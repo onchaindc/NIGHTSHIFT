@@ -1,2 +1,155 @@
 # NIGHTSHIFT
-An autonomous agent that pursues goals, acquires intelligence when needed, adapts when its approach fails, and verifies its results—all within explicit spending and permission limits.
+
+An autonomous task-execution agent. It takes a goal, plans the work, executes permitted
+actions, buys intelligence from the **Telegraph** network when useful, adapts to failures,
+and verifies the final outcome, all within explicit spending limits and permission
+boundaries.
+
+**Until the work is done.**
+
+---
+
+## What is implemented vs. what is not
+
+**Implemented and working:**
+
+- A shared server-side **task engine** (`src/lib/engine/`) used by both the web app and the   Telegram bot: task states, structured execution events, JSON-file persistence, spending
+  limits enforced against the network's actual price, permission boundaries, retries,
+  failure handling, and evidence-based result verification.
+- A real **Telegraph integration** (`src/lib/telegraph/client.ts`) following the official
+  x402 flow documented at `docs.telegraphprotocol.com` (see below): free discovery → 402
+  payment challenge → spend check → payment signature → receipt decode → signal lookup.
+- A **Telegram bot adapter** (`src/lib/telegram/adapter.ts`) over the official Bot API with
+  a webhook route and secret-token verification. `/goal`, `/tasks`, `/status`, `/approve`,
+  `/reject` all drive the same engine.
+- A dark **web console** (`/`): goal input, task state, execution timeline, spend meter,
+  final result with verifiable evidence.
+- A **goal-completion loop**, not just a purchase: each task (1) buys an answer via the
+  Engine auto route, (2) feeds the purchase's own settlement `tx_hash` into a real,
+  read-only Base Sepolia RPC check that independently confirms the payment was mined, and
+  (3) completes only if every success criterion (defined before execution) passes against
+  recorded evidence (signal match, plausibility, freshness, on-chain settlement).
+- **Recovery**: failures are classified. Transient routing blips are retried within a
+  strict cap; budget refusals and missing credentials are never retried; paid responses
+  that arrive unverifiable are never re-sent, so an uncertain paid outcome can never
+  become a double charge.
+- Both surfaces served by the same engine: the **web console** (`/`) and the **Telegram
+  bot** (`@nightshiftagent_bot`, via `setWebhook` against `/api/telegram/webhook`). Every
+  flow enforces the same spending limits, permission boundary, and approval gate.
+- Newer application structure (same engine, same APIs): a **Workspace** view that starts
+  tasks and shows active work, a dedicated **Task Detail** route (`/tasks/:id`) with the
+  full timeline, spending and every recorded evidence item, and a **Work History** view
+  with status filters. Test records created by the automated interaction audit are tagged
+  and separated, never presented as ordinary user work.
+- 51 tests: task state transitions, permission checks (including the read-only
+  `chain.read` boundary), budget refusals, recovery retries, verification failures
+  (unmined settlement, implausible answers, stale evidence, wrong-asset answers), the
+  spending ceiling and approval values the composer sends, duplicate-submission guards,
+  and the Telegram adapter's at-most-once update handling and approval flow.
+
+**Deliberately not implemented (no fakery):**
+
+- No simulated purchases, miners, rankings, verifications, or transactions. If paid
+  inference is not configured (`TELEGRAPH_EVM_PRIVATE_KEY` missing), tasks end in the
+  `blocked` state with an explicit event. It never fabricates success.
+- No invented multi-agent swarm. The planner (`src/lib/engine/planner.ts`) maps every
+  goal honestly to the capabilities that exist today: purchase, an independent on-chain
+  settlement check, and criteria verification. Richer planning (more intents, more tools)
+  is future work.
+- Single-process JSON-file persistence (`.data/tasks.json`); swap
+  `src/lib/engine/store.ts` for a database when multi-instance deployment matters.
+
+## Telegraph: how the integration actually works
+
+Verified against the official docs (docs.telegraphprotocol.com, "Paying with x402",
+"Intents", "Addresses & Parameters") and against the live testnet node:
+
+1. **Discovery is free and keyless.** `GET /api/miners` / `GET /engine/v1/intents` on the
+   node return the live miner catalog and the 134 canonical intents.
+2. **Inference is paid via x402 (HTTP-native, no API key).** `POST /engine/v1/ask` returns
+   **HTTP 402** with a `PAYMENT-REQUIRED` header (base64 JSON challenge). The challenge's
+   `accepts` list is authoritative for network, asset, `amount` (6-decimal USDC units
+   where `10000` = $0.01) and `payTo`; NIGHTSHIFT reads the amount and checks it against the
+   task's remaining spending limit **before signing anything**.
+3. **Payment & retry.** Official packages `@x402/fetch` + `@x402/evm` (used by the
+   Telegraph MCP server) sign an EIP-712 exact-scheme USDC authorization on Base Sepolia
+   (chain `84532`) and retry the identical request with `PAYMENT-SIGNATURE`. The node
+   verifies through the PayAI facilitator before calling the miner.
+4. **Receipt.** A delivered 200 carries `X-TELEGRAPH-RECEIPT` (base64 JSON with
+   `receipt_hash`, `amount_uusdc`, `miner`, `intent`, `tx_hash`, …). NIGHTSHIFT keys spend
+   accounting on `receipt_hash` (not `tx_hash`, which can be batched by the facilitator).    Note: the challenge's `amount` is in **6-decimal USDC units** (10000 = $0.01), so a
+   conversion bug here amounts to a 100× accounting error, and the unit conversion has
+   been verified against the on-chain wallet balance.
+5. **Verification.** Every paid call is committed as a signal. NIGHTSHIFT calls
+   `GET /engine/v1/signal/{signal_hash}` and compares the node's recorded `result` against
+   the answer it accepted; a mismatch or missing record fails the task. A task reaches
+   `completed` **only** when every success criterion passes: matching signal record,
+   receipt on file, plausible answer, evidence freshness, and the payment's settlement
+   transaction mined on Base Sepolia (read directly from a public RPC, trusting no miner    claim (we observed a miner misclaim "transaction not found" for a successfully mined
+    settlement).
+
+**What you must provide to buy intelligence:** a wallet private key with test USDC on
+Base Sepolia. Faucet: `https://faucet.circle.com` (20 test USDC per 2 h) plus test ETH for
+gas. There is no Telegraph API key, the 402 flow *is* the authentication. Without the key
+the app still runs; tasks simply end `blocked` with the missing key named.
+
+**Known doc limitation (reported):** the official docs say to re-derive the signal hash
+yourself but do not publish the exact hash recipe, so client-side verification checks
+existence + result equality against the node record, the strongest check available today.
+
+## Setup
+
+```bash
+npm install            # or bun install
+cp env.example .env.local    # then fill values (none are required to run unblocked)
+npm run dev            # http://localhost:3000
+```
+
+Environment variables (all optional for a first look):
+
+| Key | Purpose | Missing => |
+|---|---|---|
+| `TELEGRAPH_NODE_URL` | Telegraph node (defaults to the official testnet) | falls back to testnet |
+| `TELEGRAPH_EVM_PRIVATE_KEY` | x402 payment signer (Base Sepolia USDC) | tasks end `blocked` at the purchase step; nothing is charged |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather | bot replies that it is not configured |
+| `TELEGRAM_WEBHOOK_SECRET` | Webhook authenticity check | webhook accepts all updates (e.g. local dev) |
+| `NIGHTSHIFT_DEFAULT_SPEND_LIMIT_CENTS` | Default per-task ceiling (default 100 = $1.00) | uses default |
+| `NIGHTSHIFT_DATA_DIR` | Task persistence directory (default `./.data`) | uses default |
+
+Telegram webhook registration (after the app is reachable over HTTPS):
+
+```bash
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+     -d "url=https://<domain>/api/telegram/webhook" \
+     -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+```
+
+## API surface
+
+- `POST /api/tasks` `{ goal, spendLimitUsdCents?, requiresApproval? }`: create (+ run) a task
+- `GET /api/tasks` / `GET /api/tasks/:id`: task records with full execution timelines
+- `GET /` **Workspace**: start a task, see active work, and review recent finished results
+- `GET /history`: filtered work history (status groups, test records separated and labeled)
+- `GET /tasks/:id`: single task with timeline, spending, outcome, and evidence
+- `POST /api/tasks/:id/action` `{ action: "approve" | "reject" }`: approval gate
+- `POST /api/telegram/webhook`: Telegram Bot API webhook (secret-token verified)
+
+## Checks
+
+```bash
+npm run test        # 51 tests (engine, UI form rules, Telegram adapter)
+npm run typecheck   # tsc -b --noEmit
+npm run build       # production build
+```
+
+## Invariants (enforced and tested)
+
+1. State transitions are whitelisted; no illegal jump passes.
+2. `telegraph.ask` runs only if in the task's `allowedActions`.
+3. The 402 challenge amount is checked against the remaining budget before any payment is
+   signed; budget refusals are never retried into an overspend.
+4. `requiresApproval` tasks stay in `awaiting_approval` until an explicit approve.
+5. Only a delivered 200 with a receipt is accounted as spend; failed calls cost nothing
+   on the network and are never logged as spend.
+6. `completed` requires evidence (matching signal record + receipt); every failure path
+   stays `failed`/`blocked` with machine-readable reasons.
