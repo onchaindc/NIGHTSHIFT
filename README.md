@@ -36,16 +36,41 @@ boundaries.
 - Both surfaces served by the same engine: the **web console** (`/`) and the **Telegram
   bot** (`@nightshiftagent_bot`, via `setWebhook` against `/api/telegram/webhook`). Every
   flow enforces the same spending limits, permission boundary, and approval gate.
-- Newer application structure (same engine, same APIs): a **Workspace** view that starts
-  tasks and shows active work, a dedicated **Task Detail** route (`/tasks/:id`) with the
-  full timeline, spending and every recorded evidence item, and a **Work History** view
-  with status filters. Test records created by the automated interaction audit are tagged
-  and separated, never presented as ordinary user work.
-- 51 tests: task state transitions, permission checks (including the read-only
+- Newer application structure (same engine, same APIs): a dark **Command Center** at `/`
+  (Dashboard, Agents, Operations, Approvals, History, Settings navigation; real metrics from
+  the task store and spending ledger; an operations launcher for supported job types),
+  dedicated **Task Detail** routes (`/tasks/:id`) with the full timeline, spending and every
+  recorded evidence item, a **Work History** view with status filters, and test records from
+  the automated interaction audit tagged and separated, never presented as ordinary user work.
+- **Protocol Watch**, the flagship capability (`src/lib/watch/`, `/watch`): monitor a
+  protocol's legitimate public sources, detect real changes, investigate what matters, and
+  deliver a verified report.
+
+  * Supported source types: GitHub releases and commits, public docs pages, Discourse
+    governance forums, and RSS/Atom security feeds. All fetched for real; a source that
+    cannot be read is recorded as a source error, never invented.
+  * Free checks read sources and diff against persisted per-source fingerprints:
+    first observations record a baseline instead of a false alarm, unchanged content
+    produces nothing, and a changed source produces a finding grounded in the fetched
+    data itself (`source-direct` confidence).
+  * Optional paid investigation buys a bounded Telegraph insight, cross-checks its words
+    against the fetched source data, and marks findings `cross-checked` only when the two
+    agree; otherwise `uncertain`. All-sources-failed runs fail honestly with the reason.
+  * A **scheduler** (`src/lib/watch/scheduler.ts`, registered in `instrumentation.ts`)
+    runs free checks every 10 minutes while the server process lives; monitoring pauses
+    when the process stops (stated in the UI) and resumes without repeating old changes.
+  * Reports land in the Command Center history and, when a chat id is configured, are
+    delivered via the Telegram bot; delivery failures are recorded, not hidden.
+  * API: `GET/POST /api/watches`, `GET/PUT/DELETE /api/watches/:id`,
+    `POST /api/watches/:id/check` (body `{"investigate": true}` for the paid step).
+  * Config, budget per run and fingerprints persist in `.data/watches.json`.
+- 65 tests: task state transitions, permission checks (including the read-only
   `chain.read` boundary), budget refusals, recovery retries, verification failures
   (unmined settlement, implausible answers, stale evidence, wrong-asset answers), the
   spending ceiling and approval values the composer sends, duplicate-submission guards,
-  and the Telegram adapter's at-most-once update handling and approval flow.
+  the Telegram adapter's at-most-once update handling and approval flow, and Protocol
+  Watch's source failures, duplicate suppression, evidence verification, budget
+  enforcement, Telegram delivery failures, and persistence.
 
 **Deliberately not implemented (no fakery):**
 
@@ -128,16 +153,18 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 
 - `POST /api/tasks` `{ goal, spendLimitUsdCents?, requiresApproval? }`: create (+ run) a task
 - `GET /api/tasks` / `GET /api/tasks/:id`: task records with full execution timelines
-- `GET /` **Workspace**: start a task, see active work, and review recent finished results
+- `GET /` **Command Center**: dashboard, agents, operations, approvals, history, settings
+- `GET /watch` **Protocol Watch**: configure watches, run checks, review recorded runs
 - `GET /history`: filtered work history (status groups, test records separated and labeled)
 - `GET /tasks/:id`: single task with timeline, spending, outcome, and evidence
 - `POST /api/tasks/:id/action` `{ action: "approve" | "reject" }`: approval gate
+- `GET/POST /api/watches` + `GET/PUT/DELETE /api/watches/:id` + `POST /api/watches/:id/check`: Protocol Watch
 - `POST /api/telegram/webhook`: Telegram Bot API webhook (secret-token verified)
 
 ## Checks
 
 ```bash
-npm run test        # 51 tests (engine, UI form rules, Telegram adapter)
+npm run test        # 65 tests (engine, watch, UI form rules, Telegram adapter)
 npm run typecheck   # tsc -b --noEmit
 npm run build       # production build
 ```

@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+/*
+ * NIGHTSHIFT Command Center design system.
+ * Near-black surfaces, subtle borders, restrained teal / gold / blue accents.
+ * Geist Sans for the interface, Geist Mono for every numeric readout.
+ */
+
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* Surfaces */
+  --color-night: #0a0b0e;
+  --color-panel: #101216;
+  --color-panel-2: #15181d;
+  --color-edge: #21262d;
+  --color-edge-strong: #2e353d;
+
+  /* Ink */
+  --color-ink: #e7eaee;
+  --color-ink-soft: #98a1ab;
+  --color-ink-faint: #5d666f;
+
+  /* Signals */
+  --color-teal: #19b586;
+  --color-gold: #d9a441;
+  --color-blue: #4d8fe8;
+  --color-risk: #d4645f;
+
+  /* Legacy aliases so existing class names keep resolving */
+  --color-ivory: #e7eaee;
+  --color-mist: #98a1ab;
+  --color-faint: #5d666f;
+  --color-lamp: #19b586;
+  --color-lamp-deep: #148d68;
+  --color-go: #19b586;
+  --color-amflat: #0a0b0e;
+  --color-stop: #d4645f;
+  --color-amber: #d9a441;
+  --color-accent: #19b586;
+  --color-surface: #101216;
+  --color-surface-2: #15181d;
+  --color-surface-strong: #101216;
+  --color-background: #0a0b0e;
+  --color-background2: #0a0b0e;
+
+  --radius-card: 8px;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-night);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #1a6f57;
+  color: var(--color-ink);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-strong) transparent;
+}
+
+/* Numeric readouts always render on a tabular grid for terminal feel. */
+.tabular {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Disclosure controls get a quiet chevron. */
+details > summary::-webkit-details-marker,
+details > summary::marker {
+  display: none;
+  content: "";
+}
+
+.x-chev {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-right: 1px solid var(--color-ink-faint);
+  border-bottom: 1px solid var(--color-ink-faint);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.2s ease;
+}
+
+details[open] > summary .x-chev {
+  transform: rotate(-135deg) translateY(1px);
+}
+
+/* One visible focus style for every interactive control. */
+:where(button, a, input, textarea, [role="switch"], summary):focus-visible {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.x-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+.x-rule {
+  height: 1px;
+  background: var(--color-edge);
+}
+
+/* Quiet text selection inputs on dark panels. */
+input, textarea {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
