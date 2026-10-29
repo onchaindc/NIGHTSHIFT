@@ -23,6 +23,50 @@ export interface TaskPlan {
   criteria: VerificationCriteria;
   /** Non-secret assumptions the planner made, surfaced in the events timeline. */
   assumptions: string[];
+  /** Set for execution goals: the engine must NOT build a spending plan. It
+   * stops with this plain-language explanation instead of buying advice that
+   * might be mistaken for a completed action. */
+  executionBlocker?: string;
+}
+
+/**
+ * Goal intent, derived from the goal text BEFORE execution and fixed at task
+ * creation. Three kinds exist:
+ *  - information: the deliverable IS the researched answer (price, gas, status).
+ *  - preparation: the deliverable is guidance/plan material for an action the
+ *    user (or a later integration step) performs; nothing is executed here.
+ *  - execution: the goal asks for an external consequence (swap, deployment,
+ *    transfer...). This system has no wallet, exchange or deployment
+ *    integration, so it can never honestly claim such a goal completed.
+ */
+export type GoalIntent = "information" | "preparation" | "execution";
+
+/** Explicit execution orders. Bare verbs; framing words rule goals out first. */
+const EXECUTION_VERB =
+  /\b(?:swap|buy|sell|send this transaction|execute this transaction|sign this transaction|submit this transaction|deploy|mint|burn|bridge|stake|unstake|withdraw|deposit|pay to|move (?:the )?funds|transfer (?:the )?funds|place (?:a|this) (?:order|trade))\b/i;
+
+/** Guidance/deliverable framing: the user asks for advice, not for action. */
+const PREPARATION_FRAME =
+  /\b(?:how (?:do|can|should|would|about)|what (?:do|should)|should i|advice|recommend|suggest|guide me|walk me through|steps? (?:for|to)|plan for|prepare|draft|outline|write me|strategy)\b/i;
+
+/** Informational framing: researched facts are the deliverable. */
+const INFORMATION_FRAME =
+  /\b(?:price|worth|cost|gas|fee|fees|how much|how many|what is|what's|when|where|who|why|monitor|watch|report|research|analy[sz]e|analys|summar|overview|status|history|compare|current|latest|today|tell me|list|show|did|does|is there)\b/i;
+
+export function classifyGoal(goal: string): { intent: GoalIntent; evidence: string } {
+  const g = goal.trim();
+  if (PREPARATION_FRAME.test(g)) {
+    return { intent: "preparation", evidence: 'guidance framing ("how to"/"should I"/"prepare"), so the deliverable is advice or preparation material, not an execution' };
+  }
+  const info = INFORMATION_FRAME.exec(g);
+  if (info) {
+    return { intent: "information", evidence: `informational framing (${info[0]})` };
+  }
+  const exec = EXECUTION_VERB.exec(g);
+  if (exec) {
+    return { intent: "execution", evidence: `external action "${exec[0]}" with no informational framing` };
+  }
+  return { intent: "information", evidence: "no external action detected" };
 }
 
 const ASSET_TOKENS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "LINK", "AVAX"] as const;
@@ -76,8 +120,42 @@ export function parseGoal(goal: string): {
 
 export function planForGoal(goal: string, maxEstimateUsdCents: number): TaskPlan {
   const trimmed = goal.trim();
+
+  // EXECUTION goals never reach the purchase path. Every external consequence
+  // (a swap, deployment, transfer...) would need third-party evidence of execution:
+  // a mined receipt for the action itself plus an independent outcome check.
+  // A purchased inference answer, its payment receipt or a self-reported score
+  // is not sufficient, so instead of buying advice an execution goal stops here.
+  const intent = classifyGoal(trimmed);
+  if (intent.intent === "execution") {
+    const blockExplanation =
+      `Execution goals are not supported yet: NIGHTSHIFT has no wallet, exchange or deployment integration, so the requested action (${intent.evidence}) cannot be carried out, verified or paid for safely. Nothing was purchased. Submit the same intent as research or transaction preparation (for example "how do I ..." or "what would ... cost") if that is useful.`;
+    const criteria: VerificationCriteria = {
+      primaryVerifiedAgainstNodeSignal: false,
+      answerSane: false,
+      answerMaxAgeSeconds: 0,
+      ownPaymentSettledOnChain: false,
+      reconcileLedgerEntries: false,
+      goalIntent: "execution",
+      requiresExecutionEvidence: true,
+    };
+    return {
+      steps: [],
+      criteria,
+      assumptions: [
+        "the goal reads as an execution order, so finishing it would require external-action verification (transaction receipt plus an independent outcome check) that no current integration can produce",
+      ],
+      executionBlocker: blockExplanation,
+    };
+  }
+
   const parsed = parseGoal(trimmed);
   const assumptions = [...parsed.assumptions];
+  if (intent.intent === "preparation") {
+    assumptions.push(
+      `the goal is a request for preparation material or guidance (${intent.evidence}), so the deliverable is advice rather than a carried-out action`,
+    );
+  }
 
   const steps: PlanStep[] = [
     {
@@ -114,6 +192,7 @@ export function planForGoal(goal: string, maxEstimateUsdCents: number): TaskPlan
     answerMaxAgeSeconds: 600,
     ownPaymentSettledOnChain: true,
     reconcileLedgerEntries: true,
+    goalIntent: intent.intent,
   };
   if (parsed.isGasGoal) {
     criteria.expectedChain = parsed.expectedChain;

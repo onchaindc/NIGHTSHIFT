@@ -68,6 +68,16 @@ export async function verifyTask(
   const c = deps.now;
   const evidence: Evidence[] = [];
 
+  // Defense in depth: an execution goal (swap, deployment, transfer...) can
+  // only complete with third-party proof of the action itself. A purchased
+  // answer, a payment receipt for AI inference, or a self-reported confidence
+  // score can never satisfy this, so verification refuses outright.
+  if (criteria.requiresExecutionEvidence) {
+    fail(
+      "the goal requires evidence of an actual external action (a transaction receipt plus an independent outcome verification) that no current integration can produce, so the task cannot be verified as complete", 
+    );
+  }
+
   if (!outputs.primary?.signalHash) {
     fail("no verifiable evidence: execution produced no Telegraph signal hash");
   }
@@ -211,8 +221,13 @@ export async function verifyTask(
     }
   }
 
+  const baseSummary = summarizeAnswer(outputs.primary!);
+  const summary =
+    criteria.goalIntent === "preparation"
+      ? `Preparation material only. NIGHTSHIFT did not execute the underlying action; external execution remains unverified.\n\n${baseSummary}`
+      : baseSummary;
   task.result = {
-    summary: summarizeAnswer(outputs.primary!),
+    summary,
     evidence,
     completedAt: c(),
   };

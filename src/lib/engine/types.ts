@@ -50,6 +50,7 @@ export type ExecutionEventType =
   | "watch_source_checked"
   | "watch_baseline"
   | "watch_change_detected"
+  | "watch_corroborated"
   | "watch_paid_skipped"
   | "watch_report_ready"
   | "delivery_started"
@@ -86,6 +87,19 @@ export interface VerificationCriteria {
   maxFeeUsdFor21000Gas?: number;
   /** Max relative deviation allowed between the purchased answer and the chain read. */
   agreementToleranceRatio?: number;
+  /**
+   * Intent classified from the goal text BEFORE execution (fixed at creation):
+   * information (researched answer), preparation (guidance material, action not
+   * executed), or execution (external action required; currently unsupported).
+   */
+  goalIntent?: "information" | "preparation" | "execution";
+  /**
+   * True when the goal requires evidence of an actual external action
+   * (transaction receipt plus an independent outcome check). An inference
+   * response, a payment receipt for AI inference, or a self-reported
+   * confidence score is NEVER sufficient execution evidence.
+   */
+  requiresExecutionEvidence?: boolean;
 }
 
 export interface SpendEntry {
@@ -124,6 +138,19 @@ export type Evidence =
       toleranceRatio: number;
       agreed: boolean;
       rpcUrl: string;
+    }
+  | {
+      /**
+       * Evidence from a Protocol Watch run: a finding that restates what a
+       * configured source actually returned. Not a payment signal; carrying
+       * the real source label and confidence instead of a fake hash.
+       */
+      kind: "watch_finding";
+      sourceLabel: string;
+      findingKind: string;
+      confidence: string;
+      url: string | null;
+      corroboratedBy?: string[];
     };
 
 export type PlanStepKind =
@@ -133,6 +160,7 @@ export type PlanStepKind =
   | "verify_evidence"
   // Protocol Watch steps
   | "watch_check"
+  | "watch_corroborate"
   | "watch_investigate"
   | "watch_deliver"
   | "watch_report";

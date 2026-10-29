@@ -6,6 +6,7 @@ import { getWatch, mutateWatch } from "./store";
 import type {
   Finding,
   FindingConfidence,
+  FindingSignificance,
   SourceFetchResult,
   SourceSnapshot,
   WatchConfig,
@@ -82,6 +83,11 @@ export function planWatchSteps(watch: WatchConfig, investigate: boolean): PlanSt
     });
   }
   steps.push(
+    {
+      id: "watch-corroborate",
+      kind: "watch_corroborate",
+      description: "Cross the detected changes against every other source actually read this run, and label significance with a keyword heuristic",
+    },
     {
       id: "watch-deliver",
       kind: "watch_deliver",
@@ -177,8 +183,7 @@ export async function executeWatchCheck(
 
   for (const source of watch.sources) {
     const r = await watchDeps.fetchSource(source);
-    results.push(r);
-    if (r.ok && r.snapshot) {
+    results.push(r);    if (r.ok && r.snapshot) {
       runState.sourcesReadOk++;
       const prev = watch.fingerprints[source.id];
       const isFirstObservation = !prev;
@@ -216,6 +221,8 @@ export async function executeWatchCheck(
           { sourceId: source.id, findingId: finding.id },
         );
       }
+      if (!runState.observed) runState.observed = [];
+      runState.observed.push({ sourceId: source.id, label: source.label, summary: r.snapshot.summary, detail: r.snapshot.detail });
     } else {
       runState.sourcesFailed++;
       const finding: Finding = {
@@ -273,26 +280,130 @@ function findingKindFor(source: WatchConfig["sources"][number], _prev: string): 
 }
 
 /* ------------------------------------------------------------------ */
-/* Step 2 (optional): paid investigation with cross-check               */
+/* Shared token helpers (corroboration + paid cross-check)             */
 /* ------------------------------------------------------------------ */
+
+/** Distinctive lowercase tokens of a text: long enough and not stop words. */
+function distinctiveTokens(...texts: string[]): string[] {
+  return Array.from(
+    new Set(
+      texts
+        .join(" ")
+        // NOTE: "." is deliberately NOT a split character: versions, hashes
+        // and ids (v4.1.0, CVE-2025-9999) must survive as whole tokens, or
+        // corroboration loses exactly the identifiers that matter.
+        .split(/[\s/()[\],:;#,@]+/)
+        .map((t) => t.toLowerCase())
+        .filter((t) => t.length >= 5 && !/^(the|this|that|with|from|have|been|were|into|about|their|which|when|what|than|then|also|more|over|under|after|before|latest|release|summary|detail|source|change|detected|read|notes|published|successfully|first|observation|recorded|baseline|next)$/i.test(t)),
+    ),
+  );
+}
+
+/** Does at least `min` distinctive tokens of `text` appear in `corpus`? */
+function mentionsTokens(text: string, corpus: string, min = 2): boolean {
+  const tokens = distinctiveTokens(text);
+  const haystack = corpus.toLowerCase();
+  const hits = tokens.filter((t) => haystack.includes(t));
+  return hits.length >= min;
+}
+
+/**
+ * Identifier-level tokens for CORROBORATION between sources: words containing
+ * digits (versions, tags, hashes, CVE ids, dates). Generic prose and proper
+ * nouns are deliberately excluded because a shared protocol name proves
+ * nothing. A single shared identifier of this kind is already meaningful.
+ */
+function identifierTokens(text: string): string[] {
+  return distinctiveTokens(text).filter((t) => /\d/.test(t) && t.length >= 4);
+}
+
+/** Does the corpus contain identifier-level tokens of `text`? Uses the same
+ * run-internal, strict rule shared by corroboration and paid cross-check. */
+function mentionsIdentifiers(text: string, corpus: string): boolean {
+  const haystack = corpus.toLowerCase();
+  return identifierTokens(text).some((t) => haystack.includes(t));
+}
 
 /** Very small, explicit term-overlap check: does the paid text mention the
  * concrete identifiers the source actually showed? Honest about its limits. */
 function paidInsightAgrees(finding: Finding, paidText: string): boolean {
-  const tokens = Array.from(
-    new Set(
-      [
-        ...finding.title.split(/[\s/()[\],:;#.]+/),
-        ...finding.detail.split(/[\s/()[\],:;#.]+/),
-      ]
-        .map((t) => t.toLowerCase())
-        .filter((t) => t.length >= 5 && !/^(the|this|that|with|from|have|been|were|into|about|their|which|when|what|than|then|also|more|over|under|after|before|latest|release|summary|detail|source|change|detected|read)$/i.test(t)),
-    ),
+  return mentionsTokens(
+    finding.title + " " + finding.detail,
+    paidText,
   );
-  const haystack = paidText.toLowerCase();
-  const hits = tokens.filter((t) => haystack.includes(t));
-  return hits.length >= 2;
 }
+
+/** Significance is a transparent keyword heuristic over the claim text. */
+function significanceFor(text: string): FindingSignificance {
+  const t = text.toLowerCase();
+  if (/security|vulnerab|exploit|\bcve\b|advisory|critical|attack|breach|compromis/.test(t)) {
+    // Guard against an explicit "not a real event" label being read as a
+    // security event just because it contains the word.
+    if (t.includes("test fixture") || t.includes("not a real event")) return "routine";
+    return "high";
+  }
+  if (/deprecat|breaking|governance|proposal|migration|incident|paused|suspend|halt/.test(t)) return "notable";
+  return "routine";
+}
+
+/* ------------------------------------------------------------------ */
+/* Step 1b (free): corroborate findings across sources                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Free corroboration, always part of the plan: a change finding gains
+ * confidence only when ANOTHER successfully-read source of the same watch
+ * showed the same identifiers during this same run. Uses only real reads.
+ * Significance is a keyword heuristic stated as such, never an AI opinion.
+ */
+export async function executeWatchCorroborate(
+  task: TaskRecord,
+  deps: WatchEngineDeps,
+  outputs: ExecutionOutputs,
+): Promise<void> {
+  const runState = outputs.watch;
+  if (!runState) throw new Error("watch corroboration ran before the source check");
+  const tools = makeTools(deps, task);
+  const targets = runState.findings.filter((f) => f.kind !== "source_error");
+  if (targets.length === 0) {
+    await tools.event(task, "watch_corroborated", "Nothing changed, so there is nothing to corroborate this run.");
+    return;
+  }
+  for (const f of targets) {
+    f.significance = significanceFor(f.title + " " + f.detail);
+    // A witness is any OTHER successfully-read source of this run (never the
+    // finding's own source), so corroboration always has a second read.
+    const witnesses = Array.from(
+      new Set(
+        (runState.observed ?? [])
+          .filter((o) => o.sourceId !== f.sourceId && mentionsIdentifiers(f.title + " " + f.detail, o.summary + " " + o.detail))
+          .map((o) => o.label),
+      ),
+    );
+    if (witnesses.length > 0) {
+      f.corroboratedBy = witnesses;
+      f.confidence = "cross-checked";
+      await tools.event(
+        task,
+        "watch_corroborated",
+        `Change on "${f.sourceLabel}" was independently corroborated by ${witnesses.join(", ")} in this run (cross-checked).`,
+        { findingId: f.id, corroboratedBy: witnesses },
+      );
+    } else {
+      await tools.event(
+        task,
+        "watch_corroborated",
+        `Change on "${f.sourceLabel}" stands on the source's own data (source-direct): no other configured source read this run repeats the claim. This is not a contradiction, just a single read.`,
+        { findingId: f.id },
+      );
+    }
+  }
+  await tools.event(task, "step_succeeded", `Corroboration pass complete: ${targets.filter((f) => f.corroboratedBy?.length).length} of ${targets.length} change finding(s) cross-checked against a second real read.`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Step 2 (optional): paid investigation with cross-check               */
+/* ------------------------------------------------------------------ */
 
 export async function executeWatchInvestigate(
   task: TaskRecord,
@@ -422,6 +533,8 @@ function reportText(task: TaskRecord, runState: WatchRunState): string {
       lines.push("");
       lines.push(`[${f.confidence.toUpperCase()}] ${f.title}`);
       lines.push(f.detail.slice(0, 500));
+      if (f.corroboratedBy?.length) lines.push(`Corroboration: independently seen on ${f.corroboratedBy.join(", ")} in the same check run.`);
+      if (f.significance) lines.push(`Significance: ${f.significance} (keyword heuristic over the source text, not an AI judgment).`);
       if (f.paidInsight && f.paidInsightAgrees) lines.push(`Why it matters: ${f.paidInsight.slice(0, 400)}`);
       if (f.paidInsight && f.paidInsightAgrees === false) lines.push("Note: the paid insight did not clearly agree with the source, so treat the source facts as primary.");
       if (f.url) lines.push(`Evidence: ${f.url}`);
@@ -506,10 +619,15 @@ export async function executeWatchReport(
   const summary = reportText(task, runState);
   task.result = {
     summary,
+    // Real report evidence: each finding names the source that produced it and
+    // its confidence. NOT a purchase signal; there is no payment in a free run.
     evidence: runState.findings.map((f) => ({
-      kind: "telegraph_signal" as const,
-      signalHash: f.id, // not a payment signal: this is the trace id of the finding
-      minerId: f.sourceLabel,
+      kind: "watch_finding" as const,
+      sourceLabel: f.sourceLabel,
+      findingKind: f.kind,
+      confidence: f.confidence,
+      url: f.url ?? null,
+      corroboratedBy: f.corroboratedBy,
     })),
     completedAt: deps.now(),
   };

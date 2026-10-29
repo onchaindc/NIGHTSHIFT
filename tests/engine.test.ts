@@ -119,6 +119,69 @@ beforeEach(() => {
   resetStore();
 });
 
+describe("goal intent classification", () => {
+  it("blocks the 'swap to BTC or ETH' execution goal before any purchase and never consults the paid model", async () => {
+    // The paid network would happily return generic swap advice; even a
+    // self-congratulating answer must make no difference because it is never
+    // consulted for an execution goal.
+    const misleading = {
+      answer: { status: "swapped", outcome: "use a centralized exchange", confidence: 0.99, note: "every success criterion was verified against real evidence" },
+    };
+    const dep = makeDeps({ askAuto: async () => ({ ...GOOD_ANSWER, answer: misleading }) });
+    const task = await createdTask("swap to BTC or ETH", false);
+    expect(task.state).toBe("blocked");
+    expect(dep.calls.ask).toBe(0); // the misleading model response was never requested
+    expect(task.spend.spentUsdCents).toBe(0);
+    expect(task.result).toBeNull();
+    expect(task.criteria.goalIntent).toBe("execution");
+    expect(task.criteria.requiresExecutionEvidence).toBe(true);
+    const blocked = task.events.find((e) => e.type === "task_blocked");
+    expect(blocked?.message).toMatch(/no wallet, exchange or deployment integration|not supported yet/i);
+    expect(task.events.map((e) => e.type)).toContain("criteria_defined");
+  });
+
+  it("blocks 'deploy this application' and 'send this transaction' as execution goals", async () => {
+    const dep = makeDeps({});
+    for (const goal of ["deploy this application", "send this transaction to the exchange wallet"]) {
+      const task = await createdTask(goal, false);
+      expect(task.state).toBe("blocked");
+      expect(task.criteria.goalIntent).toBe("execution");
+      expect(dep.calls.ask).toBe(0);
+      expect(task.spend.spentUsdCents).toBe(0);
+    }
+  });
+
+  it("runs a research goal normally, no matter how asset-heavy the wording is", async () => {
+    const dep = makeDeps({});
+    const task = await createdTask("Research the current BTC and ETH prices in USD for my report", false);
+    expect(task.criteria.goalIntent).toBe("information");
+    const done = await runTask(task.id, dep);
+    expect(done.state).toBe("completed");
+    expect(dep.calls.ask).toBeGreaterThan(0);
+  });
+
+  it("runs 'how do I swap' as a preparation goal and labels the deliverable, never as an executed action", async () => {
+    const dep = makeDeps({});
+    const task = await createdTask("How do I swap USDC to ETH on Base?", true);
+    expect(task.criteria.goalIntent).toBe("preparation");
+    const done = await approveTask(task.id, dep);
+    expect(done.state).toBe("completed");
+    expect(done.result!.summary).toMatch(/Preparation material only/);
+    expect(done.result!.summary.toLowerCase()).not.toMatch(/\bfixed\b/); // no execution claim wording
+  });
+
+  it("verification refuses any task whose criteria demand external-execution evidence", async () => {
+    const dep = makeDeps({});
+    const task = await createdTask("defensive guard check", true);
+    task.criteria.goalIntent = "execution";
+    task.criteria.requiresExecutionEvidence = true;
+    task.state = "executing";
+    const outputs: ExecutionOutputs = { primary: { ...GOOD_ANSWER }, settlement: { txHash: "0xtx123", ...SETTLED } };
+    await expect(verifyTask(task, outputs, dep)).rejects.toThrow(/evidence of an actual external action/);
+    expect(task.result).toBeNull();
+  });
+});
+
 describe("task-state transitions", () => {
   it("defines a closed transition map with terminal end states", () => {
     expect(isTerminal("completed")).toBe(true);
