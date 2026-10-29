@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createWatch, listWatches, WatchValidationError } from "@/lib/watch/store";
+import { requestAuthorized } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (!requestAuthorized(req)) {
+    return NextResponse.json({ error: "authorization required: this deployment gates watch creation behind a bearer token (NIGHTSHIFT_API_TOKEN)" }, { status: 401 });
+  }
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;

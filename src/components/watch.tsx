@@ -349,6 +349,12 @@ export default function Watch() {
   const [busy, setBusy] = useState<string | null>(null);
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
   const [intervalLabel, setIntervalLabel] = useState<string>("10 minutes");
+  const [sched, setSched] = useState<{
+    degraded: boolean;
+    degradedReason: string | null;
+    lastSuccessAt: number | null;
+    nextRunAt: number | null;
+  } | null>(null);
   const reload = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -366,9 +372,19 @@ export default function Watch() {
       }
       if (t.ok) setTasks(((await t.json()) as { tasks: TaskRecord[] }).tasks);
       if (s.ok) {
-        const body = (await s.json()) as { watchScheduler?: { intervalMs?: number } };
+        const body = (await s.json()) as {
+          watchScheduler?: { intervalMs?: number; degraded?: boolean; degradedReason?: string | null; lastSuccessAt?: number | null; nextRunAt?: number | null };
+        };
         const ms = body.watchScheduler?.intervalMs;
         if (ms && ms >= 30000) setIntervalLabel(ms >= 60000 ? `${Math.round(ms / 60000)} minutes` : `${Math.round(ms / 1000)} seconds`);
+        if (body.watchScheduler) {
+          setSched({
+            degraded: body.watchScheduler.degraded === true,
+            degradedReason: body.watchScheduler.degradedReason ?? null,
+            lastSuccessAt: body.watchScheduler.lastSuccessAt ?? null,
+            nextRunAt: body.watchScheduler.nextRunAt ?? null,
+          });
+        }
       }
     } catch {
       setWatchesFailed(true);
@@ -441,6 +457,20 @@ export default function Watch() {
       </div>
 
       <p className="mt-4 rounded-md border border-edge bg-panel-2 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink-faint">
+        {sched ? (
+          sched.degraded ? (
+            <>
+              <span className="text-risk">Worker degraded: {sched.degradedReason ?? "unknown reason"}.</span>{" "}
+              {sched.lastSuccessAt ? `Last successful scan: ${new Date(sched.lastSuccessAt).toLocaleTimeString()}.` : "No successful scan has been recorded yet."}
+            </>
+          ) : (
+            <>
+              <span className="text-ink-soft">Worker healthy.</span>{" "}
+              {sched.lastSuccessAt ? `Last successful scan ${new Date(sched.lastSuccessAt).toLocaleTimeString()}.` : ""}
+              {sched.nextRunAt ? ` Next automatic scan around ${new Date(sched.nextRunAt).toLocaleTimeString()}.` : ""}
+            </>
+          )
+        ) : null}{" "}
         Automatic checks run every {intervalLabel} while the server is running, and they are always free (they read
         sources and update fingerprints; they never pay anything). When this server stops, monitoring pauses with it:
         the list shows when each source was last really checked, and a restart resumes without repeating old changes.
