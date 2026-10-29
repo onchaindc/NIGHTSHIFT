@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiAuthMode } from "@/lib/api/auth";
+import { dataDir, isVercelRuntime, persistenceMode } from "@/lib/engine/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,10 +31,11 @@ export async function GET() {
 
   // The scheduler reports its persisted tick state; a stopped or restarted
   // process cannot claim to have been monitoring while it was not running.
-  let watchScheduler: { autoChecks: boolean; intervalMs: number; freeOnly: boolean; degraded: boolean; degradedReason: string | null } = {
+  let watchScheduler: { autoChecks: boolean; intervalMs: number; freeOnly: boolean; workerMode: "in-process" | "external-trigger"; degraded: boolean; degradedReason: string | null } = {
     autoChecks: false,
     intervalMs: 600_000,
     freeOnly: true,
+    workerMode: "in-process",
     degraded: true,
     degradedReason: "scheduler status unavailable",
   };
@@ -44,6 +46,7 @@ export async function GET() {
       autoChecks: s.autoChecks,
       intervalMs: s.intervalMs,
       freeOnly: true,
+      workerMode: s.workerMode,
       degraded: s.degraded,
       degradedReason: s.degradedReason,
     };
@@ -60,6 +63,16 @@ export async function GET() {
       return Number.isFinite(env) && env > 0 ? env : 100;
     })(),
     apiAuth: apiAuthMode(),
+    /**
+     * Truthful persistence reporting: on serverless runtimes the writable
+     * directory is ephemeral per function instance, so operators can see when
+     * history/fingerprints do not survive cold starts.
+     */
+    persistence: {
+      mode: persistenceMode(),
+      dir: dataDir(),
+      durable: persistenceMode() !== "ephemeral",
+    },
     watchScheduler,
   });
 }

@@ -162,7 +162,47 @@ Environment variables (all optional for a first look):
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather | bot replies that it is not configured |
 | `TELEGRAM_WEBHOOK_SECRET` | Webhook authenticity check | webhook accepts all updates (e.g. local dev) |
 | `NIGHTSHIFT_DEFAULT_SPEND_LIMIT_CENTS` | Default per-task ceiling (default 100 = $1.00) | uses default |
-| `NIGHTSHIFT_DATA_DIR` | Task persistence directory (default `./.data`) | uses default |
+| `NIGHTSHIFT_API_TOKEN` | Operator token gating watch-management calls | watch management is open |
+| `NIGHTSHIFT_WATCH_AUTOCHECK` | Set to `0` to disable scheduled watch scans | auto checks on |
+| `NIGHTSHIFT_WATCH_INTERVAL_MS` | Auto-scan interval (default 600000 = 10 min) | uses default |
+
+## Deploying to Vercel
+
+NIGHTSHIFT runs on Vercel as-is (verified paths below), with two platform
+realities the app handles for you and one you must configure:
+
+1. **Writable storage.** Vercel functions have a read-only deployment
+   filesystem; only `/tmp` is writable. Every JSON store (tasks, watches,
+   fingerprints, scheduler state) writes to `/tmp/nightshift-data`
+   automatically on Vercel, so nothing fails at launch. `/tmp` is per function
+   instance and wiped on cold starts, so `/api/status` reports
+   `persistence.durable: false` there. For durable history and fingerprint
+   continuity across cold starts, set `NIGHTSHIFT_DATA_DIR` to a mounted
+   persistent volume (or swap the store module for a database later; the
+   engine is storage-agnostic). With the default `/tmp` behavior the first
+   scan after a cold start simply re-baselines instead of raising false
+   alarms.
+2. **Background execution.** Operations, watch checks, approvals and Telegram
+   updates all run *after* the HTTP response via Next.js `after()`, so a
+   function duration limit never cuts a paid or network-bound run mid-flight;
+   routes export `maxDuration = 60` (raise it in `vercel.json`/plan settings
+   for longer windows).
+3. **Scheduled monitoring (you must configure this).** There is no long-lived
+   process on Vercel, so the in-process interval timer deliberately does not
+   run there. Schedule scans by pointing a cron at
+   `GET /api/watches/scheduler-tick` (free checks only, idempotent via
+   fingerprints). `vercel.json` ships with a daily cron; on Vercel Pro raise
+   its frequency (Hobby allows one daily cron), or use any external scheduler.
+   Set `NIGHTSHIFT_EXTERNAL_CRON=1` when the trigger is configured so
+   `/api/status` knows scheduled checks are expected to happen. Ungated open
+   deployments expose this endpoint publicly; it only runs free source reads,
+   but set `NIGHTSHIFT_API_TOKEN` to lock it down.
+
+Telegram on Vercel: register the webhook exactly as in the Setup section,
+with `TELEGRAM_WEBHOOK_SECRET` set, and keep `TELEGRAM_BOT_TOKEN` in Vercel
+env vars. If `NIGHTSHIFT_API_TOKEN` is set, the web dashboard's watch
+management buttons require the same bearer token, which the UI does not send;
+use the API directly, or leave the token unset for UI-driven management.
 
 Telegram webhook registration (after the app is reachable over HTTPS):
 

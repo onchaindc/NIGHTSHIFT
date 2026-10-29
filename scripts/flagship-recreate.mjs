@@ -38,7 +38,19 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: "{}",
     });
-    const t = (await res.json()).task;
+    const { task: accepted, error } = await res.json();
+    if (!res.ok) {
+      console.error(`${label} check failed to start:`, error ?? res.status);
+      process.exit(1);
+    }
+    // The check now runs in the background (accepted); poll until terminal.
+    let t = accepted;
+    const deadline = Date.now() + 120_000;
+    while (t.state === "executing" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const poll = await fetch(`${base}/api/tasks/${accepted.id}`, { cache: "no-store" });
+      if (poll.ok) t = (await poll.json()).task;
+    }
     console.log(
       `${label} task ${t.id.slice(0, 8)} state=${t.state} baseline=${t.events.filter((e) => e.type === "watch_baseline").length} changes=${t.events.filter((e) => e.type === "watch_change_detected").length} errors=${t.events.filter((e) => e.type === "criteria_failed" || (e.type === "watch_source_checked" && e.message.includes("FAILED"))).length} spent=${t.spend.spentUsdCents}`,
     );
