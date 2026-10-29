@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiAuthMode } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,7 +8,8 @@ export const dynamic = "force-dynamic";
  * GET /api/status - truthful system status for the header and the Settings
  * view. Reports only which integrations are CONFIGURED (names, never values)
  * and whether the task store answers. Nothing is fabricated: a missing
- * integration is reported as unconfigured.
+ * integration is reported as unconfigured, a degraded scheduler is named as
+ * degraded with its reason.
  */
 export async function GET() {
   const configured = (key: string) => Boolean(process.env[key]);
@@ -26,6 +28,29 @@ export async function GET() {
     store = "unavailable";
   }
 
+  // The scheduler reports its persisted tick state; a stopped or restarted
+  // process cannot claim to have been monitoring while it was not running.
+  let watchScheduler: { autoChecks: boolean; intervalMs: number; freeOnly: boolean; degraded: boolean; degradedReason: string | null } = {
+    autoChecks: false,
+    intervalMs: 600_000,
+    freeOnly: true,
+    degraded: true,
+    degradedReason: "scheduler status unavailable",
+  };
+  try {
+    const { schedulerStatus } = await import("@/lib/watch/scheduler");
+    const s = await schedulerStatus();
+    watchScheduler = {
+      autoChecks: s.autoChecks,
+      intervalMs: s.intervalMs,
+      freeOnly: true,
+      degraded: s.degraded,
+      degradedReason: s.degradedReason,
+    };
+  } catch {
+    // keep the honest default above
+  }
+
   return NextResponse.json({
     ok: store === "ok",
     store,
@@ -34,10 +59,7 @@ export async function GET() {
       const env = Number(process.env.NIGHTSHIFT_DEFAULT_SPEND_LIMIT_CENTS);
       return Number.isFinite(env) && env > 0 ? env : 100;
     })(),
-    watchScheduler: (() => {
-      const env = Number(process.env.NIGHTSHIFT_WATCH_INTERVAL_MS);
-      const intervalMs = Number.isFinite(env) && env >= 30_000 ? env : 600_000;
-      return { autoChecks: process.env.NIGHTSHIFT_WATCH_AUTOCHECK !== "0", intervalMs, freeOnly: true };
-    })(),
+    apiAuth: apiAuthMode(),
+    watchScheduler,
   });
 }

@@ -64,13 +64,36 @@ boundaries.
   * API: `GET/POST /api/watches`, `GET/PUT/DELETE /api/watches/:id`,
     `POST /api/watches/:id/check` (body `{"investigate": true}` for the paid step).
   * Config, budget per run and fingerprints persist in `.data/watches.json`.
-- 65 tests: task state transitions, permission checks (including the read-only
-  `chain.read` boundary), budget refusals, recovery retries, verification failures
-  (unmined settlement, implausible answers, stale evidence, wrong-asset answers), the
-  spending ceiling and approval values the composer sends, duplicate-submission guards,
-  the Telegram adapter's at-most-once update handling and approval flow, and Protocol
-  Watch's source failures, duplicate suppression, evidence verification, budget
-  enforcement, Telegram delivery failures, and persistence.
+- 91 tests: task state transitions and goal-intent classification, permission checks
+  (including the read-only `chain.read` boundary), budget refusals, recovery retries,
+  verification failures (unmined settlement, implausible answers, stale evidence,
+  wrong-asset answers), the spending ceiling and approval values the composer sends,
+  duplicate-submission guards, the Telegram adapter's at-most-once update handling and
+  approval flow, and Protocol Watch's source failures, duplicate suppression, evidence
+  verification, budget enforcement, Telegram delivery failures, and persistence.
+
+**Production hardening (Protocol Watch):**
+
+- **SSRF guard**: user-supplied source targets must be http(s), resolve to public
+  addresses only (private, loopback, link-local, CGNAT, ULA including
+  `fd00:ec2::254`-style cloud metadata are blocked), and every fetch CONNECTS to the
+  validated IP (hostname used only for TLS SNI and the `Host` header) with manual
+  redirect following, so DNS rebinding and redirect-to-metadata cannot bypass the
+  check. Targets are revalidated again at watch creation.
+- **Worker reliability**: the schedule derives from persisted `lastCheckedAt`, so a
+  restart resumes and catches up; a live worker writes `scheduler-state.json` and
+  takes a ttl lease (`scheduler.lock`), so a second process skips the tick instead of
+  stacking scans; even overlapping scans are idempotent because findings are
+  fingerprint-gated. `/api/status` and the watch page report last success, next run,
+  other-worker detection and named degraded reasons; monitoring honestly pauses when
+  the process stops.
+- **API authorization**: with `NIGHTSHIFT_API_TOKEN` set, watch creation, deletion and
+  check triggering require `Authorization: Bearer <token>`; `/api/status` reports the
+  auth mode as `open` or `token` so an operator can never mistake the two.
+- **Hosting note**: the JSON stores (`.data/*.json`) require a persistent volume in
+  production. On an ephemeral filesystem, config, fingerprints and run history reset
+  and the first observation after that just re-baselines without raising false alarms,
+  but real continuous monitoring needs a persisted volume (or swap-in database).
 
 **Deliberately not implemented (no fakery):**
 

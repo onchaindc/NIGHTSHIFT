@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { dataDir } from "@/lib/engine/store";
+import { assertHttpUrl, rejectPrivateTarget, SsrfBlockedError } from "./ssrf";
 import type { WatchConfig, WatchSource } from "./types";
 import { isSupportedType } from "./sources";
 
@@ -72,17 +73,39 @@ export async function createWatch(input: CreateWatchInput, now = Date.now()): Pr
   if (!input.sources || input.sources.length === 0) throw new WatchValidationError("add at least one source to watch");
   if (input.sources.length > 5) throw new WatchValidationError("a watch supports at most 5 sources");
 
-  const sources: WatchSource[] = input.sources.map((s, i) => {
+  const sources: WatchSource[] = [];
+  for (const [i, s] of input.sources.entries()) {
     const type = (s.type || "").trim();
     const target = (s.target || "").trim();
     if (!isSupportedType(type)) throw new WatchValidationError(`source ${i + 1}: unsupported type "${s.type}"`);
     if (!target) throw new WatchValidationError(`source ${i + 1}: a target (repository, URL, or feed) is required`);
     if (!SOURCE_TYPE_ACTIVITY[type]) throw new WatchValidationError(`source ${i + 1}: unsupported type`);
+    if (type.startsWith("github")) {
+      // GitHub sources are host-less: normalize and enforce an owner/repo pair
+      // so no clever path can turn "owner/repo" into another API endpoint.
+      const repo = target.replace(/^https?:\/\/github\.com\//, "").replace(/\/+$/, "");
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+        throw new WatchValidationError(`source ${i + 1}: GitHub sources must be an owner/repo pair, for example "Uniswap/sdks"`);
+      }
+    } else {
+      // URL-based sources are user-supplied and are resolved on every check:
+      // reject unsafe targets at creation instead of failing every run later.
+      try {
+        assertHttpUrl(target);
+        // Fail-fast on targets that resolve into private, loopback, link-local
+        // or cloud-metadata space. A DNS-unavailable environment still passes
+        // here; every runtime fetch re-validates, so this is belt-and-braces.
+        await rejectPrivateTarget(target);
+      } catch (err) {
+        const reason = err instanceof SsrfBlockedError || err instanceof Error ? (err instanceof Error ? err.message : String(err)) : String(err);
+        throw new WatchValidationError(`source ${i + 1}: ${reason}`);
+      }
+    }
     const label =
       (s.label || "").trim() ||
       (type.startsWith("github") ? target.replace(/^https?:\/\/github\.com\//, "") : target.replace(/^https?:\/\//, "").slice(0, 60));
-    return { id: randomUUID(), type: type as WatchSource["type"], label, target };
-  });
+    sources.push({ id: randomUUID(), type: type as WatchSource["type"], label, target: type.startsWith("github") ? target.replace(/^https?:\/\/github\.com\//, "").replace(/\/+$/, "") : target });
+  }
 
   const limit = Math.round(input.spendLimitUsdCents ?? 100);
   if (!Number.isFinite(limit) || limit <= 0) throw new WatchValidationError("the per-run spend ceiling must be greater than zero");

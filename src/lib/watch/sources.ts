@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { safeHttpGet } from "./ssrf";
 import type { SourceFetchResult, SourceSnapshot, SourceType, WatchSource } from "./types";
 
 /**
@@ -11,23 +12,20 @@ import type { SourceFetchResult, SourceSnapshot, SourceType, WatchSource } from 
 export class SourceFetchError extends Error {}
 
 const TIMEOUT_MS = 12_000;
-const UA = "NIGHTSHIFT-ProtocolWatch/1.0 (+public monitoring)";
 
+/**
+ * All source reads go through the SSRF guard: user-supplied targets are
+ * scheme-checked, resolved to public addresses only, and each hop (including
+ * redirects) is revalidated. A non-public target never leaves this module.
+ */
 async function httpGet(url: string): Promise<{ status: number; body: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const headers: Record<string, string> = { "User-Agent": UA, Accept: "application/json, text/html;q=0.9, text/plain;q=0.8, application/xml;q=0.7" };
-    // Optional; only used when configured. Unauthenticated public API access works.
-    if (process.env.GITHUB_TOKEN && url.includes("api.github.com")) {
-      headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-    }
-    const res = await fetch(url, { headers, signal: controller.signal, redirect: "follow" });
-    const body = await res.text();
-    return { status: res.status, body };
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await safeHttpGet(url, {
+    timeoutMs: TIMEOUT_MS,
+    headers: process.env.GITHUB_TOKEN && url.includes("api.github.com")
+      ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
+      : undefined,
+  });
+  return { status: res.status, body: res.body };
 }
 
 function notOk(source: WatchSource, status: number, body: string): never {
