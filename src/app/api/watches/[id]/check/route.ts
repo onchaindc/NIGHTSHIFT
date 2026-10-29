@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createTask, runTask, EngineError } from "@/lib/engine/engine";
 import { getWatch } from "@/lib/watch/store";
 import { planWatchSteps } from "@/lib/watch/execute";
@@ -7,6 +7,9 @@ import { requestAuthorized } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// A check fetches up to 5 real sources; the run continues in the background
+// (after()) so the trigger response is never cut off mid-execution.
+export const maxDuration = 60;
 
 /**
  * POST /api/watches/:id/check - run ONE real check now.
@@ -53,8 +56,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       criteria: WATCH_CRITERIA,
     });
     if (task.state === "executing") {
-      const done = await runTask(task.id);
-      return NextResponse.json({ task: done }, { status: 201 });
+      after(async () => {
+        try {
+          await runTask(task.id);
+        } catch (err) {
+          console.error("background watch check failed:", err);
+        }
+      });
+      return NextResponse.json({ task, accepted: true }, { status: 202 });
     }
     return NextResponse.json({ task }, { status: 201 });
   } catch (err) {

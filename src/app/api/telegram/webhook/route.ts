@@ -1,8 +1,11 @@
 import { handleUpdate, type TgUpdate } from "@/lib/telegram/adapter";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// A /goal may run paid steps with retries; processing continues in the
+// background after the response (after()), up to this duration limit.
+export const maxDuration = 60;
 
 /**
  * Telegram webhook. Configure once (after setting TELEGRAM_BOT_TOKEN):
@@ -30,10 +33,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "invalid JSON" }, { status: 400 });
   }
 
-  try {
-    await handleUpdate(update);
-  } catch (err) {
-    console.error("telegram webhook handler error:", err);
-  }
+  // Respond to Telegram immediately and process in the background: a long
+  // goal executed request-bound used to blow through the function duration
+  // limit, killing progress delivery mid-run. The update-claim inside
+  // handleUpdate still guarantees at-most-once processing.
+  after(async () => {
+    try {
+      await handleUpdate(update);
+    } catch (err) {
+      console.error("telegram webhook handler error:", err);
+    }
+  });
   return NextResponse.json({ ok: true });
 }

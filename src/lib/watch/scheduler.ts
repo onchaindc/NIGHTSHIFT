@@ -1,6 +1,17 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listWatches } from "./store";
+import { isVercelRuntime } from "@/lib/engine/store";
+
+/**
+ * Whether scheduled monitoring is expected to come from an EXTERNAL trigger
+ * in this deployment (cron hitting /api/watches/scheduler-tick) instead of
+ * the in-process timer. Vercel functions have no long-lived process, so an
+ * in-process setInterval is not a supported worker there.
+ */
+export function externalCronConfigured(): boolean {
+  return process.env.NIGHTSHIFT_EXTERNAL_CRON === "1";
+}
 
 /**
  * Scheduler for Protocol Watch.
@@ -221,6 +232,8 @@ export interface SchedulerStatus {
   degradedReason: string | null;
   /** True when another worker process holds an unexpired scan lease. */
   otherWorkerActive: boolean;
+  /** How scans are triggered: an in-process timer, or an external cron trigger. */
+  workerMode: "in-process" | "external-trigger";
 }
 
 export async function schedulerStatus(): Promise<SchedulerStatus> {
@@ -231,7 +244,7 @@ export async function schedulerStatus(): Promise<SchedulerStatus> {
   // Self-heal: dev bundles (and any missed instrumentation hook) can yield
   // separate module instances. This idempotent arm guarantees the process
   // actually HAS a worker, and the reported state then reflects truth.
-  if (!started && autoCheckEnabled()) startWatchScheduler();
+  if (!started && autoCheckEnabled() && !isVercelRuntime()) startWatchScheduler();
   const interval = watchIntervalMs();
   const now = Date.now();
   let otherWorkerActive = false;
@@ -242,21 +255,34 @@ export async function schedulerStatus(): Promise<SchedulerStatus> {
     otherWorkerActive = false;
   }
   const stale = state.lastSuccessAt === null || now - state.lastSuccessAt > 2.5 * interval;
-  const degraded = !started || state.consecutiveFailures > 0 || (!otherWorkerActive && stale);
-  const degradedReason = !started
+  // On Vercel this process never holds the timer: scheduled work is expected
+  // from the external trigger. Report honestly whether that trigger is (per
+  // configuration, NIGHTSHIFT_EXTERNAL_CRON=1) expected to exist at all.
+  const serverless = isVercelRuntime();
+  const cronExpected = serverless && externalCronConfigured();
+  const commonDegraded = state.consecutiveFailures > 0 || (!otherWorkerActive && stale);
+  const degraded = serverless ? !cronExpected || commonDegraded : !started || commonDegraded;  const degradedReason = serverless
+    ? cronExpected
+      ? state.consecutiveFailures > 0
+        ? `the last ${state.consecutiveFailures} scan(s) failed: ${state.lastError ?? "unknown error"}; next trigger retries`
+        : null
+      : "no external trigger is configured (NIGHTSHIFT_EXTERNAL_CRON): scheduled Protocol Watch checks do not run until a cron hits /api/watches/scheduler-tick"
+    : !started
     ? "no worker timer is running in this process; monitoring is paused until the server process starts"
     : state.consecutiveFailures > 0
-      ? `the last ${state.consecutiveFailures} scan(s) failed: ${state.lastError ?? "unknown error"}; next tick retries`
-      : otherWorkerActive
-        ? null
-        : stale
-          ? "no successful scan in the last interval window; a doze may have followed a stopped process"
-          : null;
+    ? `the last ${state.consecutiveFailures} scan(s) failed: ${state.lastError ?? "unknown error"}; next tick retries`
+    : otherWorkerActive
+    ? null
+    : stale
+    ? "no successful scan in the last interval window; a doze may have followed a stopped process"
+    : null;
   return {
     autoChecks: autoCheckEnabled(),
     intervalMs: interval,
     activeInProcess: started,
     workerPid: started ? process.pid : state.pid,
+    /** How scheduled scans are triggered in this deployment. */
+    workerMode: serverless ? "external-trigger" : "in-process",
     startedAt: state.startedAt,
     lastScanStartedAt: state.lastScanStartedAt,
     lastScanCompletedAt: state.lastScanCompletedAt,
@@ -278,6 +304,11 @@ export async function schedulerStatus(): Promise<SchedulerStatus> {
 /** Idempotent: safe to call from instrumentation on every server start. */
 export function startWatchScheduler(): void {
   if (started || !autoCheckEnabled()) return;
+  // On Vercel an in-process interval timer will not survive the request and
+  // writes event loop leaks into an isolated lambda. Scheduled work there
+  // MUST come from the external trigger; the timer is intentionally not armed
+  // and /api/status says so.
+  if (isVercelRuntime()) return;
   started = true;
   // On a fresh boot (no persisted state yet) we claim this process as the
   // worker. Restart recovery keeps the persisted timestamps so history of the

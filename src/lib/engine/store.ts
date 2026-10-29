@@ -9,7 +9,28 @@ import type { TaskRecord } from "./types";
  */
 
 export function dataDir(): string {
-  return process.env.NIGHTSHIFT_DATA_DIR || path.join(process.cwd(), ".data");
+  // Explicit configuration always wins (self-hosting, tests, custom volumes).
+  if (process.env.NIGHTSHIFT_DATA_DIR) return process.env.NIGHTSHIFT_DATA_DIR;
+  // Vercel functions run on a READ-ONLY filesystem with /tmp as the only
+  // writable path: writing to process.cwd()/.data throws EROFS there and made
+  // every task launch 500. Fall back to /tmp automatically.
+  if (isVercelRuntime()) return "/tmp/nightshift-data";
+  return path.join(process.cwd(), ".data");
+}
+
+export function isVercelRuntime(): boolean {
+  return process.env.VERCEL === "1";
+}
+
+/**
+ * How the JSON stores obtain durability RIGHT NOW, reported truthfully by
+ * /api/status: "env-dir" (explicit persistent directory), "local" (repo-local
+ * .data for dev/self-hosted Node), "ephemeral" (Vercel /tmp: writable but not
+ * shared between function instances and wiped on cold starts).
+ */
+export function persistenceMode(): "env-dir" | "local" | "ephemeral" {
+  if (process.env.NIGHTSHIFT_DATA_DIR) return "env-dir";
+  return isVercelRuntime() ? "ephemeral" : "local";
 }
 
 function dataFile(): string {

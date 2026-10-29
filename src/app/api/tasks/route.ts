@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createTask, runTask, EngineError } from "@/lib/engine/engine";
 import { listTasks } from "@/lib/engine/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Operations run to completion in the background (see after() below); on
+// Vercel the function keeps executing up to this duration limit.
+export const maxDuration = 60;
 
 /**
  * GET /api/tasks - all tasks with their events (the UI renders these directly).
@@ -34,14 +37,25 @@ export async function POST(req: NextRequest) {
   const requiresApproval = body.requiresApproval === true;
 
   try {
-    let task = await createTask({
+    const task = await createTask({
       goal,
       spendLimitUsdCents,
       requiresApproval,
       origin: { source: "web" },
     });
     if (task.state === "executing") {
-      task = await runTask(task.id);
+      // Execution (possibly paid steps with retries and chain reads) must not
+      // bind the HTTP request: serverless runtimes cut request-bound work at
+      // the function duration limit, which aborted operations mid-flight. The
+      // task record persists state as it goes; clients poll /api/tasks for it.
+      after(async () => {
+        try {
+          await runTask(task.id);
+        } catch (err) {
+          console.error("background task run failed:", err);
+        }
+      });
+      return NextResponse.json({ task, accepted: true }, { status: 202 });
     }
     return NextResponse.json({ task }, { status: 201 });
   } catch (err) {
