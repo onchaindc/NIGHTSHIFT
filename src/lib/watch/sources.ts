@@ -72,13 +72,16 @@ async function fetchGithubReleases(source: WatchSource, base: string): Promise<F
   const publishedAt = latest.published_at ? String(latest.published_at) : "";
   const name = String(latest.name ?? tag);
   const notes = stripTags(String(latest.body ?? "")).slice(0, 400);
+  // When the release name equals the tag (GitHub default), show it once, not
+  // "tag (tag)".
+  const title = name === tag ? tag : name === "" ? tag : `${name} (${tag})`;
   return {
     snapshot: {
       signature: `release:${tag}:${publishedAt}`,
-      summary: latest.draft ? `${name} (draft)` : `${name} (${tag})`,
+      summary: latest.draft ? `${name} (draft)` : title,
       detail: latest.draft
         ? `Latest release on GitHub is the draft "${name}" (${tag}). Draft releases are visible to maintainers only; nothing is published yet.`
-        : `Latest published release: ${name} (${tag})${publishedAt ? `, published ${publishedAt}` : ""}.${notes ? ` Notes: ${notes}` : ""}`,
+        : `Latest published release: ${title}${publishedAt ? `, published ${publishedAt}` : ""}.${notes ? ` Notes: ${notes}` : ""}`,
       url: `https://github.com/${target}/releases`,
     },
   };
@@ -108,8 +111,11 @@ async function fetchGithubCommits(source: WatchSource, base: string): Promise<Fe
 async function fetchDocsUrl(source: WatchSource): Promise<FetchOut> {
   const { status, body } = await httpGet(source.target);
   if (status !== 200) notOk(source, status, body);
+  // Hash the NORMALIZED visible text, not the raw HTML: served pages carry
+  // per-request nonces, build ids and script payloads that change on every
+  // fetch, which made raw-HTML hashing report false content changes.
   const text = stripTags(body);
-  const hash = createHash("sha256").update(body).digest("hex").slice(0, 16);
+  const hash = createHash("sha256").update(text).digest("hex").slice(0, 16);
   const title = htmlTitle(body) ?? source.label;
   return {
     snapshot: {
@@ -147,20 +153,32 @@ async function fetchRssFeed(source: WatchSource): Promise<FetchOut> {
   const { status, body } = await httpGet(source.target);
   if (status !== 200) notOk(source, status, body);
   const entries = body.match(/<(?:item|entry)[\s\S]*?<\/(?:item|entry)>/g) ?? [];
-  if (entries.length === 0) throw new SourceFetchError(`No RSS/Atom entries found at ${source.target}`);
-  const first = entries[0] as string;
-  const title = stripTags(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(first)?.[1] ?? "untitled entry");
-  const linkRaw = stripTags(/<link[^>]*>([\s\S]*?)<\/link>/i.exec(first)?.[1] ?? "");
-  const linkAttr = /<link[^>]*href="([^"]+)"[^>]*\/>/i.exec(first)?.[1] ?? "";
-  const link = linkRaw || linkAttr;
-  const idTrue = stripTags(/<(?:guid|id)[^>]*>([\s\S]*?)<\/(?:guid|id)>/i.exec(first)?.[1] ?? "");
-  const titles = entries.slice(0, 5).map((e) => stripTags(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(e)?.[1] ?? "")).filter(Boolean).join(" | ");
+  if (entries.length > 0) {
+    const first = entries[0] as string;
+    const title = stripTags(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(first)?.[1] ?? "untitled entry");
+    const linkRaw = stripTags(/<link[^>]*>([\s\S]*?)<\/link>/i.exec(first)?.[1] ?? "");
+    const linkAttr = /<link[^>]*href="([^"]+)"[^>]*\/>/i.exec(first)?.[1] ?? "";
+    const link = linkRaw || linkAttr;
+    const idTrue = stripTags(/<(?:guid|id)[^>]*>([\s\S]*?)<\/(?:guid|id)>/i.exec(first)?.[1] ?? "");
+    const titles = entries.slice(0, 5).map((e) => stripTags(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(e)?.[1] ?? "")).filter(Boolean).join(" | ");
+    return {
+      snapshot: {
+        signature: `feed:${createHash("sha256").update(idTrue || title).digest("hex").slice(0, 16)}`,
+        summary: title,
+        detail: `Newest feed entry: "${title}"${link ? ` (${link})` : ""}. Newest titles: ${titles}`,
+        url: link || source.target,
+      },
+    };
+  }
+  // A well-formed feed that simply has nothing in it yet (e.g. a repository
+  // with no published releases) is a valid baseline, not a failed read.
+  if (!/<(?:feed|rss|rdf)[\s>]/.test(body)) throw new SourceFetchError(`No RSS/Atom entries found at ${source.target}`);
   return {
     snapshot: {
-      signature: `feed:${createHash("sha256").update(idTrue || title).digest("hex").slice(0, 16)}`,
-      summary: title,
-      detail: `Newest feed entry: "${title}"${link ? ` (${link})` : ""}. Newest titles: ${titles}`,
-      url: link || source.target,
+      signature: "no-entries",
+      summary: "No entries published yet",
+      detail: "The feed is valid but has no entries yet. They will be reported when they appear.",
+      url: source.target,
     },
   };
 }

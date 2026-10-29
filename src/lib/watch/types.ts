@@ -81,8 +81,19 @@ export interface Finding {
   paidInsight?: string;
   /** Whether the paid insight agreed with the fetched source data. */
   paidInsightAgrees?: boolean;
+  /** Labels of OTHER monitored sources that showed the same change this run. */
+  corroboratedBy?: string[];
+  /** Honest heuristic over the claim text; never claims more than that. */
+  significance?: FindingSignificance;
   detectedAt: number;
 }
+
+/**
+ * Significance is a transparent keyword heuristic over the source text, not
+ * an AI judgment: "high" = explicit security language, "notable" = breaking
+ * or governance language, "routine" = everything else.
+ */
+export type FindingSignificance = "routine" | "notable" | "high";
 
 export interface WatchRunState {
   watchId: string;
@@ -90,6 +101,9 @@ export interface WatchRunState {
   /** Whether at least one source was read successfully in this run. */
   sourcesReadOk: number;
   sourcesFailed: number;
+  /** Distilled snapshots actually read this run; corroboration compares
+   *  a finding against OTHER sources' real reads, never against itself. */
+  observed?: Array<{ sourceId: string; label: string; summary: string; detail: string }>;
 }
 
 export interface SourceSnapshot {

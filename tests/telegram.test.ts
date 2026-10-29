@@ -120,7 +120,7 @@ describe("telegram adapter", () => {
     await handleUpdate(updateOf(3001, `/approve ${prefix}`), bot);
     const reviewed = await (await import("@/lib/engine/store")).getTask(task.id);
     expect(reviewed?.state).toBe("completed");
-    expect(bot.sent.some((s) => s.text.includes("Completed. Every success criterion was verified"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("informational answer delivered, verified against recorded evidence"))).toBe(true);
   });
 
   it("runs /reject without any purchase", async () => {
@@ -143,5 +143,32 @@ describe("telegram adapter", () => {
     );
     await handleUpdate(updateOf(3003, `/status ${task.id.slice(0, 8)}`), bot);
     expect(bot.sent.some((s) => s.text.includes("AWAITING_APPROVAL"))).toBe(true);
+  });
+
+  it("reports an execution goal honestly on Telegram: blocked, nothing spent, no completion claim", async () => {
+    // The real bug: "swap to BTC or ETH" returned swap advice and claimed
+    // "Completed. Every success criterion was verified against real evidence."
+    const bot = makeBot({});
+    await handleUpdate(updateOf(4001, "/goal swap to BTC or ETH"), bot);
+    expect(bot.calls.ask).toBe(0);
+    expect(bot.sent.some((s) => /BLOCKED/.test(s.text))).toBe(true);
+    expect(bot.sent.some((s) => /no wallet, exchange or deployment integration|not supported yet/i.test(s.text))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("Completed"))).toBe(false);
+    // and the offer of an alternative framing exists
+    expect(bot.sent.some((s) => s.text.includes("preparation"))).toBe(true);
+  });
+
+  it("reports a failed task as FAILED with its spend, never as completed", async () => {
+    const bot = makeBot({
+      getReceipt: async () => ({ found: false, status: "not_found" as const, blockNumber: null, to: null, rpcUrl: "https://fake-rpc" }),
+    });
+    const task = await createTask(
+      { goal: "What is the BTC price in USD?", spendLimitUsdCents: 10, requiresApproval: true, origin: { source: "telegram", actor: "@tester" } },
+      bot.engine,
+    );
+    await handleUpdate(updateOf(5001, `/approve ${task.id.slice(0, 8)}`), bot);
+    expect(bot.sent.some((s) => s.text.includes("FAILED"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("Completed"))).toBe(false);
+    expect(bot.sent.some((s) => s.text.includes("Spent: $0.01"))).toBe(true);
   });
 });

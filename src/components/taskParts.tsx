@@ -145,6 +145,7 @@ export function EvidenceList({ evidence }: { evidence: NonNullable<TaskRecord["r
               {ev.kind === "telegraph_receipt" && "Payment receipt"}
               {ev.kind === "on_chain_settlement" && "Settlement on chain"}
               {ev.kind === "chain_gas_crosscheck" && "Independent check"}
+              {ev.kind === "watch_finding" && `Source read: ${ev.sourceLabel}`}
             </td>
             <td className="break-all py-1.5 tabular text-[11px] leading-relaxed text-ink-faint">
               {ev.kind === "telegraph_signal" && ev.signalHash}
@@ -157,6 +158,8 @@ export function EvidenceList({ evidence }: { evidence: NonNullable<TaskRecord["r
               {ev.kind === "on_chain_settlement" && `${ev.txHash}, status ${ev.status}, block ${ev.blockNumber} (${ev.rpcUrl})`}
               {ev.kind === "chain_gas_crosscheck" &&
                 `${ev.answerGasGwei} gwei purchased vs ${ev.chainGasGwei.toFixed(6)} gwei from our own node read on ${ev.chain}, agreed: ${ev.agreed ? "yes" : "no"} (${ev.rpcUrl})`}
+              {ev.kind === "watch_finding" &&
+                `${ev.findingKind} from a real source read, confidence ${ev.confidence}${ev.corroboratedBy?.length ? `, corroborated by ${ev.corroboratedBy.join(", ")}` : ""}${ev.url ? ` — ${ev.url}` : ""}`}
             </td>
           </tr>
         ))}

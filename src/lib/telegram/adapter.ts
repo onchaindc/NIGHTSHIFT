@@ -114,11 +114,30 @@ export function statusSummary(t: TaskRecord): string {
 
 function formatFinal(t: TaskRecord): string {
   const lines: string[] = [];
-  lines.push(
-    t.state === "completed"
-      ? "✅ Completed. Every success criterion was verified against real evidence."
-      : `${t.state.toUpperCase()}: ${t.error ?? ""}`.trim(),
-  );
+  if (t.state === "completed") {
+    // The completion claim states exactly what kind of deliverable was
+    // verified. Execution goals can never reach this branch: they always lack
+    // external-action evidence, so no claim is ever restated here.
+    const intent = t.criteria.goalIntent ?? "information";
+    lines.push(
+      intent === "preparation"
+        ? "✅ Completed: preparation material produced. The action itself was NOT executed by NIGHTSHIFT, and external execution remains unverified."
+        : "✅ Completed: informational answer delivered, verified against recorded evidence. No external action was performed or implied.",
+    );
+  } else {
+    lines.push(`${t.state.toUpperCase()}: ${t.error ?? ""}`.trim());
+    // Failed or partial work reports its actual state, spend and unresolved
+    // criteria rather than a generic success line.
+    const unmet = t.events.filter((e) => e.type === "criteria_failed").map((e) => `- ${e.message}`);
+    if (unmet.length) {
+      lines.push("");
+      lines.push("Unresolved criteria:");
+      lines.push(...unmet);
+    }
+    if (t.spend.spentUsdCents > 0 && !t.result) {
+      lines.push("Purchases were made during the attempt, but no outcome was verified as meeting the goal.");
+    }
+  }
   lines.push(`Spent: $${(t.spend.spentUsdCents / 100).toFixed(2)} (limit $${(t.spend.limitUsdCents / 100).toFixed(2)})`);
   if (t.result) {
     lines.push("");
@@ -134,6 +153,10 @@ function formatFinal(t: TaskRecord): string {
       if (ev.kind === "chain_gas_crosscheck")
         lines.push(
           `Evidence: cross-check ${ev.answerGasGwei} vs ${ev.chainGasGwei.toFixed(6)} gwei (${ev.chain}), ${ev.agreed ? "agree" : "disagree"}`,
+        );
+      if (ev.kind === "watch_finding")
+        lines.push(
+          `Evidence: ${ev.findingKind} from "${ev.sourceLabel}" (confidence ${ev.confidence}${ev.corroboratedBy?.length ? `, corroborated by ${ev.corroboratedBy.join(", ")}` : ""})${ev.url ? ` ${ev.url}` : ""}`,
         );
     }
   }
@@ -269,12 +292,19 @@ export async function handleUpdate(update: TgUpdate, deps: TelegramDeps = {}): P
         await send(chatId, `Could not create the task: ${err instanceof Error ? err.message : err}`);
         return;
       }
-      await send(chatId, `Goal accepted [${shortId(task.id)}]. Working on it, live updates follow.`);
+      await send(chatId, `Goal accepted [${shortId(task.id)}].`);
 
       if (task.state === "awaiting_approval") {
         await send(chatId, taskCard(task) + "\n\nThe plan waits for your approval, use /approve " + shortId(task.id));
         return;
       }
+      if (task.state === "blocked") {
+        // Execution goals arrive here already stopped: state the limitation
+        // plainly instead of pretending to "work on it".
+        await send(chatId, taskCard(task));
+        return;
+      }
+      await send(chatId, "Working on it, live updates follow.");
       await runWithProgress(task.id, chatId, engine, runEngineTask(task.id, engine), send);
       return;
     }

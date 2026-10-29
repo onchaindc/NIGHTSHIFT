@@ -344,6 +344,68 @@ describe("watch persistence (restart-safe)", () => {
     // Both sources legitimately moved from A to B, so both changes are real.
     expect(task.events.filter((e) => e.type === "watch_change_detected")).toHaveLength(2);
   });
+
+  it("corroboration: the same change seen by a second real read is marked cross-checked", async () => {
+    const watch = await makeWatch();
+    setWatchDeps(depOverrides((source) => okResult(source, SNAP_A(source.label))));
+    await runWatch(watch); // baseline v1.0.0 on both sources
+    // Both sources now read B; the two findings agree, so both are cross-checked.
+    setWatchDeps(depOverrides((source) => okResult(source, SNAP_B(source.label))));
+    const task = await runWatch(watch);
+    expect(task.events.filter((e) => e.type === "watch_change_detected")).toHaveLength(2);
+    const corroborated = task.events.filter(
+      (e) => e.type === "watch_corroborated" && /independently corroborated/.test(e.message),
+    );
+    expect(corroborated).toHaveLength(2);
+    expect(task.result?.summary).toContain("CROSS-CHECKED");
+    expect(task.result?.summary).toContain("Corroboration: independently seen on");
+  });
+
+  it("corroboration: a single-source change stays source-direct and honestly single-read", async () => {
+    const watch = await makeWatch();
+    setWatchDeps(depOverrides((source) => okResult(source, SNAP_A(source.label))));
+    await runWatch(watch);
+    // Only the releases source moves to B; docs stays at the baseline, so the
+    // finding cannot be corroborated by a second read.
+    setWatchDeps(
+      depOverrides((source) =>
+        source.type === "github_releases" ? okResult(source, SNAP_B(source.label)) : okResult(source, SNAP_A(source.label)),
+      ),
+    );
+    const task = await runWatch(watch);
+    expect(task.events.filter((e) => e.type === "watch_change_detected")).toHaveLength(1);
+    const direct = task.events.filter(
+      (e) => e.type === "watch_corroborated" && /single read/.test(e.message),
+    );
+    expect(direct).toHaveLength(1);
+    expect(task.result?.summary).toContain("SOURCE-DIRECT");
+    expect(task.result?.summary).not.toContain("CROSS-CHECKED");
+  });
+
+  it("significance is an honest keyword heuristic surfaced in the report", async () => {
+    const watch = await makeWatch({
+      name: "Security watch",
+      sources: [{ type: "rss_feed", target: "https://feeds.example.com/security.xml", label: "Security feed" }],
+    });
+    const baseline: ReturnType<typeof SNAP_A> = {
+      signature: "feed:base",
+      summary: "Security feed: routine status update",
+      detail: "routine status update, nothing actionable",
+      url: "https://feeds.example.com/security.xml",
+    };
+    const advisory = {
+      signature: "feed:adv",
+      summary: "Security feed: critical vulnerability advisory",
+      detail: "Security advisory CVE-2025-99999: critical vulnerability disclosed, upgrade recommended immediately",
+      url: "https://feeds.example.com/security.xml",
+    };
+    setWatchDeps(depOverrides((source, call) => okResult(source, call <= 1 ? baseline : advisory)));
+    await runWatch(watch); // baseline
+    const task = await runWatch(watch); // change detected
+    expect(task.events.filter((e) => e.type === "watch_change_detected")).toHaveLength(1);
+    expect(task.result?.summary).toContain("Significance: high");
+    expect(task.result?.summary).toContain("keyword heuristic");
+  });
 });
 
 describe("approvals gate paid watch investigations", () => {

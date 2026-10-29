@@ -5,7 +5,7 @@ import { verifyTask, VerificationFailure } from "./verify";
 import { extractGasGwei, extractUsdCost } from "./planner";
 import { canTransition, type ActionId, type ExecutionEvent, type ExecutionEventType, type TaskRecord, type TaskState, type TelegraphAnswer, type Evidence, type PlanStep, type VerificationCriteria, type JobType, type WatchRef } from "./types";
 import * as telegraph from "@/lib/telegraph/client";
-import { executeWatchCheck, executeWatchInvestigate, executeWatchDeliver, executeWatchReport } from "@/lib/watch/execute";
+import { executeWatchCheck, executeWatchCorroborate, executeWatchInvestigate, executeWatchDeliver, executeWatchReport } from "@/lib/watch/execute";
 import type { WatchRunState } from "@/lib/watch/types";
 import { getGasPrice, getTransactionReceipt } from "@/lib/chain/rpc";
 import type { ChainReceipt, ChainGasPrice } from "@/lib/chain/rpc";
@@ -132,7 +132,10 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
   }
 
   const now = deps.now;
-  const planned = input.plan?.length ? { steps: input.plan, criteria: input.criteria ?? null, assumptions: input.assumptions ?? [] } : planForGoal(goal, limitUsdCents);
+  const planned: { steps: PlanStep[]; criteria: VerificationCriteria | null; assumptions: string[]; executionBlocker?: string } =
+    input.plan?.length
+      ? { steps: input.plan, criteria: input.criteria ?? null, assumptions: input.assumptions ?? [] }
+      : planForGoal(goal, limitUsdCents);
   const steps = planned.steps;
   const criteria: VerificationCriteria = planned.criteria ?? {
     primaryVerifiedAgainstNodeSignal: false,
@@ -141,6 +144,8 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
     ownPaymentSettledOnChain: false,
     reconcileLedgerEntries: false,
   };
+  // Execution goals (classified by the planner) stop before any step runs.
+  const executionBlocker = input.plan?.length ? undefined : planned.executionBlocker;
   const assumptions = planned.assumptions;
   const task: TaskRecord = {
     id: randomUUID(),
@@ -167,7 +172,14 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
   await saveTask(task);
 
   transition(task, "planning");
-  event(task, "plan_created", `Plan built: ${steps.map((s) => s.description).join(" → ")}`, now);
+  event(
+    task,
+    "plan_created",
+    executionBlocker
+      ? "No execution plan was built: the goal asks for an external action this system cannot carry out (see the criteria note below)."
+      : `Plan built: ${steps.map((s) => s.description).join(" → ")}`,
+    now,
+  );
   if (input.plan?.length) {
     // Job variants define their own verification semantics; state them plainly.
     event(
@@ -178,6 +190,15 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
       { criteria },
     );
   } else {
+    if (executionBlocker) {
+      event(
+        task,
+        "criteria_defined",
+        `Success criteria fixed before execution: the goal is an execution goal, so completing it requires evidence of the actual external action, a mined transaction receipt covering the action itself plus an independent outcome verification (for a swap or transfer, for example, the resulting balance change). An inference response, a payment receipt for AI inference, or a self-reported confidence score is NOT sufficient. No such evidence can be produced today, so the task stops before spending anything.`,
+        now,
+        { criteria },
+      );
+    } else {
     const criteriaLines: string[] = [
       `answer verified against the node's signal record`,
       `answer plausible`,
@@ -200,11 +221,22 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
       now,
       { criteria },
     );
+    }
   }
   for (const a of assumptions) {
     event(task, "criteria_defined", `Planning assumption: ${a}`, now);
   }
   await saveTask(task);
+
+  // Execution goals stop here: without wallet/exchange/deployment integrations
+  // they can never be honestly completed, so nothing runs and nothing is spent.
+  if (executionBlocker) {
+    transition(task, "blocked");
+    event(task, "task_blocked", executionBlocker, now);
+    task.error = executionBlocker;
+    await saveTask(task);
+    return task;
+  }
 
   if (task.permissions.requiresApproval) {
     transition(task, "awaiting_approval");
@@ -266,6 +298,9 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
         if (task.state !== "executing") return task; // blocked during attempt
       } else if (step.kind === "watch_check") {
         await executeWatchCheck(task, deps, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "watch_corroborate") {
+        await executeWatchCorroborate(task, deps, outputs);
         if (task.state !== "executing") return task;
       } else if (step.kind === "watch_investigate") {
         await executeWatchInvestigate(task, deps, outputs);
