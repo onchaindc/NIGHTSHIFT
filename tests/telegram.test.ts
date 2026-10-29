@@ -35,6 +35,11 @@ function makeBot(overrides: {
   const calls = { ask: 0, create: 0 };
   const sent: Array<{ chat: unknown; text: string }> = [];
   const engine: EngineDeps = {
+    publicSource: {
+      fetchJSON: async () => {
+        throw new Error("unexpected public source read in this telegram test");
+      },
+    },
     telegraph: {
       askAuto: async (o) => {
         calls.ask++;
@@ -95,6 +100,8 @@ describe("telegram adapter", () => {
   });
 
   it("never creates a second purchase for the same /goal delivery", async () => {
+    // A question with no free capability, so this genuinely exercises the
+    // PAID purchase path (price questions now default to free sources).
     let askCalls = 0;
     const bot = makeBot({
       askAuto: async () => {
@@ -102,10 +109,10 @@ describe("telegram adapter", () => {
         return { ...GOOD_ANSWER };
       },
     });
-    await handleUpdate(updateOf(2001, "/goal What is the BTC price in USD?"), bot);
+    await handleUpdate(updateOf(2001, "/goal Summarize the latest research discussion in the governance forum"), bot);
     expect(bot.sent.some((s) => s.text.includes("Completed"))).toBe(true);
     const afterFirst = askCalls;
-    await handleUpdate(updateOf(2001, "/goal What is the BTC price in USD?"), bot);
+    await handleUpdate(updateOf(2001, "/goal Summarize the latest research discussion in the governance forum"), bot);
     expect(askCalls).toBe(afterFirst); // duplicate delivery → zero new purchases
     expect(askCalls).toBe(1);
   });
@@ -113,7 +120,7 @@ describe("telegram adapter", () => {
   it("runs /approve end to end through the same engine", async () => {
     const bot = makeBot({});
     const task = await createTask(
-      { goal: "What is the BTC price in USD?", spendLimitUsdCents: 10, requiresApproval: true, origin: { source: "telegram", actor: "@tester" } },
+      { goal: "What is the BTC price in USD?", spendLimitUsdCents: 10, requiresApproval: true, origin: { source: "telegram", actor: "@tester" }, mode: "paid" },
       bot.engine,
     );
     const prefix = task.id.slice(0, 8);
@@ -163,7 +170,7 @@ describe("telegram adapter", () => {
       getReceipt: async () => ({ found: false, status: "not_found" as const, blockNumber: null, to: null, rpcUrl: "https://fake-rpc" }),
     });
     const task = await createTask(
-      { goal: "What is the BTC price in USD?", spendLimitUsdCents: 10, requiresApproval: true, origin: { source: "telegram", actor: "@tester" } },
+      { goal: "What is the BTC price in USD?", spendLimitUsdCents: 10, requiresApproval: true, origin: { source: "telegram", actor: "@tester" }, mode: "paid" },
       bot.engine,
     );
     await handleUpdate(updateOf(5001, `/approve ${task.id.slice(0, 8)}`), bot);

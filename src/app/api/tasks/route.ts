@@ -19,7 +19,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { goal?: unknown; spendLimitUsdCents?: unknown; requiresApproval?: unknown };
+  let body: { goal?: unknown; spendLimitUsdCents?: unknown; requiresApproval?: unknown; mode?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -28,6 +28,11 @@ export async function POST(req: NextRequest) {
 
   const goal = typeof body.goal === "string" ? body.goal.trim() : "";
   if (!goal) return NextResponse.json({ error: "goal is required" }, { status: 400 });
+
+  // How this operation may answer. A free request can NEVER become a paid
+  // operation (the planner refuses instead), and a paid request is always
+  // labeled with its ceiling before anything runs.
+  const mode = body.mode === "free" || body.mode === "paid" || body.mode === "auto" ? body.mode : "auto";
 
   const spendLimitUsdCents =
     typeof body.spendLimitUsdCents === "number" && body.spendLimitUsdCents > 0
@@ -42,6 +47,7 @@ export async function POST(req: NextRequest) {
       spendLimitUsdCents,
       requiresApproval,
       origin: { source: "web" },
+      mode,
     });
     if (task.state === "executing") {
       // Execution (possibly paid steps with retries and chain reads) must not

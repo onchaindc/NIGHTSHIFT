@@ -118,8 +118,165 @@ export function parseGoal(goal: string): {
   return { isGasGoal, isPriceGoal, expectedChain, expectedAsset, maxFeeUsdFor21000Gas, assumptions };
 }
 
-export function planForGoal(goal: string, maxEstimateUsdCents: number): TaskPlan {
+export type PlanMode = "auto" | "free" | "paid";
+
+/**
+ * Execution modes the caller can choose explicitly (web UI, API):
+ *  - "free": ONLY free steps are allowed. If the question has no free
+ *    capability, the plan says so honestly and nothing is launched.
+ *  - "paid": the Telegraph purchase plan, clearly labeled, with its ceiling.
+ *  - "auto": no explicit choice was made, the planner decides (a paid plan is
+ *    built when the question has no free capability, and every paid step's
+ *    description carries the ceiling and the Telegraph label).
+ */
+
+/* ------------------------------------------------------------------ */
+/* Free sources                                                         */
+/* ------------------------------------------------------------------ */
+
+/** CoinGecko (public, key-less) symbols for the assets the parser knows. */
+export const COINGECKO_IDS: Record<string, string> = {
+  BTC: "bitcoin",
+  ETH: "ethereum",
+  SOL: "solana",
+  XRP: "ripple",
+  DOGE: "dogecoin",
+  LINK: "chainlink",
+  AVAX: "avalanche-2",
+};
+
+/** The native token whose price converts gas (gwei) into USD per chain. */
+export const CHAIN_NATIVE: Record<string, string> = {
+  base: "ETH",
+  ethereum: "ETH",
+  arbitrum: "ETH",
+  optimism: "ETH",
+  polygon: "MATIC",
+};
+
+/** CoinGecko id for a native token symbol. Null when unknown (no guessing). */
+export function nativeCoinId(symbol: string): string | null {
+  if (symbol === "ETH") return "ethereum";
+  if (symbol === "MATIC") return "matic-network";
+  return null;
+}
+
+/**
+ * Whether this question has a genuine FREE capability today: gas telemetry
+ * (read from a public chain RPC) or a single-asset USD price (public APIs).
+ * Anything else has no free path (inventing one would be fabrication).
+ */
+export function isFreeCapableGoal(goal: string): boolean {
+  const parsed = parseGoal(goal);
+  return parsed.isGasGoal || (parsed.isPriceGoal && Boolean(parsed.expectedAsset));
+}
+
+function freeFailedCriteria(intent: GoalIntent): VerificationCriteria {
+  return {
+    primaryVerifiedAgainstNodeSignal: false,
+    answerSane: false,
+    answerMaxAgeSeconds: 0,
+    ownPaymentSettledOnChain: false,
+    reconcileLedgerEntries: false,
+    goalIntent: intent,
+    primarySource: "free",
+  };
+}
+
+/** The genuinely free plan for a question with a matching free capability. */
+function freePlanForGoal(trimmed: string, parsed: ReturnType<typeof parseGoal>, intent: GoalIntent): TaskPlan {
+  const assumptions = [
+    "this operation runs on free public sources and read-only chain RPC only; it spends $0.00 and never signs a payment",
+  ];
+  if (parsed.isGasGoal) {
+    const chain = parsed.expectedChain ?? "base";
+    const steps: PlanStep[] = [
+      {
+        id: "free-gas-read",
+        kind: "free_chain_read",
+        description: `Read the live gas price for ${chain} directly from a public, read-only chain RPC (free)`,
+      },
+    ];
+    const native = CHAIN_NATIVE[chain] ?? "ETH";
+    const nativeId = nativeCoinId(native);
+    if (parsed.maxFeeUsdFor21000Gas != null && nativeId) {
+      steps.push({
+        id: "free-native-price",
+        kind: "free_public_lookup",
+        target: nativeId,
+        description: `Read the current ${native} USD price from a public key-less price source (free) so the 21000-gas transfer fee can be computed in USD`,
+      });
+    }
+    steps.push({
+      id: "verify-evidence",
+      kind: "verify_evidence",
+      description: "Check every success criterion against the recorded free-read evidence before completing",
+    });
+    const criteria: VerificationCriteria = {
+      ...freeFailedCriteria(intent),
+      goalIntent: intent,
+      primarySource: "free",
+      freeChainRead: chain,
+      expectedChain: chain,
+      answerSane: true,
+    };
+    if (parsed.maxFeeUsdFor21000Gas != null) {
+      criteria.maxFeeUsdFor21000Gas = parsed.maxFeeUsdFor21000Gas;
+      if (nativeId) criteria.freeAssetLookup = native;
+    }
+    return { steps, criteria, assumptions };
+  }
+
+  // Single-asset USD price goal.
+  const asset = parsed.expectedAsset!;
+  const coinId = COINGECKO_IDS[asset];
+  const criteria: VerificationCriteria = {
+    ...freeFailedCriteria(intent),
+    goalIntent: intent,
+    primarySource: "free",
+    freeAssetLookup: asset,
+    expectedAsset: asset,
+    answerSane: true,
+  };
+  return {
+    steps: [
+      {
+        id: "free-price-lookup",
+        kind: "free_public_lookup",
+        target: coinId,
+        description: `Read the current ${asset} USD price from a public, key-less price source (free)`,
+      },
+      { id: "verify-evidence", kind: "verify_evidence", description: "Check the recorded free-read evidence before completing" },
+    ],
+    criteria,
+    assumptions,
+  };
+}
+
+export function planForGoal(goal: string, maxEstimateUsdCents: number, mode: PlanMode = "auto"): TaskPlan {
   const trimmed = goal.trim();
+
+  if (mode === "free" && !isFreeCapableGoal(trimmed)) {
+    // Honest blocker: there is no free capability for this question, so
+    // nothing is launched and nothing silently becomes a paid operation.
+    const blocker =
+      `No free capability for this question: NIGHTSHIFT can answer gas questions (public chain RPC) and single-asset USD prices (public price APIs) for free, but this goal needs paid intelligence. Re-run with the paid mode and a spending ceiling, or ask a free-answerable question.`;
+    return {
+      steps: [],
+      criteria: freeFailedCriteria(classifyGoal(trimmed).intent),
+      assumptions: [],
+      executionBlocker: blocker,
+    };
+  }
+
+  if (mode === "free" || (mode === "auto" && isFreeCapableGoal(trimmed))) {
+    const intent = classifyGoal(trimmed);
+    if (intent.intent === "execution") {
+      // falls through to the execution blocker below; never plan a free run for an execution goal
+    } else {
+      return freePlanForGoal(trimmed, parseGoal(trimmed), intent.intent);
+    }
+  }
 
   // EXECUTION goals never reach the purchase path. Every external consequence
   // (a swap, deployment, transfer...) would need third-party evidence of execution:

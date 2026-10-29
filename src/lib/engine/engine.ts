@@ -34,6 +34,10 @@ export interface ExecutionOutputs {
   crossCheck?: { evidence: Evidence };
   /** Protocol Watch run context, populated by watch_check. */
   watch?: WatchRunState;
+  /** Free research evidence: a real public chain RPC read. */
+  freeRead?: { chain: string; gasPriceWei: number; gasPriceGwei: number; rpcUrl: string };
+  /** Free research evidence: a real public-source price lookup. */
+  freeLookup?: { url: string; asset: string; priceUsd: number; fetchedAt: string };
 }
 
 export interface EngineDeps {
@@ -44,6 +48,10 @@ export interface EngineDeps {
   chain: {
     getReceipt(txHash: string): Promise<ChainReceipt>;
     getGasPrice(chain: string): Promise<{ chain: string; gasPriceWei: number; gasPriceGwei: number; rpcUrl: string }>;
+  };
+  /** Free research: real reads of key-less public sources (price APIs). */
+  publicSource: {
+    fetchJSON(url: string): Promise<unknown>;
   };
   now: () => number;
   random?: () => number; // injectable backoff for tests; real jitter by default
@@ -58,6 +66,16 @@ export function defaultDeps(): EngineDeps {
     chain: {
       getReceipt: (h) => getTransactionReceipt(h),
       getGasPrice: (c) => getGasPrice(c),
+    },
+    publicSource: {
+      fetchJSON: async (url) => {
+        const res = await fetch(url, {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) throw new Error(`public source returned HTTP ${res.status}`);
+        return (await res.json()) as unknown;
+      },
     },
     now: () => Date.now(),
   };
@@ -114,6 +132,10 @@ export interface CreateTaskInput {
   spendLimitUsdCents?: number;
   requiresApproval?: boolean;
   origin: TaskRecord["origin"];
+  /** How the planner may answer: "free" (public sources only, $0), "paid"
+   * (explicit Telegraph purchase) or "auto" (legacy default). Defaults to
+   * "auto" for callers that predate the mode concept. */
+  mode?: "auto" | "free" | "paid";
   /** Overrides for job variants like Protocol Watch. When a plan is supplied
    * it replaces the deterministic goal planner entirely. */
   jobType?: JobType;
@@ -135,7 +157,7 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
   const planned: { steps: PlanStep[]; criteria: VerificationCriteria | null; assumptions: string[]; executionBlocker?: string } =
     input.plan?.length
       ? { steps: input.plan, criteria: input.criteria ?? null, assumptions: input.assumptions ?? [] }
-      : planForGoal(goal, limitUsdCents);
+      : planForGoal(goal, limitUsdCents, input.mode ?? "auto");
   const steps = planned.steps;
   const criteria: VerificationCriteria = planned.criteria ?? {
     primaryVerifiedAgainstNodeSignal: false,
@@ -226,6 +248,22 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
   for (const a of assumptions) {
     event(task, "criteria_defined", `Planning assumption: ${a}`, now);
   }
+  // Cost source labeling, fixed at creation (never switched behind the task's back).
+  if (criteria.primarySource === "free") {
+    event(
+      task,
+      "criteria_defined",
+      `Cost: FREE (public sources and read-only chain RPC only). This operation never signs a payment and will spend $0.00.`,
+      now,
+    );
+  } else if (steps.some((s) => s.kind === "telegraph_ask")) {
+    event(
+      task,
+      "criteria_defined",
+      `Cost: PAID intelligence (Telegraph). Requires TELEGRAPH_EVM_PRIVATE_KEY (a Base Sepolia wallet funded with test USDC). Maximum ${"$"}${(limitUsdCents / 100).toFixed(2)}; refused before signing if the network prices above what remains.`,
+      now,
+    );
+  }
   await saveTask(task);
 
   // Execution goals stop here: without wallet/exchange/deployment integrations
@@ -310,6 +348,12 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
         if (task.state !== "executing") return task;
       } else if (step.kind === "watch_report") {
         await executeWatchReport(task, deps, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "free_chain_read") {
+        outputs.freeRead = await executeFreeChainRead(task, deps);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "free_public_lookup") {
+        outputs.freeLookup = await executeFreePublicLookup(task, deps, step);
         if (task.state !== "executing") return task;
       } else if (step.kind === "cross_check") {
         outputs.crossCheck = await executeCrossCheck(task, deps, outputs.primary ?? null);
@@ -627,6 +671,59 @@ async function executeCrossCheck(
       rpcUrl: chainGas.rpcUrl,
     },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* FREE research executors: real public reads, $0 spent, no payments    */
+/* ------------------------------------------------------------------ */
+
+/** Genuine free action: read live gas telemetry from the chain's public RPC. */
+async function executeFreeChainRead(task: TaskRecord, deps: EngineDeps): Promise<ExecutionOutputs["freeRead"]> {
+  const now = deps.now;
+  if (!hasPermission(task, "chain.read")) {
+    event(task, "permission_denied", 'Action "chain.read" is not in this task\'s allowed actions, so no chain read was performed', now);
+    throw new EngineError("permission denied: chain.read");
+  }
+  const chain = task.criteria.freeChainRead ?? task.criteria.expectedChain ?? "base";
+  event(task, "step_started", `Free read: live gas price for ${chain} from a public read-only RPC`, now);
+  const read = await retryRead(task, deps, `gas read for ${chain}`, () => deps.chain.getGasPrice(chain));
+  event(
+    task,
+    "step_succeeded",
+    `Free read complete: ${chain} gas price is ${read.gasPriceGwei.toFixed(6)} gwei (${read.gasPriceWei} wei), read from ${read.rpcUrl} at no cost`,
+    now,
+    { chain: read.chain, gasPriceGwei: read.gasPriceGwei, rpcUrl: read.rpcUrl },
+  );
+  return { chain: read.chain, gasPriceWei: read.gasPriceWei, gasPriceGwei: read.gasPriceGwei, rpcUrl: read.rpcUrl };
+}
+
+/** Genuine free action: read a public, key-less price source for one asset. */
+async function executeFreePublicLookup(
+  task: TaskRecord,
+  deps: EngineDeps,
+  step: PlanStep,
+): Promise<ExecutionOutputs["freeLookup"]> {
+  const now = deps.now;
+  if (!step.target) {
+    // A malformed plan is an engine bug, not a transient failure: never guess a source.
+    throw new EngineError("free public lookup step carries no target asset; refusing to guess a price source");
+  }
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(step.target)}&vs_currencies=usd`;
+  event(task, "step_started", `Free read: ${step.target} USD price from a public key-less price source`, now);
+  const body = (await retryRead(task, deps, "public price read", () => deps.publicSource.fetchJSON(url))) as Record<string, unknown>;
+  const entry = body?.[step.target] as { usd?: unknown } | undefined;
+  const price = Number(entry?.usd);
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new EngineError(
+      `the public price source returned no usable USD figure for ${step.target} (${JSON.stringify(entry)}); reporting the read as failed instead of inventing a price`,
+    );
+  }
+  const fetchedAt = new Date(now()).toISOString();
+  event(task, "step_succeeded", `Free read complete: ${step.target} USD price is $${price} (public source, no account, no payment)`, now, {
+    url,
+    priceUsd: price,
+  });
+  return { url, asset: step.target, priceUsd: price, fetchedAt };
 }
 
 async function retryRead<T>(task: TaskRecord, deps: EngineDeps, name: string, op: () => Promise<T>): Promise<T> {

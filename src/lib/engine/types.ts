@@ -94,6 +94,16 @@ export interface VerificationCriteria {
    */
   goalIntent?: "information" | "preparation" | "execution";
   /**
+   * Where the primary answer comes from: "telegraph" (paid inference) or
+   * "free" (public sources + read-only chain RPC, never spends). Verification
+   * checks the matching evidence kind only.
+   */
+  primarySource?: "telegraph" | "free";
+  /** Free plan requirement: a real chain read of this chain must exist. */
+  freeChainRead?: string;
+  /** Free plan requirement: a real public-source price lookup for this asset must exist. */
+  freeAssetLookup?: string;
+  /**
    * True when the goal requires evidence of an actual external action
    * (transaction receipt plus an independent outcome check). An inference
    * response, a payment receipt for AI inference, or a self-reported
@@ -151,6 +161,22 @@ export type Evidence =
       confidence: string;
       url: string | null;
       corroboratedBy?: string[];
+    }
+  | {
+      /** Free research evidence: a real read of public chain data (RPC). */
+      kind: "chain_read";
+      chain: string;
+      gasPriceWei: number;
+      gasPriceGwei: number;
+      rpcUrl: string;
+    }
+  | {
+      /** Free research evidence: a real read of a public source (e.g. a price API). */
+      kind: "public_source_lookup";
+      url: string;
+      asset: string;
+      priceUsd: number;
+      fetchedAt: string;
     };
 
 export type PlanStepKind =
@@ -158,6 +184,9 @@ export type PlanStepKind =
   | "verify_settlement"
   | "cross_check"
   | "verify_evidence"
+  // Free research steps: public sources + read-only chain RPC, no payments
+  | "free_chain_read"
+  | "free_public_lookup"
   // Protocol Watch steps
   | "watch_check"
   | "watch_corroborate"
@@ -171,6 +200,8 @@ export interface PlanStep {
   description: string;
   /** Estimated maximum cost in USD cents; the engine refuses to exceed the budget. */
   maxCostUsdCents?: number;
+  /** Free-step parameter: the lookup target (e.g. a public price-source id). */
+  target?: string;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Evidence, TaskRecord } from "./types";
+import type { Evidence, TaskRecord, VerificationCriteria } from "./types";
 import type { EngineDeps, ExecutionOutputs } from "./engine";
 import { reconcileLedger } from "./ledger";
 import { extractUsdCost } from "./planner";
@@ -76,6 +76,15 @@ export async function verifyTask(
     fail(
       "the goal requires evidence of an actual external action (a transaction receipt plus an independent outcome verification) that no current integration can produce, so the task cannot be verified as complete", 
     );
+  }
+
+  // ------------------------------------------------------------------
+  // FREE plan verification: real public reads are the only accepted source.
+  // A paid answer can never substitute, and a missing free read cannot be
+  // replaced by anything the network says.
+  // ------------------------------------------------------------------
+  if (criteria.primarySource === "free") {
+    return verifyFreeResearch(task, outputs, criteria, deps);
   }
 
   if (!outputs.primary?.signalHash) {
@@ -231,6 +240,100 @@ export async function verifyTask(
     evidence,
     completedAt: c(),
   };
+}
+
+/**
+ * Verification for free-research plans. Every accepted number must trace to a
+ * real read this task actually performed (chain RPC or a public source), with
+ * the exact evidence this plan demanded. Nothing is renamed, inferred or
+ * substituted: a failed read fails the task.
+ */
+function verifyFreeResearch(
+  task: TaskRecord,
+  outputs: ExecutionOutputs,
+  criteria: VerificationCriteria,
+  deps: EngineDeps,
+): void {
+  const evidence: Evidence[] = [];
+
+  const read = outputs.freeRead;
+  if (criteria.freeChainRead) {
+    if (!read) {
+      fail(`the plan requires a real chain read of ${criteria.freeChainRead}, but none was recorded`);
+    }
+    if (read!.chain !== criteria.freeChainRead) {
+      fail(`the chain read returned ${read!.chain}, but the goal asked about ${criteria.freeChainRead}; the plan's evidence does not cover the goal`);
+    }
+    if (!(Number.isFinite(read!.gasPriceGwei) && read!.gasPriceGwei > 0) || !(Number.isFinite(read!.gasPriceWei) && read!.gasPriceWei > 0)) {
+      fail(`the chain read is not a plausible gas reading: ${JSON.stringify(read)}`);
+    }
+    evidence.push({
+      kind: "chain_read",
+      chain: read!.chain,
+      gasPriceWei: read!.gasPriceWei,
+      gasPriceGwei: read!.gasPriceGwei,
+      rpcUrl: read!.rpcUrl,
+    });
+  }
+
+  const lookup = outputs.freeLookup;
+  if (criteria.freeAssetLookup) {
+    if (!lookup) {
+      fail(`the plan requires a real public-source price lookup for ${criteria.freeAssetLookup}, but none was recorded`);
+    }
+    if (!(Number.isFinite(lookup!.priceUsd) && lookup!.priceUsd > 0)) {
+      fail(`the public-source price lookup returned no plausible USD price: ${JSON.stringify(lookup!)}`);
+    }
+    evidence.push({ kind: "public_source_lookup", url: lookup!.url, asset: lookup!.asset, priceUsd: lookup!.priceUsd, fetchedAt: lookup!.fetchedAt });
+  }
+
+  if (
+    !criteria.freeChainRead &&
+    !criteria.freeAssetLookup &&
+    !outputs.freeRead &&
+    !outputs.freeLookup
+  ) {
+    fail("the free plan produced no evidence at all: nothing was read publicly, so there is nothing to verify");
+  }
+
+  // The goal's own USD threshold ("21000-gas transfer under $0.50") is computed
+  // ONLY from the real free reads: gas price (wei) × 21000 gas × native USD.
+  let feeUsd: number | null = null;
+  if (criteria.maxFeeUsdFor21000Gas != null) {
+    if (!read) fail("the goal's fee threshold cannot be checked without the chain read, which did not happen");
+    if (!lookup) {
+      fail(
+        `the goal requires a transfer fee under $${criteria.maxFeeUsdFor21000Gas}, but no USD price for the chain's native token was read publicly, so the fee cannot be computed from real data`,
+      );
+    }
+    feeUsd = (read!.gasPriceGwei * 1e-9) * 21_000 * lookup!.priceUsd;
+    task.events.push({
+      id: randomUUID(),
+      ts: deps.now(),
+      type: "criteria_check_passed",
+      message: `Fee computed from free reads only: ${read!.gasPriceGwei.toFixed(6)} gwei × 21000 × $${lookup!.priceUsd} = $${feeUsd.toFixed(4)} per 21000-gas transfer (requirement: under $${criteria.maxFeeUsdFor21000Gas})`,
+    });
+    if (feeUsd > criteria.maxFeeUsdFor21000Gas) {
+      fail(
+        `the goal requires a 21000-gas transfer under $${criteria.maxFeeUsdFor21000Gas}, but the real free reads compute $${feeUsd.toFixed(4)}. The goal is NOT achieved (the reads were not bent to fit the threshold)`,
+      );
+    }
+  }
+  task.result = { summary: summarizeFreeResearch(read, lookup, feeUsd), evidence, completedAt: deps.now() };
+}
+
+function summarizeFreeResearch(read: ExecutionOutputs["freeRead"], lookup: ExecutionOutputs["freeLookup"], feeUsd: number | null): string {
+  const lines: string[] = [];
+  if (read) {
+    lines.push(`${read.chain} gas price: ${read.gasPriceGwei.toFixed(6)} gwei (${read.gasPriceWei} wei), read live from the public RPC ${read.rpcUrl}. Cost: $0.00.`);
+  }
+  if (lookup) {
+    lines.push(`${lookup.asset} USD price: $${lookup.priceUsd}, read from the public key-less source ${lookup.url} at ${lookup.fetchedAt}. Cost: $0.00.`);
+  }
+  if (feeUsd != null) {
+    lines.push(`Computed from free reads only: a 21000-gas transfer costs about $${feeUsd.toFixed(4)}.`);
+  }
+  return lines.join("\n") || "No free evidence was recorded.";
 }
 
 function summarizeAnswer(answer: TelegraphAnswerShape): string {
