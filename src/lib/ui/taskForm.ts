@@ -9,9 +9,11 @@ export interface TaskRequestPayload {
   goal: string;
   spendLimitUsdCents?: number;
   requiresApproval: boolean;
+  /** How the operation may answer: free ($0), paid (Telegraph) or auto. */
+  mode: "free" | "paid" | "auto";
 }
 
-export type FormError = "goalEmpty" | "goalDuplicate" | "limitInvalid";
+export type FormError = "goalEmpty" | "goalDuplicate" | "limitInvalid" | "modeInvalid";
 
 /**
  * Parse the raw spending-ceiling input. Empty input means "use the server
@@ -33,10 +35,14 @@ export function isDuplicateGoal(goal: string, liveGoals: string[]): boolean {
   return liveGoals.some((g) => g.trim().toUpperCase() === trimmed.toUpperCase());
 }
 
+export const MODES = ["free", "paid", "auto"] as const;
+export type ModeOption = (typeof MODES)[number];
+
 export function buildTaskRequest(input: {
   goal: string;
   limitRaw: string;
   requiresApproval: boolean;
+  mode?: string;
   liveGoals?: string[];
 }): { ok: true; payload: TaskRequestPayload } | { ok: false; error: FormError } {
   const goal = input.goal.trim();
@@ -44,12 +50,18 @@ export function buildTaskRequest(input: {
   if (isDuplicateGoal(goal, input.liveGoals ?? [])) return { ok: false, error: "goalDuplicate" };
   const { cents, valid } = cleanLimit(input.limitRaw);
   if (!valid) return { ok: false, error: "limitInvalid" };
+  // No mode passed (older callers) falls back to the server's default "auto";
+  // an explicit but unknown mode is a real error.
+  if (input.mode !== undefined && !MODES.includes(input.mode as ModeOption)) {
+    return { ok: false, error: "modeInvalid" };
+  }
   return {
     ok: true,
     payload: {
       goal,
       ...(cents ? { spendLimitUsdCents: cents } : {}),
       requiresApproval: input.requiresApproval,
+      mode: input.mode as ModeOption,
     },
   };
 }
@@ -58,4 +70,5 @@ export const FORM_ERROR_COPY: Record<FormError, string> = {
   goalEmpty: "Write a goal first, or pick one of the examples.",
   goalDuplicate: "A task with this exact goal is already running or waiting for approval.",
   limitInvalid: "Enter a ceiling of at least $0.01, or clear the field to use the default.",
+  modeInvalid: "Pick how the operation may answer: free, paid, or planner-decides.",
 };

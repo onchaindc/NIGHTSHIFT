@@ -70,6 +70,7 @@ interface FakeHooks {
   lookupSignal?: EngineDeps["telegraph"]["lookupSignal"];
   getReceipt?: EngineDeps["chain"]["getReceipt"];
   getGasPrice?: EngineDeps["chain"]["getGasPrice"];
+  fetchJSON?: EngineDeps["publicSource"]["fetchJSON"];
 }
 
 function makeDeps(hooks: FakeHooks = {}): EngineDeps & {
@@ -78,6 +79,10 @@ function makeDeps(hooks: FakeHooks = {}): EngineDeps & {
   const calls = { ask: 0, signal: 0, chain: 0 };
   return {
     calls,
+    publicSource: {
+      fetchJSON: async (url: string) =>
+        hooks.fetchJSON ? hooks.fetchJSON(url) : (() => { throw new Error("unexpected public source read in this test: " + url); })(),
+    },
     telegraph: {
       askAuto: async (o) => {
         calls.ask++;
@@ -112,6 +117,7 @@ async function createdTask(goal = "What is the BTC price?", requiresApproval = t
     spendLimitUsdCents: 10, // $0.10 — above the $0.01 charge in fakes
     requiresApproval,
     origin: { source: "web" },
+    mode: "paid", // these tests exercise the TELEGRAPH purchase behavior explicitly
   });
 }
 

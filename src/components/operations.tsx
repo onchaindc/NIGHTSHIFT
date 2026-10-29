@@ -10,7 +10,7 @@ import {
   money,
   phaseState,
 } from "@/components/taskParts";
-import { buildTaskRequest, cleanLimit, FORM_ERROR_COPY } from "@/lib/ui/taskForm";
+import { buildTaskRequest, cleanLimit, FORM_ERROR_COPY, type ModeOption } from "@/lib/ui/taskForm";
 
 /**
  * Operations launcher. Research & Verify and Custom Operation launch through
@@ -82,6 +82,8 @@ function JobConfig({
   const [requiresApproval, setRequiresApproval] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // How the operation may answer. Free is the default: it never spends.
+  const [mode, setMode] = useState<ModeOption>("free");
   const liveGoalsRef = useRef(activeGoals);
   liveGoalsRef.current = activeGoals;
   const def = JOBS.find((j) => j.id === job)!;
@@ -92,6 +94,7 @@ function JobConfig({
       goal,
       limitRaw: limit,
       requiresApproval,
+      mode,
       liveGoals: liveGoalsRef.current,
     });
     if (!built.ok) {
@@ -109,6 +112,10 @@ function JobConfig({
       const body = (await res.json().catch(() => ({}))) as { error?: string; task?: TaskRecord };
       if (!res.ok) {
         setError(body.error ?? `The request failed with status ${res.status}. Nothing was started, try again.`);
+      } else if (body.task?.state === "blocked" && body.task.error) {
+        // The engine blocked this operation honestly (no free capability,
+        // missing credentials, unsupported action): surface the named reason.
+        setError(body.task.error);
       } else {
         setGoal("");
         onStarted();
@@ -183,6 +190,55 @@ function JobConfig({
         )}
 
         <div className="x-rule my-4" />
+
+        {/* How the operation may answer: free vs paid, chosen explicitly. */}
+        <fieldset className="mb-5">
+          <legend className="mb-2 block text-xs font-medium text-ink-soft">How this operation may answer</legend>
+          <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Answer source">
+            {(
+              [
+                {
+                  id: "free" as const,
+                  title: "Free sources",
+                  price: "$0.00",
+                  blurb: "Public chain RPC and public price APIs. Gas and single-asset price questions only; never signs a payment.",
+                },
+                {
+                  id: "paid" as const,
+                  title: "Telegraph paid intelligence",
+                  price: "up to your ceiling",
+                  blurb: "Purchases an answer on the x402 network. Requires TELEGRAPH_EVM_PRIVATE_KEY (test USDC wallet) in the environment.",
+                },
+                {
+                  id: "auto" as const,
+                  title: "Planner decides",
+                  price: "$0.00 or your ceiling",
+                  blurb: "Free sources when the question fits them, otherwise a clearly labeled paid purchase.",
+                },
+              ]
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={mode === opt.id}
+                onClick={() => setMode(opt.id)}
+                className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
+                  mode === opt.id ? "border-blue/60 bg-panel" : "border-edge bg-panel-2 hover:border-edge-strong"
+                }`}
+              >
+                <p className="text-[12.5px] font-medium text-ink">{opt.title}</p>
+                <p className="mt-0.5 tabular text-[11px] font-medium text-gold">{opt.price}</p>
+                <p className="mt-1 text-[11px] leading-snug text-ink-faint">{opt.blurb}</p>
+              </button>
+            ))}
+          </div>
+          {mode === "free" && (
+            <p className="mt-1.5 text-[11px] leading-snug text-gold">
+              Free mode never switches to a paid operation: if no free capability covers this question, the launch is refused and nothing is spent.
+            </p>
+          )}
+        </fieldset>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <div>
