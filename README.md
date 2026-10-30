@@ -165,6 +165,27 @@ Environment variables (all optional for a first look):
 | `NIGHTSHIFT_API_TOKEN` | Operator token gating watch-management calls | watch management is open |
 | `NIGHTSHIFT_WATCH_AUTOCHECK` | Set to `0` to disable scheduled watch scans | auto checks on |
 | `NIGHTSHIFT_WATCH_INTERVAL_MS` | Auto-scan interval (default 600000 = 10 min) | uses default |
+| `NIGHTSHIFT_DATABASE_URL` | Postgres connection string (Neon pooled endpoint recommended; `DATABASE_URL` also honored) | JSON file stores under `.data` (durable locally, non-durable on serverless) |
+
+## Durable persistence (Postgres)
+
+Set `NIGHTSHIFT_DATABASE_URL` and every store — task history, watch configs
+and fingerprints, Telegram dedup state, scheduler state and leases — moves to
+versioned, indexed Postgres tables (`ns_tasks`, `ns_watches`, `ns_kv`,
+`ns_seen_updates`, `ns_leases`). The connection is serverless-safe (single
+pooled connection per runtime, no named prepared statements). Atomicity comes
+from the database: unique-key upserts, `ON CONFLICT DO NOTHING` claims,
+transactional lease acquisition, `SELECT … FOR UPDATE` watch mutations.
+
+Apply migrations with:
+
+```bash
+bun run db:migrate   # runs scripts/db-migrate.ts; idempotent, safe against an up-to-date DB
+```
+
+Without a database everything still works on the local JSON stores; on Vercel
+without one, `/api/status` reports `persistence.durable: false` and names the
+`/tmp` fallback honestly instead of pretending history survives cold starts.
 
 ## Deploying to Vercel
 

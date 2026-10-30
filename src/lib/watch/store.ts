@@ -1,49 +1,23 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { dataDir } from "@/lib/engine/store";
 import { assertHttpUrl, rejectPrivateTarget, SsrfBlockedError } from "./ssrf";
+import { persistence } from "@/lib/storage";
 import type { WatchConfig, WatchSource } from "./types";
 import { isSupportedType } from "./sources";
 
 /**
- * JSON-file persistence for watch configurations, next to the task store.
- * Fingerprints (per-source last-seen signatures) live inside each config, so
- * a process restart never forgets what was already observed and never
- * re-reports old changes. Same durability model as the task store: one file,
- * atomic rename, single process.
+ * Watch persistence facade. Validation, SSRF checks and config semantics live
+ * HERE; storage is provided by the swappable backend (JSON files locally,
+ * durable Postgres rows in production). Fingerprints (per-source last-seen
+ * signatures) live inside each config, so a process restart never forgets
+ * what was already observed and never re-reports old changes.
  */
 
-function file(): string {
-  return path.join(dataDir(), "watches.json");
-}
-
-let cache: WatchConfig[] | null = null;
-
-async function ensureLoaded(): Promise<WatchConfig[]> {
-  if (cache) return cache;
-  try {
-    cache = (JSON.parse(await fs.readFile(file(), "utf8")) as WatchConfig[]) ?? [];
-  } catch {
-    cache = [];
-  }
-  return cache;
-}
-
-async function persist(watches: WatchConfig[]): Promise<void> {
-  await fs.mkdir(dataDir(), { recursive: true });
-  const tmp = file() + ".tmp";
-  await fs.writeFile(tmp, JSON.stringify(watches, null, 2));
-  await fs.rename(tmp, file());
-}
-
 export async function listWatches(): Promise<WatchConfig[]> {
-  return [...(await ensureLoaded())].sort((a, b) => b.createdAt - a.createdAt);
+  return (await persistence().listWatches()).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function getWatch(id: string): Promise<WatchConfig | null> {
-  const all = await ensureLoaded();
-  return all.find((w) => w.id === id) ?? null;
+  return persistence().getWatch(id);
 }
 
 export interface CreateWatchInput {
@@ -123,44 +97,32 @@ export async function createWatch(input: CreateWatchInput, now = Date.now()): Pr
     lastCheckedAt: null,
     fingerprints: {},
   };
-
-  const all = await ensureLoaded();
-  all.push(watch);
-  await persist(all);
+  await persistence().insertWatch(watch);
   return watch;
 }
 
 export async function deleteWatch(id: string): Promise<boolean> {
-  const all = await ensureLoaded();
-  const next = all.filter((w) => w.id !== id);
-  if (next.length === all.length) return false;
-  await persist(next);
-  cache = next;
-  return true;
+  return persistence().removeWatch(id);
 }
 
 /**
  * Mutates the persisted config (fingerprints, lastCheckedAt) after a check
  * run. Takes a mutator so future fields stay in one place.
  */
+/**
+ * Mutates the persisted config (fingerprints, lastCheckedAt) after a check
+ * run. The storage backend serializes concurrent mutations: under Postgres,
+ * the row is locked and updated inside a transaction, so two overlapping
+ * workers can never interleave their mutations.
+ */
 export async function mutateWatch(
   id: string,
   mutate: (w: WatchConfig) => void,
 ): Promise<WatchConfig | null> {
-  const all = await ensureLoaded();
-  const watch = all.find((w) => w.id === id);
-  if (!watch) return null;
-  const idx = all.indexOf(watch);
-  const nextWatch: WatchConfig = JSON.parse(JSON.stringify(watch)) as WatchConfig;
-  mutate(nextWatch);
-  nextWatch.updatedAt = Date.now();
-  all[idx] = nextWatch;
-  await persist(all);
-  cache = all;
-  return nextWatch;
+  return persistence().updateWatch(id, mutate);
 }
 
-/** Test helper: clears the in-memory cache so the file is re-read. */
+/** Test helper: drops in-memory caches so reads reload from storage (like a restart). */
 export function resetWatchStore(): void {
-  cache = null;
+  void persistence().resetCaches();
 }

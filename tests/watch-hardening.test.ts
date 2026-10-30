@@ -163,11 +163,12 @@ beforeEach(() => {
   resetAll();
   resetSchedulerForTests();
 });
-afterEach(() => {
+afterEach(async () => {
   delete process.env.NIGHTSHIFT_API_TOKEN;
   setSsrfResolverForTests(null);
   setWatchDeps({} as never);
-  void stopWatchScheduler();
+  // Awaited so the lease cleanup cannot race the NEXT test's fresh state.
+  await stopWatchScheduler();
 });
 
 describe("watch creation rejects unsafe targets", () => {
