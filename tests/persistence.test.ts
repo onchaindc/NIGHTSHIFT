@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { TaskRecord } from "@/lib/engine/types";
-import { choosePersistence, dataDir, persistence, persistenceMode } from "@/lib/storage";
+import { choosePersistence, dataDir, persistence, persistenceMode, resetPersistenceForTests } from "@/lib/storage";
 import { claimUpdate, isUpdateProcessed, resetSeenUpdates } from "@/lib/telegram/offsets";
 import { getTask, listTasks, resetStore, saveTask } from "@/lib/engine/store";
 import { createWatch, deleteWatch, listWatches, mutateWatch, resetWatchStore } from "@/lib/watch/store";
@@ -56,8 +56,17 @@ const fileBackend = () => {
   return decision.persistence;
 };
 
+/** With a real DATABASE_URL deployed (Neon), every terminal command loads it —
+ * file-backend suites pin the backend explicitly so they stay hermetic. */
+function useFileBackend(): void {
+  delete process.env.NIGHTSHIFT_DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  resetPersistenceForTests();
+}
+
 describe("file backend: task store semantics", () => {
   beforeEach(() => {
+    useFileBackend();
     process.env.NIGHTSHIFT_DATA_DIR = mkdtempSync(path.join(tmpdir(), "ns-persist-"));
     resetStore();
   });
@@ -96,6 +105,7 @@ describe("file backend: task store semantics", () => {
 
 describe("file backend: watch store semantics", () => {
   beforeEach(() => {
+    useFileBackend();
     process.env.NIGHTSHIFT_DATA_DIR = mkdtempSync(path.join(tmpdir(), "ns-persist-"));
     resetWatchStore();
   });
@@ -126,6 +136,7 @@ describe("file backend: watch store semantics", () => {
 
 describe("file backend: telegram claim semantics", () => {
   beforeEach(() => {
+    useFileBackend();
     process.env.NIGHTSHIFT_DATA_DIR = mkdtempSync(path.join(tmpdir(), "ns-persist-"));
   });
 
@@ -149,11 +160,13 @@ describe("file backend: telegram claim semantics", () => {
 
 describe("file backend: named documents and leases", () => {
   beforeEach(() => {
+    useFileBackend();
     process.env.NIGHTSHIFT_DATA_DIR = mkdtempSync(path.join(tmpdir(), "ns-persist-"));
   });
 
   it("write/read/delete round-trip for named state", async () => {
     const backend = persistence();
+    await backend.deleteNamed("p-state");
     await backend.writeNamed("p-state", { pid: 1, ticks: 3 });
     expect(await backend.readNamed<{ pid: number; ticks: number }>("p-state")).toEqual({
       pid: 1,
@@ -197,12 +210,20 @@ describe("file backend: named documents and leases", () => {
 /* happens here either.                                                 */
 /* ------------------------------------------------------------------ */
 
-const dbUrl = process.env.NIGHTSHIFT_DATABASE_URL ?? process.env.DATABASE_URL;
+// setup.ts moves any deployed database URL into the test-only namespace so
+// the default suites stay file-backed; only this block opts into the real DB.
+const dbUrl =
+  process.env.NIGHTSHIFT_TEST_DATABASE_URL ?? process.env.NIGHTSHIFT_DATABASE_URL ?? process.env.DATABASE_URL;
 
 describe.skipIf(!dbUrl)("postgres backend: durability and atomicity", () => {
   const ids = { lock: "", stamp: 0 };
 
   beforeEach(async () => {
+    if (dbUrl) {
+      delete process.env.DATABASE_URL;
+      process.env.NIGHTSHIFT_DATABASE_URL = dbUrl; // pin the database backend explicitly
+    }
+    resetPersistenceForTests();
     delete process.env.NIGHTSHIFT_DATA_DIR;
     const { dbClose, dbMigrate } = await import("@/lib/db/client");
     await dbClose(); // reset the global client singleton for a fresh backend choice
@@ -261,6 +282,15 @@ describe.skipIf(!dbUrl)("postgres backend: durability and atomicity", () => {
     );
     expect(attempts.filter(Boolean)).toHaveLength(1);
     expect(await isUpdateProcessed(ids.stamp)).toBe(true);
+  });
+
+  it("named state round-trips through the database (jsonb in both directions)", async () => {
+    const name = ids.lock.replace("p-pg-lock", "p-pg-kv");
+    const backend = persistence();
+    await backend.writeNamed(name, { pid: 1, ticks: 3 });
+    expect(await backend.readNamed<{ pid: number; ticks: number }>(name)).toEqual({ pid: 1, ticks: 3 });
+    await backend.deleteNamed(name);
+    expect(await backend.readNamed(name)).toBeNull();
   });
 
   it("leases are mutually exclusive and released when done", async () => {
