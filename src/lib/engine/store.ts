@@ -1,87 +1,21 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import type { TaskRecord } from "./types";
+import { persistence } from "@/lib/storage";
 
 /**
- * JSON-file persistence for tasks. One file, one in-memory map, written on
- * every mutation. Single-process by design; swap this module for a database
- * later without touching the engine.
+ * Task persistence facade. Storage is provided by the swappable backend in
+ * src/lib/storage (JSON files locally, durable Postgres in production); this
+ * module keeps only task-specific concerns: display normalization and the
+ * public API the engine and routes depend on. Application code is unchanged.
+ *
+ * Postgres row: ns_tasks(id, created_at, state, data jsonb) — one row per
+ * task, whole-record atomic upsert, sorted reads by creation time.
  */
 
-export function dataDir(): string {
-  // Explicit configuration always wins (self-hosting, tests, custom volumes).
-  if (process.env.NIGHTSHIFT_DATA_DIR) return process.env.NIGHTSHIFT_DATA_DIR;
-  // Vercel functions run on a READ-ONLY filesystem with /tmp as the only
-  // writable path: writing to process.cwd()/.data throws EROFS there and made
-  // every task launch 500. Fall back to /tmp automatically.
-  if (isVercelRuntime()) return "/tmp/nightshift-data";
-  return path.join(process.cwd(), ".data");
-}
+export { dataDir, isVercelRuntime, persistenceMode } from "@/lib/storage";
 
-export function isVercelRuntime(): boolean {
-  return process.env.VERCEL === "1";
-}
-
-/**
- * How the JSON stores obtain durability RIGHT NOW, reported truthfully by
- * /api/status: "env-dir" (explicit persistent directory), "local" (repo-local
- * .data for dev/self-hosted Node), "ephemeral" (Vercel /tmp: writable but not
- * shared between function instances and wiped on cold starts).
- */
-export function persistenceMode(): "env-dir" | "local" | "ephemeral" {
-  if (process.env.NIGHTSHIFT_DATA_DIR) return "env-dir";
-  return isVercelRuntime() ? "ephemeral" : "local";
-}
-
-function dataFile(): string {
-  return path.join(dataDir(), "tasks.json");
-}
-
-const tasks = new Map<string, TaskRecord>();
-let loaded = false;
-
-async function ensureLoaded(): Promise<void> {
-  if (loaded) return;
-  loaded = true;
-  try {
-    const raw = await fs.readFile(dataFile(), "utf8");
-    const parsed = JSON.parse(raw) as TaskRecord[];
-    for (const t of parsed) tasks.set(t.id, t);
-  } catch {
-    // No file yet (first run) — fine.
-  }
-}
-
-async function persist(): Promise<void> {
-  await fs.mkdir(dataDir(), { recursive: true });
-  const tmp = dataFile() + ".tmp";
-  await fs.writeFile(tmp, JSON.stringify([...tasks.values()], null, 2));
-  await fs.rename(tmp, dataFile());
-}
-
-export async function listTasks(): Promise<TaskRecord[]> {
-  await ensureLoaded();
-  const tasksList = [...tasks.values()].sort((a, b) => b.createdAt - a.createdAt);
-  return tasksList.map(normalizeTaskForDisplay);
-}
-
-export async function getTask(id: string): Promise<TaskRecord | null> {
-  await ensureLoaded();
-  const task = tasks.get(id);
-  return task ? normalizeTaskForDisplay(task) : null;
-}
-
-export async function saveTask(record: TaskRecord): Promise<void> {
-  await ensureLoaded();
-  tasks.set(record.id, record);
-  await persist();
-}
-
-/**
- * Old records may still carry an em dash in user-facing event text. Normalize
- * them on read so nothing the user sees reintroduces the character. New events
- * are written em-dash-free by construction.
- */
+/** Old records may still carry an em dash in user-facing text. Normalize
+ * them on read so nothing the user sees reintroduces the character. New
+ * events are written em-dash-free by construction. */
 function normalizeTaskForDisplay(task: TaskRecord): TaskRecord {
   return {
     ...task,
@@ -100,7 +34,24 @@ function cleanText(s: string): string {
   return s.replace(/—/g, ",");
 }
 
+const store = () => persistence();
+
+export async function listTasks(): Promise<TaskRecord[]> {
+  const tasksList = [...(await store().listTasks())].sort((a, b) => b.createdAt - a.createdAt);
+  return tasksList.map((row) => normalizeTaskForDisplay(row.data));
+}
+
+export async function getTask(id: string): Promise<TaskRecord | null> {
+  const task = await store().getTask(id);
+  return task ? normalizeTaskForDisplay(task) : null;
+}
+
+export async function saveTask(record: TaskRecord): Promise<void> {
+  await store().saveTask(record);
+}
+
+/** Test/dev helper: drops in-memory caches so reads reload from the store
+ * (exactly like a process restart). Deletes nothing that is persisted. */
 export function resetStore(): void {
-  tasks.clear();
-  loaded = false;
+  void store().resetCaches();
 }

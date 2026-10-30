@@ -1,7 +1,6 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { listWatches } from "./store";
 import { isVercelRuntime } from "@/lib/engine/store";
+import { persistence } from "@/lib/storage";
 
 /**
  * Whether scheduled monitoring is expected to come from an EXTERNAL trigger
@@ -42,21 +41,6 @@ export function autoCheckEnabled(): boolean {
   return process.env.NIGHTSHIFT_WATCH_AUTOCHECK !== "0";
 }
 
-function stateFile(): string {
-  return path.join(process.env.NIGHTSHIFT_DATA_DIR || path.join(process.cwd(), ".data"), "scheduler-state.json");
-}
-
-function lockFile(): string {
-  return path.join(process.env.NIGHTSHIFT_DATA_DIR || path.join(process.cwd(), ".data"), "scheduler.lock");
-}
-
-async function atomicWrite(file: string, content: string): Promise<void> {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const tmp = file + ".tmp";
-  await fs.writeFile(tmp, content);
-  await fs.rename(tmp, file);
-}
-
 /** Persisted tick state: what status and restarts report. Survives restarts. */
 export interface SchedulerState {
   pid: number;
@@ -82,12 +66,12 @@ let state: SchedulerState = {
 
 async function loadPersistedState(): Promise<void> {
   try {
-    const raw = (JSON.parse(await fs.readFile(stateFile(), "utf8")) as SchedulerState) ?? null;
+    const raw = await persistence().readNamed<SchedulerState>("scheduler");
     if (raw && typeof raw === "object" && typeof raw.pid === "number") {
       state = raw;
     }
-  } catch {
-    // No state yet (first ever run) — fine.
+  } catch (err) {
+    console.error("failed to load scheduler state:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -95,7 +79,7 @@ let stateLoaded = false;
 
 async function persistState(): Promise<void> {
   try {
-    await atomicWrite(stateFile(), JSON.stringify(state, null, 2));
+    await persistence().writeNamed("scheduler", state);
   } catch (err) {
     console.error("failed to persist scheduler state:", err);
   }
@@ -104,6 +88,7 @@ async function persistState(): Promise<void> {
 let running = false;
 let started = false;
 let timer: ReturnType<typeof setInterval> | null = null;
+let catchUpTimeout: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Inter-process duplicate worker guard: a ttl lease acquired by exclusive
@@ -112,37 +97,10 @@ let timer: ReturnType<typeof setInterval> | null = null;
  * Returns release() or null when another live worker holds the lease.
  */
 async function acquireLease(ttlMs: number): Promise<(() => Promise<void>) | null> {
-  const file = lockFile();
-  const lease = JSON.stringify({ pid: process.pid, takenAt: Date.now(), expiresAt: Date.now() + ttlMs });
-  try {
-    const handle = await fs.open(file, "wx");
-    await handle.writeFile(lease, "utf8");
-    await handle.close();
-    return async () => {
-      try {
-        await fs.rm(file);
-      } catch {
-        /* already gone */
-      }
-    };
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "EEXIST") return null; // degrade: no lock readable, proceed (fingerprints keep us honest)
-    try {
-      const raw = JSON.parse(await fs.readFile(file, "utf8")) as { pid: number; takenAt: number; expiresAt: number; working?: boolean };
-      if (Date.now() < raw.expiresAt) return null; // another worker owns this tick
-    } catch {
-      // unreadable lock file: treat as stale and steal it
-    }
-    await atomicWrite(file, lease); // steal expired/unreadable lease
-    return async () => {
-      try {
-        await fs.rm(file);
-      } catch {
-        /* already gone */
-      }
-    };
-  }
+  // The backend serializes the ttl lease: an unexpired lease held by another
+  // worker makes this worker skip the tick; expired leases are stolen
+  // atomically. Fingerprints make any accidental double scan idempotent.
+  return persistence().acquireLease("scheduler", ttlMs);
 }
 
 async function autoScan(): Promise<void> {
@@ -249,8 +207,8 @@ export async function schedulerStatus(): Promise<SchedulerStatus> {
   const now = Date.now();
   let otherWorkerActive = false;
   try {
-    const raw = JSON.parse(await fs.readFile(lockFile(), "utf8")) as { pid: number; expiresAt: number };
-    otherWorkerActive = raw.pid !== process.pid && now < raw.expiresAt;
+    const lease = await persistence().readLease("scheduler");
+    otherWorkerActive = lease ? lease.pid !== process.pid && now < lease.expiresAt : false;
   } catch {
     otherWorkerActive = false;
   }
@@ -321,13 +279,17 @@ export function startWatchScheduler(): void {
   // First scan shortly after boot (catches up on changes noticed during a
   // pause), then every interval.
   timer = setInterval(() => void autoScan(), watchIntervalMs());
-  setTimeout(() => void autoScan(), 15_000).unref?.();
+  const catchUp = setTimeout(() => void autoScan(), 15_000);
+  catchUp.unref?.();
+  catchUpTimeout = catchUp;
   // Never keep the process alive just for this timer.
   if (timer && typeof timer === "object" && "unref" in timer) timer.unref();
 }
 
 /** Test/dev helper: forgets in-memory state so the next call re-reads from disk. */
 export function resetSchedulerForTests(): void {
+  if (catchUpTimeout) clearTimeout(catchUpTimeout); // no stray boot scan leaking into the next test
+  catchUpTimeout = null;
   stateLoaded = false;
   state = { pid: process.pid, startedAt: Date.now(), lastScanStartedAt: null, lastScanCompletedAt: null, lastSuccessAt: null, lastError: null, consecutiveFailures: 0, skippedByOtherWorker: 0 };
 }
@@ -335,11 +297,13 @@ export function resetSchedulerForTests(): void {
 /** Test/dev helper. Releases the lease and clears state visibility. */
 export async function stopWatchScheduler(): Promise<void> {
   if (timer) clearInterval(timer);
+  if (catchUpTimeout) clearTimeout(catchUpTimeout); // no orphan boot scan after a stop
+  catchUpTimeout = null;
   timer = null;
   started = false;
   running = false;
   try {
-    await fs.rm(lockFile());
+    await persistence().clearLease("scheduler");
   } catch {
     /* already gone */
   }
