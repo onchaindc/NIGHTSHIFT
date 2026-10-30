@@ -4,7 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TaskRecord } from "@/lib/engine/types";
 import {
+  ActivityLog,
+  EvidenceList,
+  OutcomeBlock,
   StatusChip,
+  clockOf,
   isOpen,
   isTestRun,
   money,
@@ -72,10 +76,12 @@ function JobConfig({
   job,
   activeGoals,
   onStarted,
+  onLaunched,
 }: {
   job: JobId;
   activeGoals: string[];
   onStarted: () => void;
+  onLaunched?: (task: TaskRecord) => void;
 }) {
   const [goal, setGoal] = useState("");
   const [limit, setLimit] = useState("1.00");
@@ -116,8 +122,9 @@ function JobConfig({
         // The engine blocked this operation honestly (no free capability,
         // missing credentials, unsupported action): surface the named reason.
         setError(body.task.error);
-      } else {
+      } else if (body.task) {
         setGoal("");
+        onLaunched?.(body.task);
         onStarted();
       }
     } catch (err) {
@@ -205,9 +212,9 @@ function JobConfig({
                 },
                 {
                   id: "paid" as const,
-                  title: "Telegraph paid intelligence",
+                  title: "Paid research",
                   price: "up to your ceiling",
-                  blurb: "Purchases an answer on the x402 network. Requires TELEGRAPH_EVM_PRIVATE_KEY (test USDC wallet) in the environment.",
+                  blurb: "Buys an answer on the Telegraph network. Requires the paid-research wallet configured first — check Settings.",
                 },
                 {
                   id: "auto" as const,
@@ -315,6 +322,177 @@ function JobConfig({
 type ReactKeyboardEvent = React.KeyboardEvent<HTMLTextAreaElement>;
 
 /* ------------------------------------------------------------------ */
+/* Launched-operation monitor: stay on this page until the result      */
+/* ------------------------------------------------------------------ */
+
+const TERMINAL_STATES = new Set(["completed", "failed", "blocked", "rejected"]);
+
+/**
+ * Live view of the operation the user just launched on this page. Polls the
+ * real task record, shows the working steps, and when the task completes
+ * renders THE ANSWER prominently right here with its verification evidence,
+ * completion time and spend, so nobody has to dig through a feed for results.
+ */
+function OperationMonitor({
+  taskId,
+  onFinished,
+  onDismiss,
+}: {
+  taskId: string;
+  onFinished: () => void;
+  onDismiss: () => void;
+}) {
+  const [task, setTask] = useState<TaskRecord | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const finishedRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTask(null);
+    setLoadFailed(false);
+    finishedRef.current = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/tasks/${taskId}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const body = (await res.json()) as { task: TaskRecord };
+        if (cancelled) return;
+        setTask(body.task);
+        if (TERMINAL_STATES.has(body.task.state) && !finishedRef.current) {
+          finishedRef.current = true;
+          onFinished();
+        }
+      } catch {
+        if (!cancelled) setLoadFailed(true);
+      }
+    };
+    void poll();
+    const id = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
+  const running = task ? !TERMINAL_STATES.has(task.state) : true;
+  const awaiting = task?.state === "awaiting_approval";
+  const done = task?.state === "completed";
+
+  async function decide(action: "approve" | "reject") {
+    if (task && !TERMINAL_STATES.has(task.state)) {
+      await fetch(`/api/tasks/${task.id}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      }).catch(() => undefined);
+    }
+  }
+
+  return (
+    <section
+      aria-label="Launched operation"
+      className={`rounded-lg border bg-panel ${done ? "border-teal/40" : awaiting ? "border-gold/50" : "border-edge"}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-edge px-4 py-3 sm:px-5">
+        <div className="flex items-center gap-3">
+          {task ? <StatusChip state={task.state} /> : (
+            <span className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[11px] font-medium text-ink-faint">
+              Starting…
+            </span>
+          )}
+          <span className="tabular text-[11px] text-ink-faint">{task ? task.goal : "your operation"}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          {task && (
+            <Link href={`/tasks/${task.id}`} className="text-[11.5px] font-medium text-blue hover:underline underline-offset-2">
+              Open full history →
+            </Link>
+          )}
+          {finishedRef.current && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="min-h-8 rounded-md border border-edge px-2.5 py-1 text-[11.5px] text-ink-soft transition-colors hover:border-edge-strong hover:text-ink"
+            >
+              Close
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="px-4 py-4 sm:px-5">
+        {loadFailed && (
+          <p role="alert" className="rounded-md border border-risk/40 bg-risk/5 px-3.5 py-2.5 text-[13px] text-risk">
+            Lost contact with the server while tracking this operation. It keeps running; reopen it from History.
+          </p>
+        )}
+
+        {!task && !loadFailed && (
+          <div className="space-y-2" aria-live="polite">
+            <div className="h-4 w-2/3 rounded bg-panel-2 motion-safe:animate-pulse" />
+            <div className="h-4 w-1/2 rounded bg-panel-2 motion-safe:animate-pulse" />
+          </div>
+        )}
+
+        {task && awaiting && (
+          <>
+            <p className="text-[13px] leading-relaxed text-ink-soft">
+              The plan is ready and waits for your decision before anything is spent.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void decide("approve")}
+                className="min-h-9 rounded-md border border-teal/40 bg-teal/15 px-3.5 py-1.5 text-[12.5px] font-medium text-teal transition-colors hover:bg-teal/25"
+              >
+                Approve and run
+              </button>
+              <button
+                type="button"
+                onClick={() => void decide("reject")}
+                className="min-h-9 rounded-md border border-edge px-3.5 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:border-edge-strong hover:text-ink"
+              >
+                Reject
+              </button>
+            </div>
+          </>
+        )}
+
+        {task && running && !awaiting && (
+          <div className="space-y-3">
+            <p className="text-[12px] text-ink-faint" aria-live="polite">
+              Working — updates appear here automatically.
+            </p>
+            <div className="max-h-56 overflow-y-auto rounded-md border border-edge bg-panel-2 px-3.5 py-2">
+              <ActivityLog events={task.events.slice(-8)} />
+            </div>
+          </div>
+        )}
+
+        {task && TERMINAL_STATES.has(task.state) && (
+          <div className="space-y-4">
+            <OutcomeBlock task={task} />
+
+            {done && task.result && (
+              <>
+                <div>
+                  <p className="x-label mb-1">Evidence</p>
+                  <EvidenceList evidence={task.result.evidence} />
+                </div>
+                <p className="tabular text-[11.5px] text-ink-faint">
+                  Completed {clockOf(task.result.completedAt)} · spent {money(task.spend.spentUsdCents)} of the {money(task.spend.limitUsdCents)} ceiling · verified against the recorded evidence above
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Page: launcher + current operations                                 */
 /* ------------------------------------------------------------------ */
 
@@ -322,6 +500,10 @@ export default function Operations() {
   const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [job, setJob] = useState<JobId>("research");
+  // The operation the user launched on THIS page; the monitor below keeps it
+  // visible here until the result shows, instead of sending people hunting
+  // through the dashboard feed.
+  const [lockedTaskId, setLockedTaskId] = useState<string | null>(null);
   const busy = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -400,8 +582,22 @@ export default function Operations() {
           job={job}
           onStarted={refresh}
           activeGoals={active.map((t) => t.goal)}
+          onLaunched={(t) => {
+            setLockedTaskId(t.id);
+            if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
         />
       </div>
+
+      {lockedTaskId && (
+        <div className="mt-5">
+          <OperationMonitor
+            taskId={lockedTaskId}
+            onFinished={refresh}
+            onDismiss={() => setLockedTaskId(null)}
+          />
+        </div>
+      )}
 
       {tasks !== null && loadFailed && (
         <p aria-live="assertive" role="alert" className="mt-5 rounded-md border border-risk/40 bg-risk/5 px-4 py-3 text-[13px] text-risk">

@@ -471,9 +471,9 @@ export default function Watch() {
             </>
           )
         ) : null}{" "}
-        Automatic checks run every {intervalLabel} while the server is running, and they are always free (they read
-        sources and update fingerprints; they never pay anything). When this server stops, monitoring pauses with it:
-        the list shows when each source was last really checked, and a restart resumes without repeating old changes.
+        Automatic checks run every {intervalLabel} while the server is running. They are always free and never pay
+        anything. When the server stops, monitoring pauses with it and resumes on restart without repeating old
+        changes.
       </p>
 
       {watchesFailed && (

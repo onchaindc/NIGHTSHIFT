@@ -1,6 +1,7 @@
 "use client";
 
 import type { ExecutionEvent, TaskRecord } from "@/lib/engine/types";
+import { humanize } from "@/lib/ui/humanize";
 
 /**
  * Shared task UI: status vocabulary, evidence, activity log, outcome blocks.
@@ -145,9 +146,27 @@ export function EvidenceList({ evidence }: { evidence: NonNullable<TaskRecord["r
               {ev.kind === "telegraph_receipt" && "Payment receipt"}
               {ev.kind === "on_chain_settlement" && "Settlement on chain"}
               {ev.kind === "chain_gas_crosscheck" && "Independent check"}
+              {ev.kind === "chain_read" && "Live chain read"}
+              {ev.kind === "public_source_lookup" && "Public source"}
               {ev.kind === "watch_finding" && `Source read: ${ev.sourceLabel}`}
             </td>
             <td className="break-all py-1.5 tabular text-[11px] leading-relaxed text-ink-faint">
+              {ev.kind === "public_source_lookup" && (
+                <>
+                  {ev.asset} price {money(ev.priceUsd)}, read {new Date(ev.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} from{" "}
+                  <a href={ev.url} target="_blank" rel="noopener noreferrer" className="text-blue hover:underline underline-offset-2">
+                    {ev.url.replace(/^https:\/\//, "").split("?")[0]}
+                  </a>
+                </>
+              )}
+              {ev.kind === "chain_read" && (
+                <>
+                  {ev.chain} gas {ev.gasPriceGwei.toFixed(6)} gwei from{" "}
+                  <a href={ev.rpcUrl} target="_blank" rel="noopener noreferrer" className="text-blue hover:underline underline-offset-2">
+                    {ev.rpcUrl.replace(/^https:\/\//, "")}
+                  </a>
+                </>
+              )}
               {ev.kind === "telegraph_signal" && ev.signalHash}
               {ev.kind === "telegraph_receipt" && (
                 <>
@@ -192,7 +211,7 @@ export function ActivityLog({ events }: { events: ExecutionEvent[] }) {
           <span className="mt-0.5 shrink-0 tabular text-[10.5px] text-ink-faint">
             {clockOf(e.ts)}
           </span>
-          <span className="text-[12.5px] leading-snug text-ink-soft">{e.message}</span>
+          <span className="text-[12.5px] leading-snug text-ink-soft">{humanize(e.message)}</span>
         </li>
       ))}
     </ol>
@@ -202,11 +221,17 @@ export function ActivityLog({ events }: { events: ExecutionEvent[] }) {
 export function OutcomeBlock({ task }: { task: TaskRecord }) {
   const done = task.state === "completed" && task.result;
   if (done) {
+    // Free answers carry real content on their first line (gas figure, price);
+    // paid answers open with a miner attribution line that is not the answer.
+    const isFreeResult = task.result!.evidence.some(
+      (ev) => ev.kind === "chain_read" || ev.kind === "public_source_lookup",
+    );
+    const summaryLines = task.result!.summary.split("\n");
     return (
       <div className="rounded-md border border-teal/30 bg-teal/5 p-4">
-        <p className="mb-1.5 text-[13px] text-ink-soft">{task.result!.summary.split("\n")[0]}</p>
+        <p className="mb-1.5 text-[13px] text-ink-soft">{humanize(summaryLines[0])}</p>
         <pre className="whitespace-pre-wrap tabular text-[12.5px] leading-relaxed text-ink">
-          {compactAnswer(task.result!.summary)}
+          {humanize(isFreeResult ? summaryLines.slice(1).join("\n") || "" : compactAnswer(task.result!.summary))}
         </pre>
       </div>
     );
@@ -215,7 +240,7 @@ export function OutcomeBlock({ task }: { task: TaskRecord }) {
     return (
       <div className="rounded-md border border-risk/30 bg-risk/5 p-4">
         <p className="text-[14px] leading-relaxed text-ink">The goal was not met, so nothing is claimed.</p>
-        {task.error && <p className="mt-1.5 text-[13px] leading-relaxed text-ink-soft">{cleanReason(task.error)}</p>}
+        {task.error && <p className="mt-1.5 text-[13px] leading-relaxed text-ink-soft">{humanize(cleanReason(task.error))}</p>}
       </div>
     );
   }
@@ -223,7 +248,7 @@ export function OutcomeBlock({ task }: { task: TaskRecord }) {
     return (
       <div className="rounded-md border border-risk/30 bg-risk/5 p-4">
         <p className="text-[14px] leading-relaxed text-ink">Stopped before it could finish. Nothing was charged.</p>
-        {task.error && <p className="mt-1.5 text-[13px] leading-relaxed text-ink-soft">{cleanReason(task.error)}</p>}
+        {task.error && <p className="mt-1.5 text-[13px] leading-relaxed text-ink-soft">{humanize(cleanReason(task.error))}</p>}
       </div>
     );
   }

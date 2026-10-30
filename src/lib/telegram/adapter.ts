@@ -21,6 +21,7 @@ import type { EngineDeps } from "@/lib/engine/engine";
 import { getTask, listTasks } from "@/lib/engine/store";
 import { missingPaidCredentials } from "@/lib/telegraph/client";
 import { claimUpdate } from "./offsets";
+import { humanize } from "@/lib/ui/humanize";
 import type { TaskRecord } from "@/lib/engine/types";
 
 const API_BASE = "https://api.telegram.org";
@@ -97,8 +98,8 @@ function taskCard(t: TaskRecord): string {
     `Spend: $${spent} / $${limit} limit`,
   ];
   const last = t.events[t.events.length - 1];
-  if (last) lines.push(`Last event: ${last.message}`);
-  if (t.error) lines.push(`Error: ${t.error}`);
+  if (last) lines.push(`Last event: ${humanize(last.message)}`);
+  if (t.error) lines.push(`Error: ${humanize(t.error)}`);
   if (t.state === "awaiting_approval") lines.push("→ use /approve " + shortId(t.id) + " or /reject " + shortId(t.id));
   return lines.join("\n");
 }
@@ -123,11 +124,12 @@ function formatFinal(t: TaskRecord): string {
         ? "✅ Completed: preparation material produced. The action itself was NOT executed by NIGHTSHIFT, and external execution remains unverified."
         : "✅ Completed: informational answer delivered, verified against recorded evidence. No external action was performed or implied.",
     );
-  } else {
-    lines.push(`${t.state.toUpperCase()}: ${t.error ?? ""}`.trim());
+  }
+  if (t.state !== "completed") {
+    lines.push(`${t.state.toUpperCase()}: ${humanize(t.error ?? "")}`.trim());
     // Failed or partial work reports its actual state, spend and unresolved
     // criteria rather than a generic success line.
-    const unmet = t.events.filter((e) => e.type === "criteria_failed").map((e) => `- ${e.message}`);
+    const unmet = t.events.filter((e) => e.type === "criteria_failed").map((e) => `- ${humanize(e.message)}`);
     if (unmet.length) {
       lines.push("");
       lines.push("Unresolved criteria:");
@@ -209,7 +211,7 @@ async function runWithProgress(
           if (sentEventIds.has(e.id)) continue;
           sentEventIds.add(e.id);
           const icon = EVENT_ICON[e.type] ?? "·";
-          await send(chatId, `${icon} ${e.message}`.slice(0, 3800));
+          await send(chatId, humanize(`${icon} ${e.message}`).slice(0, 3800));
         }
         if (t.state === "completed" || t.state === "failed" || t.state === "blocked") break;
       }
