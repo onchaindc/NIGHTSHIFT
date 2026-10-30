@@ -140,7 +140,7 @@ export default function Approvals() {
                   )}
                   {t.events.some((e) => e.type === "criteria_defined") && (
                     <p className="mt-2 text-[11.5px] text-ink-faint">
-                      Success criteria are fixed by the planner before execution; see the operation detail for the full list.
+                      The outcome checks were fixed before this plan was started; the full list is in the operation detail.
                     </p>
                   )}
                   <div className="mt-3 flex gap-2">

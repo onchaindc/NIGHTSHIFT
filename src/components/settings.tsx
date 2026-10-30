@@ -61,19 +61,19 @@ export default function Settings() {
             <ul className="divide-y divide-edge">
               {[
                 {
-                  name: "Telegraph paid intelligence",
+                  name: "Paid research",
                   configured: status.services.telegraph,
-                  note: "Buys answers over x402 with an auditable receipt. Needs TELEGRAPH_EVM_PRIVATE_KEY in the environment (Settings → Environment).",
+                  note: "Buys answers on the Telegraph network with an auditable receipt. Setup: add the paid-research wallet key (TELEGRAPH_EVM_PRIVATE_KEY) to the environment.",
                 },
                 {
                   name: "Telegram bot",
                   configured: status.services.telegram,
-                  note: "The same engine on @nightshiftagent_bot. Needs TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET.",
+                  note: "Runs the same operations over @nightshiftagent_bot. Setup: add the bot token (TELEGRAM_BOT_TOKEN) and the webhook secret (TELEGRAM_WEBHOOK_SECRET) to the environment.",
                 },
                 {
-                  name: "Chain RPC (read-only)",
+                  name: "Chain reads (read-only)",
                   configured: status.services.chainRpc,
-                  note: "Public Base Sepolia RPC by default; override with NIGHTSHIFT_CHAIN_RPC_URL. Used for settlement checks and independent reads only.",
+                  note: "Reads public chain data for verification. Base Sepolia RPC by default; override with NIGHTSHIFT_CHAIN_RPC_URL. Never signs anything.",
                 },
               ].map((s) => (
                 <li key={s.name} className="flex items-start justify-between gap-4 px-4 py-3">

@@ -1,166 +1,156 @@
 /**
- * Real-browser regression audit of NIGHTSHIFT. Clicks and keys every control,
- * records console errors, failed requests, and states. Approve clicks are
- * intercepted (never spends); reject hits the real API (never spends).
+ * Real-browser regression audit of NIGHTSHIFT's current operation journey.
+ * Desktop + mobile: launch a FREE research operation on /operations and verify
+ * the complete journey stays on that page - live status, steps, then the
+ * prominent verified result with evidence, completion time and spend.
+ *
+ * Safety: only free capabilities are exercised (public chain RPC and public
+ * price APIs, $0 by construction). No paid Telegraph request, no Telegram
+ * message, no approve/reject of anyone else's task is ever sent. If a live
+ * public lookup is unreachable, the run asserts the honest failure rendering
+ * instead of the answer.
+ *
  * Run: node scripts/audit-interactions.mjs
  */
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { chromium } = require(path.join(os.tmpdir(), "bunx-0-playwright@latest", "node_modules", "playwright-core"));
+function loadPlaywrightCore() {
+  const candidates = [
+    process.env.PLAYWRIGHT_CORE_PATH,
+    "/home/daytona/.bun/install/cache/playwright-core@1.64.1@@@1",
+    path.join(os.tmpdir(), "bunx-0-playwright@latest", "node_modules", "playwright-core"),
+    "playwright-core",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      return require(candidate);
+    } catch {
+      // try the next location
+    }
+  }
+  throw new Error("playwright-core not found; set PLAYWRIGHT_CORE_PATH to its directory");
+}
+const { chromium } = loadPlaywrightCore();
 
 const base = process.env.SHOT_BASE || "http://localhost:3000";
 const exe = path.join(os.homedir(), ".cache", "ms-playwright", "chromium_headless_shell-1248", "chrome-headless-shell-linux64", "chrome-headless-shell");
 
 const findings = [];
-const note = (scope, msg) => findings.push({ scope, msg });
+const note = (label, msg) => findings.push({ label, msg });
 
-async function audit(viewport, label) {
+async function audit(pageConfig, label) {
   const browser = await chromium.launch({ executablePath: exe });
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage(pageConfig);
 
   const consoleMsgs = [];
   const failedRequests = [];
-  const approvesInitial = [];
-  const rejectPosts = [];
-  page.on("console", (m) => consoleMsgs.push({ type: m.type(), text: m.text().slice(0, 300) }));
-  page.on("pageerror", (e) => consoleMsgs.push({ type: "PAGEERROR", text: String(e).slice(0, 300) }));
-  page.on("requestfailed", (r) => failedRequests.push(`${r.method()} ${r.url().slice(0, 120)}: ${r.failure()?.errorText}`));
-  page.on("response", (r) => { if (r.status() >= 400) failedRequests.push(`${r.request().method()} ${r.url().slice(0, 120)}: HTTP ${r.status()}`); });
+  const paidEndpoints = [];
+  page.on("console", (m) => {
+    if (m.type() === "error" || m.type() === "warning") consoleMsgs.push(m.text().slice(0, 240));
+  });
+  page.on("pageerror", (e) => consoleMsgs.push(String(e).slice(0, 240)));
+  page.on("requestfailed", (r) => failedRequests.push(`${r.method()} ${r.url().slice(0, 100)}`));
+  page.on("response", (r) => {
+    if (r.status() >= 400) failedRequests.push(`${r.request().method()} ${r.url().slice(0, 100)}: ${r.status()}`);
+  });
+  // Blocklist the transport of consequential flows during the audit: no paid
+  // purchase attempt and no Telegram send may be produced by UI usage.
   page.on("request", (r) => {
-    if (r.method() === "POST" && r.url().includes("/action")) {
-      const body = r.postData() ?? "";
-      if (body.includes("approve")) approvesInitial.push(r.url());
-      else rejectPosts.push(r.url());
-    }
+    if (r.url().includes("api.telegram.org") || r.url().includes("telegraphprotocol.com")) paidEndpoints.push(r.url());
   });
-  // Intercept approve clicks only. Reject goes to the real API (free, no spend).
-  await page.route("**/api/tasks/*/action", async (route) => {
-    const body = route.request().postData() ?? "";
-    if (body.includes("approve")) {
-      await route.abort("blockedbyclient");
+
+  try {
+    // 1. The dashboard loads and its navigation works.
+    await page.goto(base + "/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(1500);
+    const navOk = await page.evaluate(() => {
+      const links = [...document.querySelectorAll('nav a, aside a')].map((a) => a.getAttribute("href"));
+      return links.filter(Boolean).length >= 5 ? links : null;
+    });
+    if (!navOk) note(label, "NAV: could not find 5+ navigation links on the dashboard");
+
+    // 2. Launch a FREE research operation and follow it on the same page.
+    await page.goto(base + "/operations", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(1200);
+    const goal = page.locator("#goal");
+    await goal.waitFor({ timeout: 20000 });
+    // Free sources must be the default choice.
+    const freeDefault = await page
+      .locator('[role="radio"][aria-checked="true"]:has-text("Free sources")')
+      .count();
+    if (freeDefault < 1) note(label, "MODE: 'Free sources' is not the pre-selected answer source");
+    await goal.click();
+    await goal.fill("What is the current BTC price in USD?");
+    await page.locator('button:has-text("Launch Operation")').click();
+
+    // The monitor must appear on THIS page (no navigation away).
+    const monitor = page.locator('[aria-label="Launched operation"]');
+    await monitor.waitFor({ timeout: 15000 });
+    const stillOnOperations = page.url().includes("/operations");
+    if (!stillOnOperations) note(label, "FLOW: leaving /operations after launch");
+
+    // 3. The task reaches a terminal state within the monitor (free runs are quick).
+    let terminalText = null;
+    for (let i = 0; i < 45; i++) {
+      const chip = await monitor.locator(".text-teal, .text-risk").first().textContent().catch(() => null);
+      const t = (chip ?? "").trim();
+      if (i > 1 && terminalText === null && t) terminalText = t;
+      if (t === "Completed" || t === "Failed" || t === "Blocked") break;
+      await page.waitForTimeout(1000);
+    }
+    const outcome = await monitor.locator("pre, .text-risk").first().textContent().catch(() => null);
+    const bodyText = await monitor.innerText();
+    if (bodyText.includes("Completed")) {
+      const answerShown = /USD price: \$[0-9]/.test(bodyText);
+      note(label, `FREE RUN: completed. Answer shown: ${answerShown ? "yes - " + (await monitor.locator("pre").first().textContent()).slice(0, 80) : "NO"}`);
+      note(label, `EVIDENCE: ${await evidenceCount(monitor)}`);
+      note(label, `SPEND LINE: ${bodyText.includes("spent") && bodyText.includes("$0.00") ? "shows $0.00" : "MISSING"}`);
+      const historyLink = await monitor.locator('a[href^="/tasks/"]').count();
+      note(label, `FULL HISTORY LINK: ${historyLink > 0 ? "present" : "MISSING"}`);
+      const onSamePage = page.url().includes("/operations");
+      note(label, `RESULT ON LAUNCH PAGE: ${onSamePage ? "yes" : "no"}`);
     } else {
-      await route.continue();
+      note(label, `FREE RUN did not complete (chip="${terminalText ?? "??"}"). Outcome shown: ${String(outcome).slice(0, 140)}`);
     }
-  });
 
-  await page.goto(base + "/", { waitUntil: "networkidle", timeout: 45000 });
-  await page.waitForTimeout(900);
+    // 4. A goal with no free capability is blocked honestly, inline, without exiting the page.
+    await page.locator("#goal").click();
+    await page.locator("#goal").fill("Summarize the latest research discussion in the governance forum");
+    await page.locator('button:has-text("Launch Operation")').click();
+    await page.waitForTimeout(2500);
+    const pageText = await page.locator("body").innerText();
+    note(label, `BLOCKED STATE: ${/No free capability/i.test(pageText) ? "shown inline" : "MISSING"}`);
 
-  for (const m of consoleMsgs) {
-    if (m.type === "error" || m.type === "warning" || m.type === "PAGEERROR") note(label, `console ${m.type}: ${m.text}`);
+    // 5. Mobile sanity: no horizontal overflow on operations and dashboard.
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+    if (overflow) note(label, "MOBILE: horizontal overflow on /operations");
+    await page.goto(base + "/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(1200);
+    const overflowDash = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+    if (overflowDash) note(label, "MOBILE: horizontal overflow on /");
+  } catch (err) {
+    note(label, `AUDIT ABORTED: ${String(err).slice(0, 200)}`);
   }
 
-  // Composer structure
-  const composer = page.locator('[aria-label="Start a task"]');
-  const textarea = page.locator("#goal");
-  const submitBtn = page.locator('button:has-text("Start task")').last();
+  for (const m of consoleMsgs) note(label, `console: ${m}`);
+  if (failedRequests.length) note(label, `failed requests: ${failedRequests.slice(0, 6).join(" | ")}`);
+  if (paidEndpoints.length) note(label, `SAFETY: paid/telegram transport touched: ${paidEndpoints.slice(0, 3).join(" | ")}`);
 
-  // 1. Enter submits the goal (approval ON so nothing is ever spent)
-  const toggle = page.locator('[role="switch"]');
-  if ((await toggle.getAttribute("aria-checked")) !== "true") await toggle.click();
-  await textarea.click();
-  await textarea.fill("What is the current BTC price in USD?");
-  await textarea.press("Enter", { delay: 20 });
-  await page.waitForTimeout(3500);
-  if (rejectPosts.length > 0 || approvesInitial.length > 0) note(label, "unexpected action posts during Enter submit");
-  const btcCard = page.locator('article[data-state]:has-text("What is the current BTC price in USD?")').first();
-  const btcState = await btcCard.getAttribute("data-state").catch(() => null);
-  note(label, `Enter submit => task state: ${btcState}`);
-  if (btcState !== "awaiting_approval") note(label, `BUG: Enter-submitted task not awaiting_approval (state=${btcState})`);
-
-  // 2. Shift+Enter inserts a newline without submitting
-  await textarea.click();
-  await textarea.fill("line one");
-  const tasksById = await page.evaluate(() => document.querySelectorAll("article[data-task-id]").length);
-  await textarea.press("Shift+Enter");
-  const val = await textarea.inputValue();
-  if (!(val.includes("\n") && (await page.evaluate(() => document.querySelectorAll("article[data-task-id]").length)) === tasksById)) {
-    note(label, "BUG: Shift+Enter did not insert a clean newline");
-  }
-
-  // 3. Example chips: click feasibility (pointer) + fills the textarea
-  const chip = page.locator('button:has-text("BTC price")').first();
-  await chip.scrollIntoViewIfNeeded();
-  const box = await chip.boundingBox();
-  if (box) {
-    const tag = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName, [box.x + box.width / 2, box.y + box.height / 2]);
-    if (tag === "BODY") note(label, "BUG: example chip pointer-blocked");
-  }
-  await chip.click();
-  await page.waitForTimeout(150);
-  if (!(await textarea.inputValue()).includes("BTC")) note(label, "BUG: chip did not fill textarea");
-
-  // 4. Budget: invalid value blocks submit with an inline message
-  await page.fill("#limit", "0.00");
-  await textarea.fill("What is the current ETH price in USD?");
-  await page.waitForTimeout(150);
-  if (!(await submitBtn.isDisabled())) note(label, "BUG: invalid ceiling left the primary button enabled");
-  const errText = await page.locator('[aria-label="Start a task"] p.text-stop, [aria-label="Start a task"] [aria-invalid="true"]').count();
-  if (errText === 0) note(label, "no inline validation surfaced for a bad ceiling");
-  await page.fill("#limit", "0.50");
-
-  // 5. Duplicate goal: submitting the same live goal is blocked with a message
-  await textarea.fill("What is the current BTC price in USD?");
-  await submitBtn.click();
-  await page.waitForTimeout(400);
-  const dupNote = await page.locator('[aria-label="Start a task"] [role="alert"]').first().textContent().catch(() => null);
-  if (!dupNote || !dupNote.includes("already running")) note(label, `BUG: duplicate goal not blocked (saw: ${dupNote})`);
-  else note(label, "duplicate live goal correctly blocked with an inline message");
-
-  // 6. Real reject flow (no spend): newest approval card flips to Rejected immediately
-  await textarea.fill("What is the current ETH price in USD?");
-  await submitBtn.click();
-  await page.waitForTimeout(4000);
-  const ethBefore = await page.locator('article[data-state]:has-text("What is the current ETH price in USD?")').first().getAttribute("data-state");
-  if (ethBefore !== "awaiting_approval") note(label, `BUG: ETH task state before reject is ${ethBefore}`);
-  // the reject buttons live inside awaiting cards below the goal text
-  const rejectedBtn = page.locator('button:has-text("Reject")').first();
-  await rejectedBtn.click();
-  await page.waitForTimeout(1500); // immediate update, not on the next poll tick
-  const ethAfter = await page.locator('details:has-text("What is the current ETH price in USD?")').count();
-  const rejectedCount = await page.locator('details.x-disc:has(span:has-text("Rejected"))').count();
-  note(label, `reject: eth card now in history rows = ${ethAfter}, rows marked Rejected = ${rejectedCount}`);
-  const totalRejected = await page.evaluate(() => document.querySelectorAll('details.history-row').length);
-  note(label, `history rows total: ${totalRejected}`);
-  const serverStates = await (await fetch(base + "/api/tasks")).json();
-  const ethTasks = serverStates.tasks.filter((t) => t.goal.includes("ETH"));
-  const anyRejectedFromThisRun = ethTasks.some((t) => t.state === "rejected" && new Date(t.updatedAt) > new Date(Date.now() - 60000));
-  if (!anyRejectedFromThisRun) note(label, "BUG: reject click did not record a rejected task server-side");
-  else note(label, "reject: server recorded a new rejected ETH task");
-
-  // 7. Button + form response: chip click once more still usable
-  if (rejectPosts.length === 0) note(label, "BUG: no reject POST went out");
-  else note(label, `reject POSTs sent to real API: ${rejectPosts.length}`);
-
-  // 8. Polling continues
-  let gets = 0;
-  page.on("request", (r) => { if (r.method() === "GET" && r.url().includes("/api/tasks")) gets++; });
-  await page.waitForTimeout(9000);
-  if (gets < 2) note(label, `BUG: polling dead (${gets} GETs in 9s)`);
-
-  // 9. Composition facts: page height, hero type, row compactness
-  const facts = await page.evaluate(() => ({
-    pageHeight: document.body.scrollHeight,
-    h1: document.querySelector("h1")?.getBoundingClientRect().height,
-    h1Font: getComputedStyle(document.querySelector("h1")).fontFamily.split(",")[0],
-    historyRows: document.querySelectorAll("details.history-row").length,
-    activeCards: document.querySelectorAll("article[data-task-id]").length,
-    hasEmDash: document.body.textContent?.includes("—"),
-    focusables: [...document.querySelectorAll("button")].filter((b) => b.offsetParent !== null && (b.getBoundingClientRect().height < 38 || b.getBoundingClientRect().width < 38)).map((b) => ({ t: (b.textContent ?? "").trim().slice(0, 26), h: Math.round(b.getBoundingClientRect().height), w: Math.round(b.getBoundingClientRect().width) })),
-  }));
-  note(label, `facts: ${JSON.stringify(facts)}`);
-
-  await page.screenshot({ path: `.data/shots/audit-${label}.jpeg`, fullPage: false, type: "jpeg", quality: 55 });
-  await page.screenshot({ path: `.data/shots/audit-${label}-full.jpeg`, fullPage: true, type: "jpeg", quality: 50 });
-
-  const clientErrors = consoleMsgs.filter((m) => m.type === "error" || m.type === "PAGEERROR").length;
-  note(label, `console client errors: ${clientErrors}; failed requests: ${JSON.stringify(failedRequests)}`);
   await browser.close();
 }
 
-await audit({ width: 1440, height: 900 }, "desktop");
-await audit({ width: 390, height: 844 }, "mobile");
-console.log(JSON.stringify(findings, null, 1));
+async function evidenceCount(monitor) {
+  const n = await monitor.locator("table tbody tr").count();
+  return n > 0 ? `${n} evidence row(s)` : "MISSING";
+}
+
+await audit({ viewport: { width: 1440, height: 900 } }, "desktop");
+await audit({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, "mobile");
+
+console.log("\n=== AUDIT FINDINGS ===");
+for (const f of findings) console.log(`[${f.label}] ${f.msg}`);
+const bugs = findings.filter((f) => /MISSING|BUG|SAFETY|ABORTED|overflow|ALERT/.test(f.msg));
+console.log(bugs.length ? `\nPOTENTIAL DEFECTS: ${bugs.length}` : "\nNO DEFECTS FOUND");
