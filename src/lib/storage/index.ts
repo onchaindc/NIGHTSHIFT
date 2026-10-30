@@ -498,7 +498,10 @@ class PostgresPersistence implements Persistence {
     await this.ready();
     const client = dbSql();
     const rows = await client<Record<string, unknown>[]>`select data from ns_kv where name = ${name}`;
-    return rows.length > 0 ? (rows[0].data as T) : null;
+    if (rows.length === 0) return null;
+    const data = rows[0].data;
+    // The column is jsonb; if a driver version hands it back as text, decode it.
+    return typeof data === "string" ? (JSON.parse(data) as T) : (data as T);
   }
   async writeNamed<T>(name: string, value: T): Promise<void> {
     await this.ready();
@@ -584,4 +587,12 @@ export function choosePersistence(): StorageDecision {
 
 export function persistence(): Persistence {
   return choosePersistence().persistence;
+}
+
+/**
+ * Test hook: forgets the chosen backend so the next persistence() re-decides.
+ * Lets tests pin a backend by manipulating the selection env vars first.
+ */
+export function resetPersistenceForTests(): void {
+  g2.__nightshiftPersistence = undefined;
 }
