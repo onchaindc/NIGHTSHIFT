@@ -58,9 +58,20 @@ export async function markUpdateProcessed(updateId: number | undefined): Promise
   await persist();
 }
 
-export function resetSeenUpdates(): void {
+/**
+ * Test/dev helper: forgets in-memory state AND the persisted seen-set file, so
+ * the next claim starts clean. Resetting only memory is insufficient: without
+ * the fresh reload the next claim re-reads the stale file and would silently
+ * treat every previously used update id as already processed.
+ */
+export async function resetSeenUpdates(): Promise<void> {
   seen.clear();
   loaded = false;
+  try {
+    await fs.rm(file(), { force: true });
+  } catch {
+    /* already gone */
+  }
 }
 
 /**

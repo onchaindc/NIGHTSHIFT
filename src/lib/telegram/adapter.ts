@@ -68,22 +68,21 @@ export interface TgUpdate {
   message?: TgMessage;
 }
 
-/* ------------------------------------------------------------------ */
-
-const HELP = [
-  "NIGHTSHIFT, until the work is done.",
-  "",
-  "Commands:",
-  "/goal <text> submit a goal for autonomous execution",
-  "/tasks list your recent goals",
-  "/status <id-prefix> show one task in detail",
-  "/approve <id-prefix> approve a plan awaiting approval",
-  "/reject <id-prefix> reject a plan awaiting approval",
-  "",
-  "Every purchase is checked against the task's spending limit and the",
-  "network's actual 402 price before any payment is signed. Approval-gated",
-  "goals stay awaiting_approval until you approve them here (or in the web app).",
-].join("\n");
+/* ------------------------------------------------------------------ */  const HELP = [
+    "NIGHTSHIFT, until the work is done.",
+    "",
+    "Commands:",
+    "/goal <text> research for FREE (public chain RPC + public price APIs); questions with no free capability are refused, never paid for silently",
+    "/paid <text> EXPLICIT paid research via Telegraph (requires TELEGRAPH_EVM_PRIVATE_KEY); the plan waits for your /approve before anything is spent",
+    "/tasks list your recent goals",
+    "/status <id-prefix> show one task in detail",
+    "/approve <id-prefix> approve a plan awaiting approval",
+    "/reject <id-prefix> reject a plan awaiting approval",
+    "",
+    "Every purchase is checked against the task's spending limit and the",
+    "network's actual 402 price before any payment is signed. Nothing is",
+    "ever switched from free to paid behind your back.",
+  ].join("\n");
 
 function shortId(id: string): string {
   return id.slice(0, 8);
@@ -263,7 +262,7 @@ export async function handleUpdate(update: TgUpdate, deps: TelegramDeps = {}): P
 
   const telegraphMissing = missingPaidCredentials();
   const credentialNote = telegraphMissing.length
-    ? `\n\n⚠️ Paid intelligence is currently unavailable: ${telegraphMissing.join(", ")} is not configured on the server. Goals will be blocked at the purchase step (nothing is charged).`
+    ? `\n\n⚠️ Paid research is currently unavailable: ${telegraphMissing.join(", ")} is not configured on the server. Free research still works; explicit /paid goals would block at the purchase step (nothing is charged).`
     : "";
 
   switch (command) {
@@ -285,6 +284,10 @@ export async function handleUpdate(update: TgUpdate, deps: TelegramDeps = {}): P
             spendLimitUsdCents: defaultSpendLimit(),
             requiresApproval: false,
             origin: { source: "telegram", actor: sender },
+            // /goal is FREE by default, matching the web UI. A question with
+            // no free capability is refused at creation; it can never become
+            // a silent paid purchase.
+            mode: "free",
           },
           engine,
         );
@@ -299,13 +302,40 @@ export async function handleUpdate(update: TgUpdate, deps: TelegramDeps = {}): P
         return;
       }
       if (task.state === "blocked") {
-        // Execution goals arrive here already stopped: state the limitation
-        // plainly instead of pretending to "work on it".
+        // Execution goals and goals without a free capability arrive here
+        // already stopped: state the limitation plainly (blocked tasks never
+        // spend) instead of pretending or falling back to a paid purchase.
         await send(chatId, taskCard(task));
         return;
       }
       await send(chatId, "Working on it, live updates follow.");
       await runWithProgress(task.id, chatId, engine, runEngineTask(task.id, engine), send);
+      return;
+    }
+    case "/paid": {
+      if (!arg) {
+        await send(chatId, "Usage: /paid <what you want researched> — explicitly starts a PAID Telegraph research task (needs TELEGRAPH_EVM_PRIVATE_KEY) and waits for your /approve before anything is spent.");
+        return;
+      }
+      let task: TaskRecord;
+      try {
+        task = await createTask(
+          {
+            goal: arg,
+            spendLimitUsdCents: defaultSpendLimit(),
+            // Explicit paid choice, double-gated: approval must confirm the
+            // spend before any payment can be signed.
+            requiresApproval: true,
+            origin: { source: "telegram", actor: sender },
+            mode: "paid",
+          },
+          engine,
+        );
+      } catch (err) {
+        await send(chatId, `Could not create the task: ${err instanceof Error ? err.message : err}`);
+        return;
+      }
+      await send(chatId, taskCard(task) + "\n\nThis is a PAID task awaiting your confirmation: /approve " + shortId(task.id) + " or /reject " + shortId(task.id));
       return;
     }
     case "/tasks": {

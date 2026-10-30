@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { handleUpdate, type TelegramDeps, type TgUpdate } from "@/lib/telegram/adapter";
 import { resetSeenUpdates } from "@/lib/telegram/offsets";
-import { resetStore } from "@/lib/engine/store";
+import { resetStore, listTasks } from "@/lib/engine/store";
 import { createTask, type EngineDeps } from "@/lib/engine/engine";
 
 /* Local fakes. */
@@ -31,13 +31,15 @@ function makeBot(overrides: {
   askAuto?: EngineDeps["telegraph"]["askAuto"];
   getReceipt?: EngineDeps["chain"]["getReceipt"];
   getGasPrice?: EngineDeps["chain"]["getGasPrice"];
+  fetchJSON?: EngineDeps["publicSource"]["fetchJSON"];
 } = {}): TelegramDeps & { calls: { ask: number; create: number }; sent: Array<{ chat: unknown; text: string }> } {
   const calls = { ask: 0, create: 0 };
   const sent: Array<{ chat: unknown; text: string }> = [];
   const engine: EngineDeps = {
     publicSource: {
-      fetchJSON: async () => {
-        throw new Error("unexpected public source read in this telegram test");
+      fetchJSON: async (url: string) => {
+        if (overrides.fetchJSON) return overrides.fetchJSON(url);
+        throw new Error("unexpected public source read in this telegram test: " + url);
       },
     },
     telegraph: {
@@ -85,9 +87,9 @@ function updateOf(id: number, text: string): TgUpdate {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetStore();
-  resetSeenUpdates();
+  await resetSeenUpdates();
 });
 
 describe("telegram adapter", () => {
@@ -99,9 +101,23 @@ describe("telegram adapter", () => {
     expect(bot.sent.length).toBe(afterFirst);
   });
 
-  it("never creates a second purchase for the same /goal delivery", async () => {
-    // A question with no free capability, so this genuinely exercises the
-    // PAID purchase path (price questions now default to free sources).
+  it("answers /goal with FREE sources: no purchase attempt, $0 spend", async () => {
+    let askCalls = 0;
+    const bot = makeBot({
+      askAuto: async () => {
+        askCalls++;
+        return { ...GOOD_ANSWER };
+      },
+      fetchJSON: async () => ({ bitcoin: { usd: 61000 } }),
+    });
+    await handleUpdate(updateOf(2001, "/goal What is the current BTC price in USD?"), bot);
+    expect(askCalls).toBe(0); // /goal NEVER initiates a paid request
+    expect(bot.sent.some((s) => s.text.includes("Completed"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("$61000"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("Spent: $0.00"))).toBe(true);
+  });
+
+  it("refuses /goal questions with no free capability instead of paying, and names the paid alternative", async () => {
     let askCalls = 0;
     const bot = makeBot({
       askAuto: async () => {
@@ -109,12 +125,62 @@ describe("telegram adapter", () => {
         return { ...GOOD_ANSWER };
       },
     });
-    await handleUpdate(updateOf(2001, "/goal Summarize the latest research discussion in the governance forum"), bot);
-    expect(bot.sent.some((s) => s.text.includes("Completed"))).toBe(true);
-    const afterFirst = askCalls;
-    await handleUpdate(updateOf(2001, "/goal Summarize the latest research discussion in the governance forum"), bot);
-    expect(askCalls).toBe(afterFirst); // duplicate delivery → zero new purchases
+    await handleUpdate(updateOf(2002, "/goal Summarize the latest research discussion in the governance forum"), bot);
+    expect(askCalls).toBe(0); // nothing was ever paid or even requested
+    expect(bot.sent.some((s) => /BLOCKED/.test(s.text))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("No free capability"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("paid mode"))).toBe(true);
+  });
+
+  it("paid Telegraph research requires the EXPLICIT /paid command and a second /approve", async () => {
+    let askCalls = 0;
+    const bot = makeBot({
+      askAuto: async () => {
+        askCalls++;
+        return { ...GOOD_ANSWER };
+      },
+    });
+    // An ordinary goal never starts paid work, even for a question without a free answer:
+    await handleUpdate(updateOf(2010, "/goal Summarize the latest research discussion in the governance forum"), bot);
+    expect(askCalls).toBe(0);
+    // The explicit /paid command creates a PAID task awaiting confirmation...
+    const before = bot.calls.create;
+    await handleUpdate(updateOf(2001, "/paid Summarize the latest research discussion in the governance forum"), bot);
+    expect(askCalls).toBe(0); // still nothing spent
+    expect(bot.sent.some((s) => s.text.includes("PAID task awaiting"))).toBe(true);
+    // classify: the created task is awaiting_approval and identifiably paid
+    const created = (await listTasks()).find(
+      (t) => t.origin.source === "telegram" && t.state === "awaiting_approval",
+    );
+    expect(created).toBeDefined();
+    expect((created!.plan ?? []).some((s) => s.kind === "telegraph_ask")).toBe(true);
+    // ...and ONLY /approve starts the purchase.
+    await handleUpdate(updateOf(2003, `/approve ${created!.id.slice(0, 8)}`), bot);
     expect(askCalls).toBe(1);
+    expect(bot.sent.some((s) => s.text.includes("Completed"))).toBe(true);
+  });
+
+  it("never creates a second purchase for redelivered /paid updates", async () => {
+    let askCalls = 0;
+    const bot = makeBot({
+      askAuto: async () => {
+        askCalls++;
+        return { ...GOOD_ANSWER };
+      },
+    });
+    await handleUpdate(updateOf(2001, "/paid Summarize the latest research discussion in the governance forum"), bot);
+    const created = (await listTasks()).find(
+      (t) => t.origin.source === "telegram" && t.state === "awaiting_approval",
+    );
+    expect(created).toBeDefined();
+    const afterFirst = askCalls; // 0
+    await handleUpdate(updateOf(2001, "/paid Summarize the latest research discussion in the governance forum"), bot);
+    expect(askCalls).toBe(afterFirst); // duplicate delivery → zero new purchases
+    const beforeApprove = askCalls;
+    await handleUpdate(updateOf(2004, `/approve ${created!.id.slice(0, 8)}`), bot);
+    expect(askCalls).toBe(beforeApprove + 1);
+    await handleUpdate(updateOf(2004, `/approve ${created!.id.slice(0, 8)}`), bot);
+    expect(askCalls).toBe(beforeApprove + 1); // redelivered approval → no second purchase
   });
 
   it("runs /approve end to end through the same engine", async () => {
