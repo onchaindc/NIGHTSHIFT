@@ -255,35 +255,14 @@ function freePlanForGoal(trimmed: string, parsed: ReturnType<typeof parseGoal>, 
 
 export function planForGoal(goal: string, maxEstimateUsdCents: number, mode: PlanMode = "auto"): TaskPlan {
   const trimmed = goal.trim();
-
-  if (mode === "free" && !isFreeCapableGoal(trimmed)) {
-    // Honest blocker: there is no free capability for this question, so
-    // nothing is launched and nothing silently becomes a paid operation.
-    const blocker =
-      `No free capability for this question: NIGHTSHIFT can answer gas questions (public chain RPC) and single-asset USD prices (public price APIs) for free, but this goal needs paid intelligence. Re-run with the paid mode and a spending ceiling, or ask a free-answerable question.`;
-    return {
-      steps: [],
-      criteria: freeFailedCriteria(classifyGoal(trimmed).intent),
-      assumptions: [],
-      executionBlocker: blocker,
-    };
-  }
-
-  if (mode === "free" || (mode === "auto" && isFreeCapableGoal(trimmed))) {
-    const intent = classifyGoal(trimmed);
-    if (intent.intent === "execution") {
-      // falls through to the execution blocker below; never plan a free run for an execution goal
-    } else {
-      return freePlanForGoal(trimmed, parseGoal(trimmed), intent.intent);
-    }
-  }
-
-  // EXECUTION goals never reach the purchase path. Every external consequence
-  // (a swap, deployment, transfer...) would need third-party evidence of execution:
-  // a mined receipt for the action itself plus an independent outcome check.
-  // A purchased inference answer, its payment receipt or a self-reported score
-  // is not sufficient, so instead of buying advice an execution goal stops here.
   const intent = classifyGoal(trimmed);
+
+  // EXECUTION goals never reach the purchase path, in every mode. Every
+  // external consequence (a swap, deployment, transfer...) would need
+  // third-party evidence of execution: a mined receipt for the action itself
+  // plus an independent outcome check. A purchased inference answer, its
+  // payment receipt or a self-reported score is not sufficient, so instead of
+  // paying for advice an execution goal stops here.
   if (intent.intent === "execution") {
     const blockExplanation =
       `Execution goals are not supported yet: NIGHTSHIFT has no wallet, exchange or deployment integration, so the requested action (${intent.evidence}) cannot be carried out, verified or paid for safely. Nothing was purchased. Submit the same intent as research or transaction preparation (for example "how do I ..." or "what would ... cost") if that is useful.`;
@@ -304,6 +283,24 @@ export function planForGoal(goal: string, maxEstimateUsdCents: number, mode: Pla
       ],
       executionBlocker: blockExplanation,
     };
+  }
+
+  // FREE mode (explicit user choice): if this question has no free
+  // capability, stop honestly instead of silently starting a paid operation.
+  if (mode === "free" && !isFreeCapableGoal(trimmed)) {
+    const blocker =
+      `No free capability for this question: NIGHTSHIFT can answer gas questions (public chain RPC) and single-asset USD prices (public price APIs) for free, but this goal needs paid intelligence. Re-run with the paid mode and a spending ceiling, or ask a free-answerable question.`;
+    return {
+      steps: [],
+      criteria: freeFailedCriteria(intent.intent),
+      assumptions: [],
+      executionBlocker: blocker,
+    };
+  }
+  // A deliberate free request (or an unconstrained auto choice) uses the free
+  // plan whenever one covers the goal.
+  if (mode === "free" || (mode === "auto" && isFreeCapableGoal(trimmed))) {
+    return freePlanForGoal(trimmed, parseGoal(trimmed), intent.intent);
   }
 
   const parsed = parseGoal(trimmed);
