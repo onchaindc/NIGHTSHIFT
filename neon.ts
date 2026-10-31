@@ -6,6 +6,11 @@ export default defineConfig({
     realtime: true,
   },
   auth: true,
+  // Object storage: private bucket for app/branch-scoped file uploads
+  // (branch-scoped, copy-on-write with the database).
+  buckets: {
+    "nightshift-files": {},
+  },
   // aiGateway was removed: the Neon Free plan does not include it, and a
   // non-serving gateway deployment blocks `neon deploy` from finishing all
   // of the other services. Re-add once the org upgrades to a paid plan.
