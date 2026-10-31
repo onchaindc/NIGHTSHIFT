@@ -112,7 +112,7 @@ describe("telegram adapter", () => {
     });
     await handleUpdate(updateOf(2001, "/goal What is the current BTC price in USD?"), bot);
     expect(askCalls).toBe(0); // /goal NEVER initiates a paid request
-    expect(bot.sent.some((s) => s.text.includes("Completed"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("COMPLETED"))).toBe(true);
     expect(bot.sent.some((s) => s.text.includes("$61000"))).toBe(true);
     expect(bot.sent.some((s) => s.text.includes("Spent: $0.00"))).toBe(true);
   });
@@ -157,7 +157,7 @@ describe("telegram adapter", () => {
     // ...and ONLY /approve starts the purchase.
     await handleUpdate(updateOf(2003, `/approve ${created!.id.slice(0, 8)}`), bot);
     expect(askCalls).toBe(1);
-    expect(bot.sent.some((s) => s.text.includes("Completed"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("COMPLETED"))).toBe(true);
   });
 
   it("never creates a second purchase for redelivered /paid updates", async () => {
@@ -193,7 +193,7 @@ describe("telegram adapter", () => {
     await handleUpdate(updateOf(3001, `/approve ${prefix}`), bot);
     const reviewed = await (await import("@/lib/engine/store")).getTask(task.id);
     expect(reviewed?.state).toBe("completed");
-    expect(bot.sent.some((s) => s.text.includes("informational answer delivered, verified against recorded evidence"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("Verified ✓ outcome checked against the recorded evidence"))).toBe(true);
   });
 
   it("runs /reject without any purchase", async () => {

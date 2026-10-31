@@ -285,6 +285,21 @@ function verifyFreeResearch(
       fail(`the public-source price lookup returned no plausible USD price: ${JSON.stringify(lookup!)}`);
     }
     evidence.push({ kind: "public_source_lookup", url: lookup!.url, asset: lookup!.asset, priceUsd: lookup!.priceUsd, fetchedAt: lookup!.fetchedAt });
+    // Plan-aware freshness: free price plans record the fetch time, so a stale
+    // read fails verification instead of silently completing an outdated answer.
+    if ((criteria.answerMaxAgeSeconds ?? 0) > 0) {
+      const fetchedMs = Date.parse(lookup!.fetchedAt);
+      if (!Number.isFinite(fetchedMs)) {
+        fail(`the recorded public-source lookup carries an unreadable fetch timestamp (${lookup!.fetchedAt}); answer freshness cannot be verified`);
+      }
+      const ageSeconds = (deps.now() - fetchedMs) / 1000;
+      if (ageSeconds < -30) fail("the recorded public-source read claims a fetch time in the future; the evidence cannot be trusted");
+      if (ageSeconds > (criteria.answerMaxAgeSeconds ?? 0)) {
+        fail(
+          `the recorded public-source read is ${Math.round(ageSeconds)}s old; the plan requires evidence fresher than ${criteria.answerMaxAgeSeconds}s. Re-run the goal to refresh the read`,
+        );
+      }
+    }
   }
 
   if (

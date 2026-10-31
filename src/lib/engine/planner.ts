@@ -171,6 +171,13 @@ export function isFreeCapableGoal(goal: string): boolean {
   return parsed.isGasGoal || (parsed.isPriceGoal && Boolean(parsed.expectedAsset));
 }
 
+/**
+ * Free public-source reads record their fetch time; a plan-aware freshness
+ * requirement is therefore checkable and enforced in verification (not a
+ * fabricated constraint — stale evidence genuinely disqualifies the answer).
+ */
+export const FREE_LOOKUP_FRESHNESS_SECONDS = 300;
+
 function freeFailedCriteria(intent: GoalIntent): VerificationCriteria {
   return {
     primaryVerifiedAgainstNodeSignal: false,
@@ -181,6 +188,58 @@ function freeFailedCriteria(intent: GoalIntent): VerificationCriteria {
     goalIntent: intent,
     primarySource: "free",
   };
+}
+
+/**
+ * User-facing success criteria descriptions, derived ONLY from what the plan
+ * will actually do. A free plan (public reads, $0.00) must never display
+ * payment-settlement or purchase-ledger criteria it can never exercise; a
+ * paid plan states its purchase-verification checks; execution-blocked goals
+ * keep their own standing template in the engine.
+ */
+export function describeCriteria(criteria: VerificationCriteria): string[] {
+  if (criteria.primarySource === "free") {
+    const lines: string[] = [];
+    if (criteria.freeChainRead) {
+      lines.push(`evidence comes from a real chain read of ${criteria.freeChainRead} against the public RPC (recorded with the actual response)`);
+    }
+    if (criteria.freeAssetLookup) {
+      lines.push(`evidence comes from a real public-source USD lookup for ${criteria.freeAssetLookup} (recorded with the actual response and fetch time)`);
+    }
+    if (criteria.answerSane) {
+      lines.push("the read value must be plausible (positive, finite)");
+    }
+    if ((criteria.answerMaxAgeSeconds ?? 0) > 0) {
+      lines.push(`the recorded public-source read must be fresher than ${criteria.answerMaxAgeSeconds}s when the outcome is verified`);
+    }
+    if (criteria.maxFeeUsdFor21000Gas != null) {
+      lines.push(`a 21000-gas transfer cost computed ONLY from the recorded free reads must be under $${criteria.maxFeeUsdFor21000Gas}`);
+    }
+    if (criteria.expectedAsset && !criteria.freeAssetLookup) lines.push(`the answer must concern ${criteria.expectedAsset}`);
+    if (criteria.expectedChain && !criteria.freeChainRead) lines.push(`the answer must concern the ${criteria.expectedChain} chain`);
+    if (lines.length === 0) lines.push("the recorded free public reads are the evidence the outcome is verified against");
+    return lines;
+  }
+
+  // Paid research: every purchase must prove itself before the goal completes.
+  const lines: string[] = [
+    "answer verified against the node's signal record",
+    "answer plausible",
+    `answer fetched within ${criteria.answerMaxAgeSeconds}s`,
+  ];
+  // Purchase-verification criteria apply only when the plan actually spends:
+  // there is no settlement or ledger to check on a $0.00 operation.
+  if (criteria.ownPaymentSettledOnChain) lines.push("payment's settlement tx mined with success status");
+  if (criteria.reconcileLedgerEntries) lines.push("purchase ledger reconciles (receipt, tx, signal hashes, sums)");
+  if (criteria.expectedAsset) lines.push(`the answer must concern ${criteria.expectedAsset}`);
+  if (criteria.expectedChain) lines.push(`the answer must concern the ${criteria.expectedChain} chain`);
+  if (criteria.crossCheckChainTelemetry) {
+    lines.push("the purchased gas telemetry is cross-checked against our own chain read");
+    if (criteria.maxFeeUsdFor21000Gas != null) {
+      lines.push(`a 21000-gas transfer must cost under $${criteria.maxFeeUsdFor21000Gas} by real evidence`);
+    }
+  }
+  return lines;
 }
 
 /** The genuinely free plan for a question with a matching free capability. */
@@ -223,6 +282,8 @@ function freePlanForGoal(trimmed: string, parsed: ReturnType<typeof parseGoal>, 
     if (parsed.maxFeeUsdFor21000Gas != null) {
       criteria.maxFeeUsdFor21000Gas = parsed.maxFeeUsdFor21000Gas;
       if (nativeId) criteria.freeAssetLookup = native;
+      // The native-price lookup records its fetch time, so freshness applies.
+      criteria.answerMaxAgeSeconds = FREE_LOOKUP_FRESHNESS_SECONDS;
     }
     return { steps, criteria, assumptions };
   }
@@ -237,6 +298,9 @@ function freePlanForGoal(trimmed: string, parsed: ReturnType<typeof parseGoal>, 
     freeAssetLookup: asset,
     expectedAsset: asset,
     answerSane: true,
+    // The lookup records its fetch time, so a genuine freshness requirement is
+    // checkable; stale reads fail verification instead of silently passing.
+    answerMaxAgeSeconds: FREE_LOOKUP_FRESHNESS_SECONDS,
   };
   return {
     steps: [

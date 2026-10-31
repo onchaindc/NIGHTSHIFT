@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getTask, saveTask } from "./store";
-import { planForGoal } from "./planner";
+import { planForGoal, describeCriteria } from "./planner";
 import { verifyTask, VerificationFailure } from "./verify";
 import { extractGasGwei, extractUsdCost } from "./planner";
 import { canTransition, type ActionId, type ExecutionEvent, type ExecutionEventType, type TaskRecord, type TaskState, type TelegraphAnswer, type Evidence, type PlanStep, type VerificationCriteria, type JobType, type WatchRef } from "./types";
@@ -221,21 +221,10 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
         { criteria },
       );
     } else {
-    const criteriaLines: string[] = [
-      `answer verified against the node's signal record`,
-      `answer plausible`,
-      `answer fetched within ${criteria.answerMaxAgeSeconds}s`,
-      `payment's settlement tx mined with success status`,
-      `purchase ledger reconciles (receipt, tx, signal hashes, sums)`,
-    ];
-    if (criteria.expectedAsset) criteriaLines.push(`the answer must concern ${criteria.expectedAsset}`);
-    if (criteria.expectedChain) criteriaLines.push(`the answer must concern the ${criteria.expectedChain} chain`);
-    if (criteria.crossCheckChainTelemetry) {
-      criteriaLines.push(`the purchased gas telemetry is cross-checked against our own chain read`);
-      if (criteria.maxFeeUsdFor21000Gas != null) {
-        criteriaLines.push(`a 21000-gas transfer must cost under $${criteria.maxFeeUsdFor21000Gas} by real evidence`);
-      }
-    }
+    // Plan-aware by construction: a free plan can never state a purchase or
+    // settlement requirement it will not exercise (describeCriteria derives
+    // every line from the criteria actually set by the planner).
+    const criteriaLines: string[] = describeCriteria(criteria);
     event(
       task,
       "criteria_defined",
