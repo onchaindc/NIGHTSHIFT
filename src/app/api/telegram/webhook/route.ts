@@ -8,7 +8,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Telegram webhook. Configure once (after setting TELEGRAM_BOT_TOKEN):
+ * Telegram webhook. Registration is automatic: on server boot and on the
+ * daily scheduler tick, src/lib/telegram/webhook-register.ts compares the
+ * URL Telegram currently holds against this deployment's public URL and
+ * re-registers (setWebhook, including TELEGRAM_WEBHOOK_SECRET) on drift —
+ * so a deployment can no longer go silent because it was never registered
+ * in production. Manual fallback, after setting TELEGRAM_BOT_TOKEN:
  *   curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
  *        -d "url=https://<your-domain>/api/telegram/webhook" \
  *        -d "secret_token=<value of TELEGRAM_WEBHOOK_SECRET>"
@@ -42,6 +47,19 @@ export async function POST(req: Request) {
       await handleUpdate(update);
     } catch (err) {
       console.error("telegram webhook handler error:", err);
+    }
+    // Wake-up recovery: if a previous goal's after() was killed by the
+    // duration limit, its task record stayed `executing` with no live
+    // runner (the update was already claimed, so no redelivery comes).
+    // Each new inbound message doubles as a recovery trigger, so the
+    // abandoned free task completes the next time the user talks to the
+    // bot, instead of only when the daily cron fires.
+    try {
+      const { recoverAbandonedFreeTasks } = await import("@/lib/telegram/recovery");
+      const { recovered } = await recoverAbandonedFreeTasks();
+      if (recovered.length) console.log(`recovery finished for: ${recovered.join(", ")}`);
+    } catch (err) {
+      console.error("abandoned task recovery failed:", err);
     }
   });
   return NextResponse.json({ ok: true });
