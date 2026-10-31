@@ -325,4 +325,167 @@ describe("scheduler reliability", () => {
     expect(await deleteWatch(w.id)).toBe(true);
     expect(await deleteWatch(w.id)).toBe(false);
   });
+
+  it("reconciles a mid-run death: the stale watch task gets an honest terminal state and an interruption event", async () => {
+    const { createWatch } = await import("@/lib/watch/store");
+    await createWatch({ name: "ghost", protocol: "ghost", sources: [{ type: "docs_url", target: "https://docs.example.com/p" }] });
+    const { createTask } = await import("@/lib/engine/engine");
+    // A check run that was accepted but whose worker died before any step:
+    // state is executing and now the record freezes there forever unless a
+    // later tick reconciles it.
+    const stuck = await createTask({
+      goal: "Protocol Watch check: ghost (ghost)",
+      spendLimitUsdCents: 10,
+      requiresApproval: false,
+      origin: { source: "web" },
+      jobType: "protocol_watch",
+      plan: [{ kind: "watch_check", id: "step-check", description: "watch check" }],
+    });
+    expect(stuck.state).toBe("executing");
+    const taskFile = path.join(dataDir, "tasks.json");
+    const tasks = JSON.parse(readFileSync(taskFile, "utf8")) as Array<Record<string, unknown>>;
+    const record = tasks.find((t) => t.id === stuck.id)!;
+    record.updatedAt = Date.now() - 30 * 60_000; // idle well past the grace window
+    writeFileSync(taskFile, JSON.stringify(tasks));
+    resetStore(); // the engine's in-memory cache must not hide the rewind
+
+    const { reconcileStaleWatchTasks } = await import("@/lib/watch/scheduler");
+    const reconciled = await reconcileStaleWatchTasks(Date.now());
+    expect(reconciled).toBe(1);
+    const after = JSON.parse(readFileSync(taskFile, "utf8")) as Array<Record<string, unknown>>;
+    const nowTerminated = after.find((t) => t.id === stuck.id)! as { state: string; error: string | null; events: Array<{ type: string }> };
+    expect(nowTerminated.state).toBe("failed");
+    expect(nowTerminated.error).toMatch(/interrupted/i);
+    expect(nowTerminated.events.some((e) => e.type === "scan_interrupted")).toBe(true);
+
+    // Idempotent: reconciling again (or a live-untouched record) does nothing.
+    expect(await reconcileStaleWatchTasks(Date.now())).toBe(0);
+  });
+
+  it("a live-leaning run is not reconciled: the grace window keeps active workers safe", async () => {
+    const { createWatch } = await import("@/lib/watch/store");
+    await createWatch({ name: "live", protocol: "live", sources: [{ type: "docs_url", target: "https://docs.example.com/p" }] });
+    const { createTask } = await import("@/lib/engine/engine");
+    const live = await createTask({
+      goal: "Protocol Watch check: live (live)",
+      spendLimitUsdCents: 10,
+      requiresApproval: false,
+      origin: { source: "web" },
+      jobType: "protocol_watch",
+      plan: [{ kind: "watch_check", id: "step-check", description: "watch check" }],
+    });
+    expect(live.state).toBe("executing"); // updatedAt is fresh
+    const { reconcileStaleWatchTasks } = await import("@/lib/watch/scheduler");
+    expect(await reconcileStaleWatchTasks(Date.now())).toBe(0); // untouched
+    expect(live.state).toBe("executing");
+  });
+
+  it("a per-watch lease blocks only that watch's scan; other due watches still run", async () => {
+    const { createWatch } = await import("@/lib/watch/store");
+    const leased = await createWatch({ name: "leased", protocol: "leased", sources: [{ type: "github_releases", target: "org/repo" }] });
+    await createWatch({ name: "free", protocol: "free", sources: [{ type: "github_releases", target: "org/repo2" }] });
+    setWatchDeps({
+      fetchSource: async () => {
+        throw new Error("all sources fail -> run fails fast, that is fine here");
+      },
+      sendTelegram: async () => {},
+    } as never);
+    // Another worker is already checking "leased":
+    const { persistence } = await import("@/lib/storage");
+    const leaseRelease = await persistence().acquireLease(`watch-run:${leased.id}`, 10 * 60_000);
+    expect(leaseRelease).not.toBeNull();
+    await runAutoScanOnce();
+    const tasks = JSON.parse(readFileSync(path.join(dataDir, "tasks.json"), "utf8")) as Array<{ goal: string }>;
+    // "free" ran; "leased" did not.
+    expect(tasks.some((t) => t.goal.includes("free"))).toBe(true);
+    expect(tasks.some((t) => t.goal.includes("leased"))).toBe(false);
+    await leaseRelease!();
+    // With the lease released, the very next tick checks it too.
+    await runAutoScanOnce();
+    const after = JSON.parse(readFileSync(path.join(dataDir, "tasks.json"), "utf8")) as Array<{ goal: string }>;
+    expect(after.some((t) => t.goal.includes("leased"))).toBe(true);
+  });
+
+  it("a missed scheduled scan catches up: an old lastCheckedAt makes the watch due again", async () => {
+    const { createWatch } = await import("@/lib/watch/store");
+    setWatchDeps({
+      fetchSource: async () => {
+        throw new Error("down");
+      },
+      sendTelegram: async () => {},
+    } as never);
+    const w = await createWatch({ name: "catchup", protocol: "catchup", sources: [{ type: "github_releases", target: "org/repo" }] });
+    expect(w.lastCheckedAt).toBeNull();
+    await runAutoScanOnce(); // ran (and failed with all sources down; recorded)
+    let tasks = JSON.parse(readFileSync(path.join(dataDir, "tasks.json"), "utf8")) as Array<{ goal: string }>;
+    const runsAfterFirst = tasks.length;
+    expect(runsAfterFirst).toBe(1);
+
+    // Simulate a LONG outage (a dead worker for many intervals): rewind the
+    // persisted lastCheckedAt far past the interval, then a single tick must
+    // pick the watch back up - catch-up, not "wait for the next slot".
+    const watchFile = path.join(dataDir, "watches.json");
+    const watches = JSON.parse(readFileSync(watchFile, "utf8")) as Array<{ id: string; lastCheckedAt: number | null }>;
+    const record = watches.find((x) => x.id === w.id)!;
+    record.lastCheckedAt = Date.now() - 90 * 60_000;
+    writeFileSync(watchFile, JSON.stringify(watches));
+    const { resetWatchStore } = await import("@/lib/watch/store");
+    resetWatchStore(); // in-memory caches must not hide the rewind
+
+    await runAutoScanOnce();
+    tasks = JSON.parse(readFileSync(path.join(dataDir, "tasks.json"), "utf8")) as Array<{ goal: string }>;
+    expect(tasks.length).toBe(runsAfterFirst + 1); // the missed scan ran
+  });
+
+  it("pending alerts that failed delivery are retried by the scheduler tick automatically", async () => {
+    const { createWatch, getWatch, mutateWatch } = await import("@/lib/watch/store");
+    let failSend = true;
+    setWatchDeps({
+      fetchSource: async (source: { id: string; label: string }) => ({
+        sourceId: source.id,
+        sourceLabel: source.label,
+        ok: true as const,
+        snapshot: {
+          signature: "release:v2.0.0",
+          summary: `${source.label}: Release v2.0.0`,
+          detail: `${source.label}: newest published release v2.0.0, a routine feature drop`,
+        },
+      }),
+      sendTelegram: async () => {
+        if (failSend) throw new Error("Telegram sendMessage failed: HTTP 503 service unavailable");
+      },
+    } as never);
+    const watch = await createWatch({ name: "deliverlater", protocol: "deliverlater", sources: [{ type: "github_releases", target: "org/repo" }], telegramChatId: 1234 });
+    await runAutoScanOnce(); // baseline: signature recorded, nothing to send
+    // Force a REAL change on the next tick: the fetcher now serves v2.0.0;
+    // rewind the fingerprint to v1.0.0 so the diff is genuine.
+    await mutateWatch(watch.id, (w) => {
+      for (const s of w.sources) w.fingerprints[s.id] = { signature: "release:v1.0.0", seenAt: Date.now() - 60_000 };
+      w.lastCheckedAt = null;
+    });
+    await runAutoScanOnce(); // change detected -> alert recorded, delivery fails (503)
+    const { listAlerts } = await import("@/lib/watch/alerts");
+    let alerts = await listAlerts(watch.id);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].status).toBe("pending");
+    expect(alerts[0].attempts).toBe(1);
+    expect(alerts[0].lastError).toContain("503");
+
+    // Age the failed attempt past its backoff (boundedly, minutes), exactly
+    // what wall-clock time does between two ticks in production.
+    const { persistence } = await import("@/lib/storage");
+    const ledger = (await persistence().readNamed<Array<{ key: string; lastAttemptAt?: number }>>(`watch-alerts:${watch.id}`))!;
+    for (const a of ledger) a.lastAttemptAt = Date.now() - 10 * 60_000;
+    await persistence().writeNamed(`watch-alerts:${watch.id}`, ledger);
+
+    // The next tick catches up WITHOUT a new change: same fetcher output,
+    // fingerprints unchanged -> no re-detection, pure delivery recovery.
+    failSend = false;
+    await runAutoScanOnce();
+    alerts = await listAlerts(watch.id);
+    expect(alerts).toHaveLength(1); // no duplicate alert
+    expect(alerts[0].status).toBe("delivered");
+    expect(alerts[0].attempts).toBe(2);
+    expect(await getWatch(watch.id)).not.toBeNull();
+  });
 });

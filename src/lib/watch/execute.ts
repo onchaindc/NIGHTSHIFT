@@ -3,6 +3,8 @@ import type { EngineDeps, ExecutionOutputs } from "@/lib/engine/engine";
 import { canTransition, type ExecutionEvent, type TaskRecord, type PlanStep } from "@/lib/engine/types";
 import { fetchSource } from "./sources";
 import { getWatch, mutateWatch } from "./store";
+import { recordAlerts, deliverAlerts, type AlertContext } from "./alerts";
+import { resolveWebhookBaseUrl } from "@/lib/telegram/webhook-register";
 import type {
   Finding,
   FindingConfidence,
@@ -212,6 +214,10 @@ export async function executeWatchCheck(
           confidence: "source-direct",
           verified: true,
           detectedAt: deps.now(),
+          // The change is preserved WITH its evidence: the previous observation
+          // (when it was taken) and the current fingerprint.
+          before: { signature: prev.signature, summary: prev.summary, seenAt: prev.seenAt },
+          after: { signature: r.snapshot.signature },
         };
         runState.findings.push(finding);
         await tools.event(
@@ -563,7 +569,7 @@ export async function executeWatchDeliver(
   const chatId = task.watch?.telegramChatId;
 
   if (runState.findings.length === 0) {
-    // Nothing changed and nothing failed: delivering an all-quiet report on
+    // Nothing changed and nothing failed: delivering an all-quiet alert on
     // every check would be spam. The quiet run is still recorded in history.
     await tools.event(task, "delivery_skipped", "Nothing to deliver: no changes and no source errors surfaced this run.");
     return;
@@ -578,14 +584,38 @@ export async function executeWatchDeliver(
     return;
   }
 
-  const text = reportText(task, runState);
-  await tools.event(task, "delivery_started", `Delivering the report to Telegram chat (id ending ${String(chatId).slice(-4)})`);
-  try {
-    await watchDeps.sendTelegram(chatId, text);
-    await tools.event(task, "delivery_succeeded", "Report delivered to Telegram.", { chatIdSuffix: String(chatId).slice(-4) });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await tools.event(task, "delivery_failed", `Telegram delivery FAILED, the report is kept in the task history: ${message}`);
+  // DEDUPE-FIRST: the change is recorded in the persisted alert ledger BEFORE
+  // any send attempt. A repeated scan, a duplicate invocation or a second
+  // worker then sees the same alert key and never notifies the change twice.
+  const watch = task.watch?.watchId ? await getWatch(task.watch.watchId) : null;
+  const context: AlertContext = {
+    watchId: task.watch?.watchId ?? "unknown",
+    watchName: task.watch?.watchName ?? "watch",
+    protocol: watch?.protocol ?? task.watch?.watchName ?? "protocol",
+    telegramChatId: chatId,
+  };
+  const fresh = await recordAlerts(context, runState.findings, task.id);
+
+  await tools.event(task, "delivery_started", `Delivering a concise alert (id ending ${String(chatId).slice(-4)}), ${fresh.length} new change(s)`);
+  const baseReportUrl = resolveWebhookBaseUrl();
+  const outcome = await deliverAlerts(context, fresh, baseReportUrl, deps.now());
+
+  if (outcome.delivered > 0) {
+    await tools.event(
+      task,
+      "delivery_succeeded",
+      `Alert delivered to Telegram (${outcome.freshCount} new change(s), ${outcome.delivered} alert update(s) sent).`,
+      { chatIdSuffix: String(chatId).slice(-4), delivered: outcome.delivered },
+    );
+  } else if (outcome.failed > 0) {
+    await tools.event(
+      task,
+      "delivery_failed",
+      `Telegram delivery FAILED for ${outcome.failed} alert(s) (${outcome.firstError ?? "unknown error"}); they stay pending and will be retried automatically on the next scheduled tick: the change report is kept in the task history either way.`,
+      { failed: outcome.failed, pendingRetry: true },
+    );
+  } else if (fresh.length === 0) {
+    await tools.event(task, "delivery_skipped", "All detected changes were already recorded as alerts — no duplicate notification sent.");
   }
 }
 

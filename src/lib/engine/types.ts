@@ -56,7 +56,9 @@ export type ExecutionEventType =
   | "delivery_started"
   | "delivery_succeeded"
   | "delivery_failed"
-  | "delivery_skipped";
+  | "delivery_skipped"
+  // Watch scheduling: an interrupted scan was reconciled by a later worker.
+  | "scan_interrupted";
 
 export interface ExecutionEvent {
   id: string;

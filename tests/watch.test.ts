@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { approveTask, createTask, runTask } from "@/lib/engine/engine";
 import { resetStore } from "@/lib/engine/store";
 import type { PlanStep } from "@/lib/engine/types";
-import { createWatch, getWatch, resetWatchStore } from "@/lib/watch/store";
+import { createWatch, getWatch, mutateWatch, resetWatchStore } from "@/lib/watch/store";
+import { deliverAlerts, listAlerts, type AlertContext } from "@/lib/watch/alerts";
 import { WATCH_CRITERIA, type SourceFetchResult, type WatchConfig, type WatchSource } from "@/lib/watch/types";
 import {
   executeWatchDeliver,
@@ -265,8 +266,17 @@ describe("protocol watch delivery", () => {
     expect(sends).toHaveLength(0);
     const task = await runWatch(watch); // change -> deliver
     expect(sends).toHaveLength(1);
-    expect(sends[0]).toContain("Protocol Watch: Core watch report");
-    expect(sends[0]).toContain("v4.1.0");
+    // Concise alert: named protocol, what changed, importance keyword,
+    // evidence link, observation time, full-report pointer.
+    expect(sends[0]).toContain("🔎 Protocol Watch — Uniswap (Core watch)");
+    expect(sends[0]).toContain("Releases: Release v4.1.0");
+    expect(sends[0]).toContain("was: Release v1.0.0");
+    expect(sends[0]).toContain("Importance:");
+    expect(sends[0]).toContain("breaking/deprecation/governance keywords");
+    expect(sends[0]).toContain("Evidence: https://example.com/releases");
+    expect(sends[0]).toContain("Observed:");
+    expect(sends[0]).toContain("Full report:");
+    expect(sends[0]).not.toContain("Next steps:"); // concise report stays in history
     const delivered = task.events.filter((e) => e.type === "delivery_succeeded");
     expect(delivered).toHaveLength(1);
   });
@@ -381,11 +391,145 @@ describe("watch persistence (restart-safe)", () => {
     expect(task.result?.summary).toContain("SOURCE-DIRECT");
     expect(task.result?.summary).not.toContain("CROSS-CHECKED");
   });
+});
 
-  it("significance is an honest keyword heuristic surfaced in the report", async () => {
+describe("alert ledger reliability (dedupe, retry)", () => {
+  it("a re-detected change (interrupted scan, fingerprint loss) never notifies twice", async () => {
+    const watch = await makeWatch({ telegramChatId: 424242 });
+    const sends: string[] = [];
+    setWatchDeps({
+      ...depOverrides((source, call) => (call <= 2 ? okResult(source, SNAP_A(source.label)) : okResult(source, SNAP_B(source.label)))),
+      sendTelegram: async (_chat, text) => {
+      sends.push(text);
+    },
+    });
+    await runWatch(watch); // baseline
+    await runWatch(watch); // change -> one alert
+    expect(sends).toHaveLength(1);
+
+    // Simulate the exact reliability wound this ledger exists for: a worker
+    // died MID-run so the fingerprint write rolled back to the previous
+    // release, while the alert had already been recorded. The next re-scan
+    // re-detects the SAME release as a change... and must not re-notify it.
+    await mutateWatch(watch.id, (w) => {
+      for (const s of w.sources) {
+        w.fingerprints[s.id] = { signature: "release:v1.0.0", seenAt: Date.now() - 60_000, summary: `${s.label}: Release v1.0.0` };
+      }
+      w.lastCheckedAt = null;
+    });
+    await runWatch(watch); // re-detection of the SAME release
+    expect(sends).toHaveLength(1); // no duplicate notification
+    const alerts = await listAlerts(watch.id);
+    expect(alerts).toHaveLength(2); // one per source, both already delivered
+    for (const a of alerts) expect(a.status).toBe("delivered");
+  });
+
+  it("a failed delivery stays pending and a later retry delivers exactly once (bounded backoff)", async () => {
+    const watch = await makeWatch({ telegramChatId: 424242 });
+    const sends: string[] = [];
+    setWatchDeps({
+      ...depOverrides((source, call) => (call <= 2 ? okResult(source, SNAP_A(source.label)) : okResult(source, SNAP_B(source.label)))),
+      sendTelegram: async () => {
+        throw new Error("Telegram sendMessage failed: HTTP 429 Too Many Requests: retry later");
+      },
+    });
+    await runWatch(watch); // baseline
+    await runWatch(watch); // change -> delivery fails, recorded not lost
+    const failedAlerts = await listAlerts(watch.id);
+    expect(failedAlerts.every((a) => a.status === "pending" && a.attempts === 1)).toBe(true);
+    expect(failedAlerts[0].lastError).toContain("429");
+    expect(sends).toHaveLength(0);
+
+    const context: AlertContext = {
+      watchId: watch.id,
+      watchName: watch.name,
+      protocol: watch.protocol,
+      telegramChatId: watch.telegramChatId ?? null,
+    };
+    // Retry inside the bounded backoff window: withheld, not re-sent blindly.
+    const tooEarly = await deliverAlerts(context, [], null, Date.now() + 10_000);
+    expect(tooEarly.delivered).toBe(0);
+    expect(sends).toHaveLength(0);
+
+    // Once the backoff passes, the scheduled tick's retry delivers once...
+    setWatchDeps({
+      ...depOverrides((source) => okResult(source, SNAP_A(source.label))),
+      sendTelegram: async (_chat, text) => {
+        sends.push(text);
+      },
+    });
+    const retried = await deliverAlerts(context, [], null, Date.now() + 90_000);
+    expect(retried.delivered).toBe(2);
+    expect(sends).toHaveLength(1);
+    const afterRetry = await listAlerts(watch.id);
+    expect(afterRetry.every((a) => a.status === "delivered")).toBe(true);
+
+    // ...and exactly-once holds for good: further retries send nothing.
+    await deliverAlerts(context, [], null, Date.now() + 90_000_000);
+    expect(sends).toHaveLength(1);
+  });
+
+  it("fresh changes deliver immediately while older failed attempts wait for their backoff, then one batch completes them", async () => {
+    const watch = await makeWatch({ telegramChatId: 9911 });
+    const sends: string[] = [];
+    setWatchDeps({
+      ...depOverrides((source, call) => (call <= 2 ? okResult(source, SNAP_A(source.label)) : okResult(source, SNAP_B(source.label)))),
+      sendTelegram: async () => {
+        throw new Error("Telegram sendMessage failed: HTTP 502 bad gateway");
+      },
+    });
+    await runWatch(watch); // baseline
+    await runWatch(watch); // change -> delivery fails, alerts recorded as pending
+    expect(sends).toHaveLength(0);
+
+    // A new release lands while the first batch is backoff-bound. Fresh
+    // alerts (attempts 0) are not backoff-bound: the next run delivers them
+    // immediately, exactly the new ones.
+    const SNAP_C = (label: string) => ({
+      signature: "release:v5.0.0",
+      summary: `${label}: Release v5.0.0`,
+      detail: `${label}: newest published release v5.0.0, a routine feature drop`,
+      url: "https://example.com/releases",
+    });
+    setWatchDeps({
+      // Fingerprints already hold v4.1.0 from the failed run, so the source
+      // read is a REAL change the moment v5.0.0 appears.
+      ...depOverrides((source) => okResult(source, SNAP_C(source.label))),
+      sendTelegram: async (_chat, text) => {
+      sends.push(text);
+    },
+    });
+    await runWatch(watch); // second change -> immediate single-message delivery
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toContain("Release v5.0.0");
+    // The backoff-bound batch is withheld: the old alert (as its own line)
+    // is absent — "was: Release v4.1.0" is just the fresh change's history.
+    expect(sends[0]).not.toContain("Releases: Release v4.1.0");
+
+    // Once the backoff passes (scheduler-tick style catch-up call), the two
+    // failed alert attempts ride ONE batched message and complete.
+    const context: AlertContext = {
+      watchId: watch.id,
+      watchName: watch.name,
+      protocol: watch.protocol,
+      telegramChatId: watch.telegramChatId ?? null,
+    };
+    const catchUp = await deliverAlerts(context, [], null, Date.now() + 90_000);
+    expect(catchUp.delivered).toBe(2);
+    expect(sends).toHaveLength(2);
+    expect(sends[1]).toContain("Release v4.1.0");
+    expect(sends[1]).toContain("Release v1.0.0");
+    const all = await listAlerts(watch.id);
+    expect(all).toHaveLength(4);
+    expect(all.every((a) => a.status === "delivered")).toBe(true);
+  });
+
+  it("significance surfaces the unverified-incident guard on high-severity alerts", async () => {
     const watch = await makeWatch({
       name: "Security watch",
+      protocol: "Feed protocol",
       sources: [{ type: "rss_feed", target: "https://feeds.example.com/security.xml", label: "Security feed" }],
+      telegramChatId: 777,
     });
     const baseline: ReturnType<typeof SNAP_A> = {
       signature: "feed:base",
@@ -399,12 +543,23 @@ describe("watch persistence (restart-safe)", () => {
       detail: "Security advisory CVE-2025-99999: critical vulnerability disclosed, upgrade recommended immediately",
       url: "https://feeds.example.com/security.xml",
     };
-    setWatchDeps(depOverrides((source, call) => okResult(source, call <= 1 ? baseline : advisory)));
+    const sends: string[] = [];
+    setWatchDeps({
+      ...depOverrides((source, call) => okResult(source, call <= 1 ? baseline : advisory), sends),
+      sendTelegram: async (_chat, text) => {
+      sends.push(text);
+    },
+    });
     await runWatch(watch); // baseline
     const task = await runWatch(watch); // change detected
     expect(task.events.filter((e) => e.type === "watch_change_detected")).toHaveLength(1);
     expect(task.result?.summary).toContain("Significance: high");
     expect(task.result?.summary).toContain("keyword heuristic");
+    // High severity alert wording: the importance line exists, but it is
+    // explicit that nothing is a confirmed security incident.
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toContain("Importance: security-relevant keywords");
+    expect(sends[0]).toContain("NOT a confirmed incident");
   });
 });
 
