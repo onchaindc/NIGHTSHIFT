@@ -37,6 +37,25 @@ async function tick(req: NextRequest) {
     } catch (err) {
       console.error("scheduler tick failed:", err);
     }
+    // The daily tick is also the slow heartbeat for Telegram reliability
+    // jobs that must eventually reconcile even without a fresh deploy or
+    // user message: re-register the webhook if the deployment URL drifted,
+    // and re-run free Telegram tasks abandoned mid-run. Both are no-ops
+    // when there is nothing to do and never fail the watch scan itself.
+    try {
+      const { reconcileTelegramWebhook } = await import("@/lib/telegram/webhook-register");
+      const result = await reconcileTelegramWebhook();
+      if (result.action === "registered") console.log(`telegram webhook: ${result.detail}`);
+    } catch (err) {
+      console.error("telegram webhook reconcile failed:", err);
+    }
+    try {
+      const { recoverAbandonedFreeTasks } = await import("@/lib/telegram/recovery");
+      const { recovered } = await recoverAbandonedFreeTasks();
+      if (recovered.length) console.log(`recovery finished for: ${recovered.join(", ")}`);
+    } catch (err) {
+      console.error("abandoned task recovery failed:", err);
+    }
   });
   return NextResponse.json({ ok: true, started: true });
 }

@@ -36,20 +36,63 @@ interface SendFn {
   (chatId: string | number, text: string): Promise<void>;
 }
 
+const MAX_SEND_ATTEMPTS = 3;
+
+/**
+ * sendMessage with bounded retries: a transient network error or Telegram
+ * 429 (rate limit, honored via `retry_after`) is retried; other Bot API
+ * HTTP errors are not (they are deterministic-ish, and the task outcome
+ * matters more than the notification — we log and continue rather than
+ * throw, so a failed progress message can never kill a live task run).
+ */
 async function defaultSend(chatId: string | number, text: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set");
-  const res = await fetch(`${API_BASE}/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }), // plain text: no escaping foot-guns
-  });
-  if (!res.ok) {
-    // Bot API errors are best-effort: a task's outcome matters more than the
-    // notification failing, so we log and continue rather than throw.
-    const body = await res.text().catch(() => "");
-    console.error(`telegram sendMessage failed: HTTP ${res.status} ${body}`);
+  let lastDetail = "unknown error";
+  for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }), // plain text: no escaping foot-guns
+      });
+      if (res.ok) return;
+      const payload = await res.text().catch(() => "");
+      lastDetail = `HTTP ${res.status} ${payload}`;
+      if (res.status === 429 && attempt < MAX_SEND_ATTEMPTS) {
+        let waitMs = 1500;
+        try {
+          const parsed = JSON.parse(payload) as { parameters?: { retry_after?: number } };
+          if (parsed?.parameters?.retry_after) waitMs = Math.min(10_000, parsed.parameters.retry_after * 1000);
+        } catch {}
+        await sleep(waitMs);
+        continue;
+      }
+      break; // non-429 API error: not retryable
+    } catch (err) {
+      // Network-level failure: the serverless runtime freezes, DNS blips,
+      // connection resets — retry with a small backoff.
+      lastDetail = err instanceof Error ? err.message : String(err);
+      if (attempt < MAX_SEND_ATTEMPTS) {
+        await sleep(500 * attempt);
+        continue;
+      }
+    }
   }
+  console.error(`telegram sendMessage failed after ${MAX_SEND_ATTEMPTS} attempts: ${lastDetail}`);
+}
+
+/** Direct single-shot gateway used by recovery to re-deliver task results. */
+export async function sendViaDefault(chatId: string | number, text: string): Promise<void> {
+  await defaultSend(chatId, text);
+}
+
+/**
+ * Re-delivers a finished task's final report (used after recovery re-runs
+ * a task whose origin chat is a numeric user id). Best-effort by contract:
+ */
+export async function deliverResult(chatId: string | number, task: TaskRecord, send: SendFn = sendViaDefault): Promise<void> {
+  await send(chatId, formatFinal(task));
 }
 
 export interface TelegramDeps {
@@ -202,7 +245,19 @@ async function runWithProgress(
   send: SendFn,
 ): Promise<void> {
   let sentEventIds = new Set<string>();
+  let sendFailures = 0;
   let done = false;
+  // A failed send used to abort the whole progress pump, silently dropping
+  // every remaining update (final report included). Each send is now
+  // guarded: the task keeps producing events and the pump keeps delivering.
+  const guardedSend = async (text: string): Promise<void> => {
+    try {
+      await send(chatId, text);
+    } catch (err) {
+      sendFailures++;
+      console.error("telegram progress send failed:", err);
+    }
+  };
   const pump = (async () => {
     while (!done) {
       const t = await getTask(taskId);
@@ -211,7 +266,7 @@ async function runWithProgress(
           if (sentEventIds.has(e.id)) continue;
           sentEventIds.add(e.id);
           const icon = EVENT_ICON[e.type] ?? "·";
-          await send(chatId, humanize(`${icon} ${e.message}`).slice(0, 3800));
+          await guardedSend(humanize(`${icon} ${e.message}`).slice(0, 3800));
         }
         if (t.state === "completed" || t.state === "failed" || t.state === "blocked") break;
       }
@@ -225,7 +280,19 @@ async function runWithProgress(
   });
   done = true;
   await pump;
-  await getTask(taskId).then((t) => t && send(chatId, formatFinal(t)));
+  const t = await getTask(taskId);
+  if (t) {
+    // The final report is the one message that must not be lost to a single
+    // transient failure; the retrying defaultSend backs it up in production.
+    const final = formatFinal(t);
+    if (sendFailures > 0) {
+      await guardedSend(
+        `${final}\n\n⚠️ ${sendFailures} live update(s) could not be delivered earlier; use /status ${shortId(taskId)} in case anything is missing.`,
+      );
+    } else {
+      await guardedSend(final);
+    }
+  }
   void finished;
   sentEventIds = new Set(); // allow old runs to be GC'd cleanly
 }
