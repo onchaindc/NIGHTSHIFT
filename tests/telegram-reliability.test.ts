@@ -142,9 +142,9 @@ describe("telegram progress pump resilience", () => {
     };
     let failedSends = 0;
     bot.send = async (chat, text) => {
-      // Throw ONLY on messages that START with the guarded/verification icons;
-      // final evidence lines carry mid-text ellipses and must still deliver.
-      if (/^[⚙…]/.test(text)) {
+      // Throw ONLY on streamed milestone messages (spend events start with
+      // "$" — the one streamable type); the final report must always deliver.
+      if (text.startsWith("$")) {
         failedSends++;
         throw new Error("simulated transport drop");
       }
@@ -156,7 +156,7 @@ describe("telegram progress pump resilience", () => {
     await handleUpdate(updateOf(8101, `/approve ${created!.id.slice(0, 8)}`), bot);
     expect(failedSends).toBeGreaterThan(0);
     // The task completed and the final report (with a delivery-failure notice) arrived:
-    expect(bot.sent.some((s) => s.text.includes("Result:"))).toBe(true);
+    expect(bot.sent.some((s) => s.text.includes("COMPLETED"))).toBe(true);
     expect(bot.sent.some((s) => s.text.includes("could not be delivered"))).toBe(true);
     const finished = await getTask(created!.id);
     expect(finished?.state).toBe("completed");
@@ -225,7 +225,7 @@ describe("abandoned free task recovery", () => {
     const finished = await getTask(task.id);
     expect(finished?.state).toBe("completed");
     expect(finished?.spend.spentUsdCents).toBe(0); // free replay stays free
-    expect(sent.some((s) => String(s.chat) === "4242" && s.text.includes("Result:"))).toBe(true);
+    expect(sent.some((s) => String(s.chat) === "4242" && s.text.includes("COMPLETED"))).toBe(true);
   });
 
   it("never auto-resumes paid-plan tasks (double-spend risk): state untouched, nothing purchased", async () => {

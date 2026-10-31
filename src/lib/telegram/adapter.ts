@@ -22,7 +22,8 @@ import { getTask, listTasks } from "@/lib/engine/store";
 import { missingPaidCredentials } from "@/lib/telegraph/client";
 import { claimUpdate } from "./offsets";
 import { humanize } from "@/lib/ui/humanize";
-import type { TaskRecord } from "@/lib/engine/types";
+import { resolveWebhookBaseUrl } from "./webhook-register";
+import type { TaskRecord, ExecutionEventType } from "@/lib/engine/types";
 
 const API_BASE = "https://api.telegram.org";
 
@@ -155,55 +156,80 @@ export function statusSummary(t: TaskRecord): string {
   return taskCard(t);
 }
 
+/** Web report link, only when the deployment has a known public base URL. */
+function webReportLink(taskId: string): string | null {
+  const base = resolveWebhookBaseUrl();
+  return base ? `${base}/tasks/${taskId}` : null;
+}
+
+function clampLine(text: string, max: number): string {
+  const single = text.trim().split("\n")[0].trim();
+  return single.length > max ? `${single.slice(0, max)}…` : single;
+}
+
+/**
+ * Concise BLOCKED report: status, short reason, spend status and a next step.
+ * Never the full internal criteria/plan dump. Used both by the live /goal flow
+ * (blocked-at-creation tasks) and by the final-report path.
+ */
+export function blockedReport(t: TaskRecord): string {
+  const id = shortId(t.id);
+  const blockerEvent = [...t.events].reverse().find((e) => e.type === "task_blocked");
+  const reason = clampLine(humanize(t.error ?? blockerEvent?.message ?? "the plan was blocked"), 400);
+  const lines = [`⛔ BLOCKED [${id}]`, "", reason, ""];
+  if (t.spend.spentUsdCents > 0) lines.push(`Spent: $${(t.spend.spentUsdCents / 100).toFixed(2)} (limit $${(t.spend.limitUsdCents / 100).toFixed(2)})`);
+  else lines.push("Nothing was executed and nothing was spent — no payment was signed.");
+  const reportLink = webReportLink(t.id);
+  if (reportLink) lines.push("", `Full record: ${reportLink}`);
+  return lines.join("\n").slice(0, 4000);
+}
+
+/**
+ * Result-first, concise final messages. The full internal record (plan,
+ * criteria, every event, all raw evidence) stays in the engine task record
+ * and the web report; Telegram gets the outcome, spend, operation id and a
+ * link where a public base URL exists. Completion claims are only ever built
+ * from verified results — a completed state always passed verification.
+ */
 function formatFinal(t: TaskRecord): string {
-  const lines: string[] = [];
-  if (t.state === "completed") {
-    // The completion claim states exactly what kind of deliverable was
-    // verified. Execution goals can never reach this branch: they always lack
-    // external-action evidence, so no claim is ever restated here.
-    const intent = t.criteria.goalIntent ?? "information";
-    lines.push(
-      intent === "preparation"
-        ? "✅ Completed: preparation material produced. The action itself was NOT executed by NIGHTSHIFT, and external execution remains unverified."
-        : "✅ Completed: informational answer delivered, verified against recorded evidence. No external action was performed or implied.",
-    );
+  const id = shortId(t.id);
+  const spent = `Spent: $${(t.spend.spentUsdCents / 100).toFixed(2)} (limit $${(t.spend.limitUsdCents / 100).toFixed(2)})`;
+  const reportLink = webReportLink(t.id);
+
+  if (t.state === "blocked") {
+    return blockedReport(t);
   }
+
   if (t.state !== "completed") {
-    lines.push(`${t.state.toUpperCase()}: ${humanize(t.error ?? "")}`.trim());
-    // Failed or partial work reports its actual state, spend and unresolved
-    // criteria rather than a generic success line.
-    const unmet = t.events.filter((e) => e.type === "criteria_failed").map((e) => `- ${humanize(e.message)}`);
-    if (unmet.length) {
-      lines.push("");
-      lines.push("Unresolved criteria:");
-      lines.push(...unmet);
+    const failureEvent = [...t.events].reverse().find((e) => e.type === "criteria_failed" || e.type === "task_failed");
+    const reason = humanize(t.error ?? failureEvent?.message ?? "the run failed");
+    const lines = [`✗ FAILED [${id}]`, "", reason.length > 600 ? `${reason.slice(0, 600)}…` : reason, "", spent];
+    if (t.spend.spentUsdCents > 0) {
+      // Honest recovery guidance: a spent research plan is never re-run
+      // automatically — that would risk a second charge.
+      lines.push("Purchases were made but the outcome did not verify. Re-running would spend again; /status " + id + " has the full record first.");
+    } else {
+      lines.push("No purchases were made; this goal can be re-run for free.");
     }
-    if (t.spend.spentUsdCents > 0 && !t.result) {
-      lines.push("Purchases were made during the attempt, but no outcome was verified as meeting the goal.");
-    }
+    if (reportLink) lines.push("", `Full record: ${reportLink}`);
+    return lines.join("\n").slice(0, 4000);
   }
-  lines.push(`Spent: $${(t.spend.spentUsdCents / 100).toFixed(2)} (limit $${(t.spend.limitUsdCents / 100).toFixed(2)})`);
+
+  // COMPLETED — result first: status, the answer itself, verification, spend.
+  const lines = [`✅ COMPLETED [${id}]`];
+  const intent = t.criteria.goalIntent ?? "information";
+  if (intent === "preparation") {
+    lines.push("Preparation material produced — NIGHTSHIFT did NOT execute any action, and that remains unverified.");
+  }
   if (t.result) {
-    lines.push("");
-    lines.push("Result:");
-    lines.push(t.result.summary.slice(0, 2800));
-    lines.push("");
-    for (const ev of t.result.evidence) {
-      if (ev.kind === "telegraph_signal") lines.push(`Evidence: signal ${ev.signalHash}`);
-      if (ev.kind === "telegraph_receipt")
-        lines.push(`Evidence: receipt ${ev.receiptHash}${ev.txHash ? ` (tx ${ev.txHash.slice(0, 18)}…)` : ""}`);
-      if (ev.kind === "on_chain_settlement")
-        lines.push(`Evidence: settlement ${ev.txHash.slice(0, 18)}… status ${ev.status} at block ${ev.blockNumber}`);
-      if (ev.kind === "chain_gas_crosscheck")
-        lines.push(
-          `Evidence: cross-check ${ev.answerGasGwei} vs ${ev.chainGasGwei.toFixed(6)} gwei (${ev.chain}), ${ev.agreed ? "agree" : "disagree"}`,
-        );
-      if (ev.kind === "watch_finding")
-        lines.push(
-          `Evidence: ${ev.findingKind} from "${ev.sourceLabel}" (confidence ${ev.confidence}${ev.corroboratedBy?.length ? `, corroborated by ${ev.corroboratedBy.join(", ")}` : ""})${ev.url ? ` ${ev.url}` : ""}`,
-        );
-    }
+    // The recorded summary already carries the actual answer, its real source
+    // and the cost — send it prominently, unembellished.
+    lines.push("", t.result.summary.slice(0, 2400));
   }
+  lines.push("");
+  lines.push(`Verified ✓ outcome checked against the recorded evidence. ${spent}`);
+  lines.push(`Ops ID: ${t.id}`);
+  if (reportLink) lines.push(`Full report (events, evidence, verification): ${reportLink}`);
   return lines.join("\n").slice(0, 4000);
 }
 
@@ -233,9 +259,17 @@ const EVENT_ICON: Partial<Record<TaskRecord["events"][number]["type"], string>> 
 };
 
 /**
- * Runs the engine task asynchronously while pumping new timeline events to
- * the chat, then sends the final report. The engine stays unchanged (it has
- * no transport code); this polls the persisted task record.
+ * Concise-stream policy: Telegram is NOT shown the internal execution
+ * timeline (plans, criteria, step chatter, repeated cost explanations stay in
+ * the task record and the web report). The one stream-worthy moment is real
+ * money moving; everything else arrives result-first in the final message.
+ */
+const STREAMED_EVENT_TYPES: ReadonlySet<ExecutionEventType> = new Set<ExecutionEventType>(["spend_recorded"]);
+
+/**
+ * Runs the engine task asynchronously, streaming only milestone events to
+ * the chat, then sends the final result-first report. The engine stays
+ * unchanged (it has no transport code); this polls the persisted task record.
  */
 async function runWithProgress(
   taskId: string,
@@ -263,6 +297,7 @@ async function runWithProgress(
       const t = await getTask(taskId);
       if (t) {
         for (const e of t.events) {
+          if (!STREAMED_EVENT_TYPES.has(e.type)) continue; // internal timeline stays off Telegram
           if (sentEventIds.has(e.id)) continue;
           sentEventIds.add(e.id);
           const icon = EVENT_ICON[e.type] ?? "·";
@@ -374,10 +409,10 @@ export async function handleUpdate(update: TgUpdate, deps: TelegramDeps = {}): P
         // Execution goals and goals without a free capability arrive here
         // already stopped: state the limitation plainly (blocked tasks never
         // spend) instead of pretending or falling back to a paid purchase.
-        await send(chatId, taskCard(task));
+        await send(chatId, blockedReport(task));
         return;
       }
-      await send(chatId, "Working on it, live updates follow.");
+      await send(chatId, "Working on it.");
       await runWithProgress(task.id, chatId, engine, runEngineTask(task.id, engine), send);
       return;
     }
@@ -453,7 +488,7 @@ export async function handleUpdate(update: TgUpdate, deps: TelegramDeps = {}): P
         await send(chatId, `Task ${shortId(rejected.id)} rejected. Nothing was spent.`);
         return;
       }
-      await send(chatId, "Plan approved, executing, live updates follow.");
+      await send(chatId, "Plan approved, executing.");
       await runWithProgress(task.id, chatId, engine, approveTask(task.id, engine), send);
       return;
     }
