@@ -85,7 +85,16 @@ export interface Finding {
   corroboratedBy?: string[];
   /** Honest heuristic over the claim text; never claims more than that. */
   significance?: FindingSignificance;
+  /** When the changed source was actually observed. */
   detectedAt: number;
+  /**
+   *  Real before/after comparison: what the source published at the previous
+   * observation versus what it published now (both actually fetched and
+   * fingerprinted). Preserved with the finding so the change is reproducible
+   * and auditable, never an assertion without its evidence.
+   */
+  before?: { signature: string; summary?: string; seenAt: number };
+  after?: { signature: string };
 }
 
 /**

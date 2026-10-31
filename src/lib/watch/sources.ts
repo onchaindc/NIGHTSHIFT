@@ -47,6 +47,28 @@ function stripTags(html: string): string {
     .trim();
 }
 
+/**
+ * Irrelevant page noise that is NOT a protocol change: rotating timestamps,
+ * cookie banners, copyright years, build/asset ids. Stripped BEFORE hashing
+ * docs content so the change detector distinguishes meaningful content
+ * changes from page furniture. Explicit list, kept conservative — anything
+ * not in it still counts as a change.
+ */
+const DOCS_NOISE_PATTERNS: RegExp[] = [
+  /provider\s*=\s*"[^"]*"/gi, // analytics/tracker config churn
+  /last\s+(updated|reviewed|modified|edited)\s+(?:on\s+)?[^,.]{0,60}?(?:19|20)\d{2}\b/gi,
+  /\blink(?=ed)?\.\w{2,12}\.(?:js|css|png|jpg|woff2?)/gi, // hashed build assets
+  /copyright\s*©?\s*(?:\(c\)\s*)?(19|20)\d{2}[^.]{0,80}/gi,
+  /©\s*(19|20)\d{2}\s*-/gi,
+  /cookie(?:\s+consent)?\s+(?:banner|notice|settings)/gi,
+];
+
+function stripDocsNoise(text: string): string {
+  let next = text;
+  for (const pattern of DOCS_NOISE_PATTERNS) next = next.replace(pattern, " ");
+  return next.replace(/\s+/g, " ").trim();
+}
+
 interface FetchOut {
   snapshot: SourceSnapshot;
 }
@@ -109,10 +131,10 @@ async function fetchGithubCommits(source: WatchSource, base: string): Promise<Fe
 async function fetchDocsUrl(source: WatchSource): Promise<FetchOut> {
   const { status, body } = await httpGet(source.target);
   if (status !== 200) notOk(source, status, body);
-  // Hash the NORMALIZED visible text, not the raw HTML: served pages carry
-  // per-request nonces, build ids and script payloads that change on every
-  // fetch, which made raw-HTML hashing report false content changes.
-  const text = stripTags(body);
+  // Hash the NORMALIZED visible text without page furniture: served pages
+  // carry per-request nonces, build ids and script payloads that change on
+  // every fetch, which made raw-HTML hashing report false content changes.
+  const text = stripDocsNoise(stripTags(body));
   const hash = createHash("sha256").update(text).digest("hex").slice(0, 16);
   const title = htmlTitle(body) ?? source.label;
   return {

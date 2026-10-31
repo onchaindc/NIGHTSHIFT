@@ -1,6 +1,10 @@
 import { listWatches } from "./store";
 import { isVercelRuntime } from "@/lib/engine/store";
 import { persistence } from "@/lib/storage";
+import { randomUUID } from "node:crypto";
+import { canTransition } from "@/lib/engine/types";
+import { deliverAlerts } from "./alerts";
+import { resolveWebhookBaseUrl } from "@/lib/telegram/webhook-register";
 
 /**
  * Whether scheduled monitoring is expected to come from an EXTERNAL trigger
@@ -125,23 +129,50 @@ async function autoScan(): Promise<void> {
     const interval = watchIntervalMs();
     const watches = await listWatches();
     const now = Date.now();
+    await reconcileStaleWatchTasks(now);
     for (const w of watches) {
       const due = w.lastCheckedAt === null || now - w.lastCheckedAt >= interval;
       if (!due) continue;
-      // Auto checks are always FREE: the scheduler never triggers a purchase.
-      const { createTask, runTask } = await import("@/lib/engine/engine");
-      const task = await createTask({
-        goal: `Protocol Watch check: ${w.name} (${w.protocol})`,
-        spendLimitUsdCents: w.spendLimitUsdCents,
-        requiresApproval: false,
-        origin: { source: "web" },
-        jobType: "protocol_watch",
-        watch: { watchId: w.id, watchName: w.name, triggeredBy: "auto-scheduler", telegramChatId: w.telegramChatId ?? null },
-        plan: (await import("./execute")).planWatchSteps(w, false),
-        criteria: (await import("./types")).WATCH_CRITERIA,
-      });
-      if (task.state === "executing") {
-        await runTask(task.id);
+      // Per-watch lease: two fleet workers (multi-instance deployment) cannot
+      // run the same watch's check concurrently. A manual check remains
+      // intentionally un-leased: it is a fresh, deliberate task, and its
+      // overlaps stay harmless through merged fingerprints + alert dedupe.
+      const watchRelease = await persistence().acquireLease(`watch-run:${w.id}`, interval + 5 * 60_000);
+      if (!watchRelease) continue; // another worker is checking this watch right now
+      try {
+        // Auto checks are always FREE: the scheduler never triggers a purchase.
+        const { createTask, runTask } = await import("@/lib/engine/engine");
+        const task = await createTask({
+          goal: `Protocol Watch check: ${w.name} (${w.protocol})`,
+          spendLimitUsdCents: w.spendLimitUsdCents,
+          requiresApproval: false,
+          origin: { source: "web" },
+          jobType: "protocol_watch",
+          watch: { watchId: w.id, watchName: w.name, triggeredBy: "auto-scheduler", telegramChatId: w.telegramChatId ?? null },
+          plan: (await import("./execute")).planWatchSteps(w, false),
+          criteria: (await import("./types")).WATCH_CRITERIA,
+        });
+        if (task.state === "executing") {
+          await runTask(task.id);
+        }
+      } finally {
+        await watchRelease();
+      }
+    }
+    // Pending alert retries: alerts whose Telegram delivery failed stay
+    // pending in the persisted ledger; every tick re-attempts them after
+    // their bounded backoff, so a transient outage never loses an alert.
+    for (const w of watches) {
+      if (!w.telegramChatId) continue;
+      try {
+        await deliverAlerts(
+          { watchId: w.id, watchName: w.name, protocol: w.protocol, telegramChatId: w.telegramChatId },
+          [],
+          resolveWebhookBaseUrl(),
+          Date.now(),
+        );
+      } catch (err) {
+        console.error(`pending alert retry failed for watch ${w.id}:`, err);
       }
     }
     state.lastSuccessAt = Date.now();
@@ -164,6 +195,47 @@ async function autoScan(): Promise<void> {
 /** One immediate scan; exported for tests and manual recovery. */
 export async function runAutoScanOnce(): Promise<void> {
   await autoScan();
+}
+
+/**
+ * Interrupted-scan recovery. A check run that died mid-execution (frozen
+ * lambda, deploy, crash, OOM) leaves its task record in executing/verifying
+ * forever; without this every such run would pollute history as "running".
+ *
+ * SAFETY: the WATCH itself needs no state repair — its fingerprints and
+ * alert ledger persisted at each step, and lastCheckedAt is only written on
+ * a scan that actually completed, so the missed scan simply re-happens on
+ * the next tick (idempotent: unchanged sources re-diff against old
+ * fingerprints, already-alerted changes are deduped by key). Only the task
+ * RECORD gets an honest terminal state, after a grace window far beyond any
+ * legitimate check duration, guarded by canTransition so a live runner is
+ * never touched and reconciliation is never applied twice.
+ */
+export async function reconcileStaleWatchTasks(now: number, graceMs = 15 * 60_000): Promise<number> {
+  const { listTasks, getTask, saveTask } = await import("@/lib/engine/store");
+  let reconciled = 0;
+  try {
+    for (const t of await listTasks()) {
+      if (t.jobType !== "protocol_watch") continue;
+      if (t.state !== "executing" && t.state !== "verifying") continue;
+      if (now - t.updatedAt <= graceMs) continue; // could still be a live run
+      const fresh = await getTask(t.id);
+      if (!fresh || fresh.state !== t.state || !canTransition(fresh.state, "failed")) continue;
+      fresh.state = "failed";
+      fresh.error = "Scan interrupted: the worker died mid-run. Persisted fingerprints make the next scheduled scan cover the missed work.";
+      fresh.events.push({
+        id: randomUUID(),
+        ts: now,
+        type: "scan_interrupted",
+        message: "This scan was interrupted mid-run (worker loss). It was reconciled by a later scheduled tick; the watch re-checks automatically and alert dedupe prevents duplicate notifications.",
+      });
+      await saveTask(fresh);
+      reconciled++;
+    }
+  } catch (err) {
+    console.error("stale watch task reconciliation failed:", err);
+  }
+  return reconciled;
 }
 
 export interface SchedulerStatus {

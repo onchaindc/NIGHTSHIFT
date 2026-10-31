@@ -286,11 +286,25 @@ function WatchRow({
       </div>
       <div className="px-4 py-3">
         <div className="flex flex-wrap gap-1.5">
-          {watch.sources.map((s) => (
-            <span key={s.id} className="rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[11px] text-ink-soft">
-              {SOURCE_TYPE_LABELS[s.type]}: {s.label.slice(0, 40)}
-            </span>
-          ))}
+          {watch.sources.map((s) => {
+            // Source monitoring status is REAL state: a persisted fingerprint
+            // means this source has a baseline to diff against; its absence
+            // means the next scan will still be establishing one.
+            const hasBaseline = Boolean(watch.fingerprints?.[s.id]);
+            return (
+              <span
+                key={s.id}
+                className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[11px] text-ink-soft"
+                title={hasBaseline ? "Monitored: baseline recorded; changes are detected by diffing against it real-time on every scan." : "Waiting for first scan: the baseline is recorded on the next check."}
+              >
+                <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${hasBaseline ? "bg-teal" : "bg-ink-faint"}`} />
+                {SOURCE_TYPE_LABELS[s.type]}: {s.label.slice(0, 40)}
+              </span>
+            );
+          })}
+          <span className="self-center text-[10.5px] text-ink-faint">
+            {Object.keys(watch.fingerprints ?? {}).length === 0 ? "baselines recorded on the first scan" : `baselines kept for ${Object.keys(watch.fingerprints ?? {}).length}/${watch.sources.length} sources`}
+          </span>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
@@ -516,6 +530,13 @@ export default function Watch() {
           <h2 className="text-[14px] font-semibold">Recent runs</h2>
           <span className="tabular text-[11px] text-ink-faint">real checks from the task store</span>
         </div>
+        {watchRuns.some((t) => t.state === "failed") && (
+          <p className="mb-3 rounded-md border border-gold/30 bg-gold/5 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink-soft">
+            <span className="font-medium text-gold">Failed or interrupted scans are recovered automatically:</span> the next tick
+            re-checks the watch (idempotent fingerprints prevent duplicate alerts), and pending Telegram deliveries retry with
+            backoff. Open a run for its timeline.
+          </p>
+        )}
         {tasks === null ? (
           <p aria-live="polite" className="text-[13px] text-ink-faint">Loading runs…</p>
         ) : watchRuns.length === 0 ? (
