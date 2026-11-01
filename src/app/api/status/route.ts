@@ -5,6 +5,7 @@ import {
   dataDir,
   persistenceMode,
 } from "@/lib/storage";
+import { isDatabaseConfigured } from "@/lib/db/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,37 @@ export const dynamic = "force-dynamic";
  * integration is reported as unconfigured, a degraded scheduler is named as
  * degraded with its reason.
  */
+/**
+ * Expensive store probes, cached briefly.
+ *
+ * Every open dashboard tab polls /api/status, and a full probe runs several
+ * live database roundtrips. Polling a database on a tighter loop than the
+ * compute's auto-suspend threshold (Neon: 5 min) keeps the database awake
+ * around the clock, which exhausted free-tier compute quotas in under a
+ * month. A short-lived cache shrinks that to a few connection windows per
+ * hour while staying honest: the worst case is a status that is up to
+ * PROBE_TTL_MS stale, and a real outage is still reported within minutes.
+ */
+const PROBE_TTL_MS = 4 * 60_000;
+let probed: { at: number; store: "ok" | "unavailable"; connection: "ok" | "unreachable" } | null = null;
+
+async function probeStore(): Promise<{ store: "ok" | "unavailable"; connection: "ok" | "unreachable" }> {
+  if (probed && Date.now() - probed.at < PROBE_TTL_MS) {
+    return { store: probed.store, connection: probed.connection };
+  }
+  let store: "ok" | "unavailable" = "unavailable";
+  try {
+    const { listTasks } = await import("@/lib/engine/store");
+    await listTasks();
+    store = "ok";
+  } catch {
+    store = "unavailable";
+  }
+  let connection: "ok" | "unreachable" = store === "ok" ? "ok" : "unreachable";
+  probed = { at: Date.now(), store, connection };
+  return { store, connection };
+}
+
 export async function GET() {
   const configured = (key: string) => Boolean(process.env[key]);
   const services = {
@@ -26,9 +58,8 @@ export async function GET() {
 
   let store: "ok" | "unavailable" = "unavailable";
   try {
-    const { listTasks } = await import("@/lib/engine/store");
-    await listTasks();
-    store = "ok";
+    const probe = await probeStore();
+    store = probe.store;
   } catch {
     store = "unavailable";
   }
@@ -48,18 +79,15 @@ export async function GET() {
     const decision = choosePersistence();
     const chosen = decision.persistence;
     const isPostgres = chosen.provider === "postgres";
-    let connection: "ok" | "unreachable" | "unconfigured" = isPostgres ? "unreachable" : "unconfigured";
-    if (isPostgres) {
-      try {
-        await chosen.ready();
-        connection = await chosen.health();
-      } catch (err) {
-        // A configured database that cannot be reached must NOT be silently
-        // downgraded to a non-durable story in the report: keep provider truth.
-        connection = "unreachable";
-        console.error("persistence health check failed:", err instanceof Error ? err.message : err);
-      }
-    }
+    // The expensive live check already ran inside probeStore (cached); a
+    // readable store means a connected database. Only the "which backend"
+    // decision and non-database configuration are computed per request.
+    let connection: "ok" | "unreachable" | "unconfigured" = isPostgres
+      ? store === "ok"
+        ? "ok"
+        : "unreachable"
+      : "unconfigured";
+    if (isPostgres && !isDatabaseConfigured()) connection = "unconfigured";
     persistenceReport = {
       mode: persistenceMode(),
       provider: chosen.provider,

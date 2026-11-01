@@ -54,7 +54,7 @@ function useSystemStatus() {
       }
     }
     void poll();
-    const id = setInterval(poll, 10000);
+    const id = setInterval(poll, 60000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -71,7 +71,7 @@ type SystemState = {
 };
 
 function systemState(status: StatusBody | null, down: boolean): SystemState {
-  if (down) return { label: "API unreachable", tone: "text-risk", dot: "bg-risk", note: "Retrying every 10 s" };
+  if (down) return { label: "API unreachable", tone: "text-risk", dot: "bg-risk", note: "Retrying every minute" };
   if (!status) return { label: "Checking", tone: "text-ink-faint", dot: "bg-ink-faint", note: "…" };
   const core = status.store === "ok" && status.services.telegraph;
   if (core) return { label: "Operational", tone: "text-teal", dot: "bg-teal", note: "Store and integrations reachable" };
