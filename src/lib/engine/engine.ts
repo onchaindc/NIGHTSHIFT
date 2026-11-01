@@ -7,7 +7,7 @@ import { canTransition, type ActionId, type ExecutionEvent, type ExecutionEventT
 import * as telegraph from "@/lib/telegraph/client";
 import { executeWatchCheck, executeWatchCorroborate, executeWatchInvestigate, executeWatchDeliver, executeWatchReport } from "@/lib/watch/execute";
 import type { WatchRunState } from "@/lib/watch/types";
-import { getGasPrice, getTransactionReceipt } from "@/lib/chain/rpc";
+import { getGasPrice, getTransactionReceipt, rpcForChainId } from "@/lib/chain/rpc";
 import type { ChainReceipt, ChainGasPrice } from "@/lib/chain/rpc";
 import type { SignalRecord } from "@/lib/telegraph/client";
 
@@ -46,7 +46,7 @@ export interface EngineDeps {
     lookupSignal(signalHash: string): Promise<SignalRecord>;
   };
   chain: {
-    getReceipt(txHash: string): Promise<ChainReceipt>;
+    getReceipt(txHash: string, rpcUrl?: string): Promise<ChainReceipt>;
     getGasPrice(chain: string): Promise<{ chain: string; gasPriceWei: number; gasPriceGwei: number; rpcUrl: string }>;
   };
   /** Free research: real reads of key-less public sources (price APIs). */
@@ -64,7 +64,7 @@ export function defaultDeps(): EngineDeps {
       lookupSignal: (h) => telegraph.lookupSignal(h),
     },
     chain: {
-      getReceipt: (h) => getTransactionReceipt(h),
+      getReceipt: (h, rpcUrl?) => getTransactionReceipt(h, rpcUrl),
       getGasPrice: (c) => getGasPrice(c),
     },
     publicSource: {
@@ -552,7 +552,18 @@ async function executeSettlementCheck(
     );
   }
 
-  event(task, "action_started", `Check chosen next action: read OUR OWN payment settlement ${txHash.slice(0, 18)}… on the public Base Sepolia RPC (free, read-only)`, now);
+  // Read the receipt from the chain the network settled on, not a hardcoded
+  // one: operation 7188c593-4f13 proved a not_found when the x402 receipt
+  // named eip155:11155111 (Ethereum Sepolia) while the read hit Base Sepolia.
+  // Unknown chains keep the previous default; nothing is guessed.
+  const receiptChain = (primary.receipt as unknown as { chain?: string } | undefined)?.chain;
+  const rpcUrl = rpcForChainId(receiptChain) ?? undefined;
+  event(
+    task,
+    "action_started",
+    `Check chosen next action: read OUR OWN payment settlement ${txHash.slice(0, 18)}… on a public RPC for the settled chain${rpcUrl ? ` (named ${receiptChain})` : " (default)" } (free, read-only)`,
+    now,
+  );
 
   let lastError: unknown;
   let lastDiagnosis: { diagnostic: string; retryable: boolean } | null = null;
@@ -561,7 +572,7 @@ async function executeSettlementCheck(
 
   for (let attempt = 0; attempt <= task.permissions.maxRetries; attempt++) {
     try {
-      receipt = await deps.chain.getReceipt(txHash);
+      receipt = await deps.chain.getReceipt(txHash, rpcUrl);
       lastDiagnosis = null;
       break;
     } catch (err) {

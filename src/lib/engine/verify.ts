@@ -87,6 +87,29 @@ function canonicalEquivalent(a: unknown, b: unknown): boolean {
   }
 }
 
+/** Envelope keys the network layers around an answer before delivering it in
+ * one place and not the other (drop the transport wrapper, the content is what
+ * must match). Only stripped when it is the sole key holding an object. */
+const ENVELOPE_KEYS = new Set(["data", "result", "response"]);
+
+function unwrapEnvelope(x: unknown, depth = 0): unknown {
+  if (depth >= 3 || x === null || typeof x !== "object" || Array.isArray(x)) return x;
+  const entries = Object.entries(x as Record<string, unknown>);
+  if (entries.length === 1 && ENVELOPE_KEYS.has(entries[0][0])) {
+    return unwrapEnvelope(entries[0][1], depth + 1);
+  }
+  return x;
+}
+
+function shapesEquivalent(answerSide: unknown, candidateSide: unknown): boolean {
+  return (
+    canonicalEqual(answerSide, candidateSide) ||
+    canonicalEquivalent(answerSide, candidateSide) ||
+    canonicalEqual(unwrapEnvelope(answerSide), unwrapEnvelope(candidateSide)) ||
+    canonicalEquivalent(unwrapEnvelope(answerSide), unwrapEnvelope(candidateSide))
+  );
+}
+
 function flattenStrings(x: unknown, out: string[] = []): string[] {
   if (typeof x === "string") {
     out.push(x);
@@ -101,6 +124,18 @@ function flattenStrings(x: unknown, out: string[] = []): string[] {
 /** Substantive text: long enough to be unique, not a bare URL. */
 function substantiveStrings(x: unknown): string[] {
   return [...new Set(flattenStrings(x))].filter((s) => s.length >= 40 && !/^https?:\/\//i.test(s));
+}
+
+/** Every finite number the answer carries, in order of appearance. */
+function collectNumbers(x: unknown, out: number[] = []): number[] {
+  if (typeof x === "number") {
+    if (Number.isFinite(x)) out.push(x);
+  } else if (Array.isArray(x)) {
+    for (const item of x) collectNumbers(item, out);
+  } else if (x !== null && typeof x === "object") {
+    for (const v of Object.values(x as Record<string, unknown>)) collectNumbers(v, out);
+  }
+  return out;
 }
 
 function scalarAnswerRecordedIn(record: SignalRecord, answer: string | number | boolean): boolean {
@@ -142,7 +177,7 @@ export function signalRecordMatchesAnswer(record: SignalRecord | null, answer: u
   const candidates = candidateResults(record);
   for (const candidate of candidates) {
     if (candidate === undefined || candidate === null) continue;
-    if (canonicalEqual(candidate, answer) || canonicalEquivalent(candidate, answer)) {
+    if (shapesEquivalent(answer, candidate)) {
       return true;
     }
   }
@@ -156,8 +191,21 @@ export function signalRecordMatchesAnswer(record: SignalRecord | null, answer: u
   const answerStrings = flattenStrings(answer);
   if (answerStrings.length === 0) return false;
   const sigs = substantiveStrings(answer);
-  // Too short to distinguish from server-side noise: refuse rather than wave through.
-  if (sigs.length === 0) return false;
+  if (sigs.length === 0) {
+    // No long text to anchor on: numeric-facts answers (e.g. CRYPTO_PRICE_USD,
+    // where the record holds {data:{amount,"base",currency}} and the delivered
+    // shape may carry the same facts in a flat form). Verify only when EVERY
+    // number and EVERY non-URL string the answer carries is recorded verbatim.
+    // An answer with neither numbers nor text signatures has nothing that
+    // distinguishes it from noise; refuse rather than wave it through.
+    const numbers = collectNumbers(answer);
+    if (numbers.length === 0) return false;
+    const leaves = flattenLeaves([record.result, record.payload]);
+    if (!numbers.every((n) => leaves.some((leaf) => canonicalEquivalent(leaf, n)))) return false;
+    const answerTokens = answerStrings.filter((s) => !/^https?:\/\//i.test(s));
+    const recordStrings = flattenStrings([record.result, record.payload]);
+    return answerTokens.every((s) => containedIn(recordStrings, s)) || answerTokens.length === 0;
+  }
   const recordTextSections = flattenStrings([record.result, record.payload]);
   const sigsPresent = sigs.every((s) => containedIn(recordTextSections, s));
   if (!sigsPresent) return false;
