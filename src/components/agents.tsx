@@ -65,12 +65,12 @@ export default function Agents() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
-      <Link href="/" className="inline-flex min-h-10 items-center gap-1 text-[12.5px] font-medium text-amber transition-colors hover:text-amber-soft">
+      <Link href="/console" className="inline-flex min-h-10 items-center gap-1 text-[12.5px] font-medium text-amber transition-colors hover:text-amber-soft">
         <ChevronLeft size={13} aria-hidden /> Overview
       </Link>
       <div className="mt-3 max-w-2xl">
-        <p className="x-label">Capability matrix</p>
-        <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Agents</h1>
+        <p className="x-tag">NS-WSP/16 · MATRIX</p>
+        <h1 className="x-display-1 mt-3 text-ink">Agents</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
           What each agent can do, stated plainly. Capabilities marked Planned do not exist in the service yet and
           those agents are never shown as active.

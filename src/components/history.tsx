@@ -109,8 +109,8 @@ export default function HistoryView() {
   return (
     <div className="mx-auto max-w-5xl px-4 pb-16 sm:px-6">
       <div className="pt-8 sm:pt-10">
-        <p className="x-label">The record of record</p>
-        <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">History</h1>
+        <p className="x-tag">NS-WSP/14 · RECORD</p>
+        <h1 className="x-display-1 mt-3 text-ink">History</h1>
         <p className="mt-2 max-w-[64ch] text-[13px] leading-relaxed text-ink-soft">
           Every task this workspace has run, newest first. Open one to see its timeline, spending, and recorded
           evidence.

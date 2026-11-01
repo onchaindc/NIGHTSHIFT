@@ -35,8 +35,8 @@ export default function Settings() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="max-w-2xl">
-        <p className="x-label">System configuration</p>
-        <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Settings</h1>
+        <p className="x-tag">NS-WSP/15 · CONFIG</p>
+        <h1 className="x-display-1 mt-3 text-ink">Settings</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
           How this NIGHTSHIFT instance is configured. Names and states only; secret values never appear here.
         </p>
