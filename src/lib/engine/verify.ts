@@ -304,9 +304,26 @@ export async function verifyTask(
   if (criteria.expectedAsset && answer) {
     const assetMention = findLooseString(answer, criteria.expectedAsset);
     if (!assetMention) {
-      fail(
-        `the purchased answer is not about the requested asset: the goal named ${criteria.expectedAsset}, but the answer carries no matching symbol/asset field. A successful purchase would not complete this goal`,
-      );
+      // The ask body reads miner output into the intent shape, which can be a
+      // numeric-only object ({price_usd: 77957.665}) with no asset field at
+      // all. Asset identity is then proven against the record served for the
+      // SAME signal — already verified above to match the delivered answer —
+      // but ONLY from the purchased response content (a request string that
+      // merely quotes the asset is not evidence). Neither the answer nor the
+      // recorded response naming the asset means the goal cannot be
+      // attributed to the request; refuse fail-closed.
+      const recordedResponses: unknown[] = [
+        (record.result as { execution?: { result?: unknown } } | undefined)?.execution?.result,
+        (record.payload as { response?: unknown } | undefined)?.response,
+      ].filter((part) => part !== undefined && part !== null);
+      const assetInRecordedResponse =
+        criteria.primaryVerifiedAgainstNodeSignal &&
+        recordedResponses.some((part) => findLooseString(part, criteria.expectedAsset!));
+      if (!assetInRecordedResponse) {
+        fail(
+          `the purchased answer is not about the requested asset: the goal named ${criteria.expectedAsset}, but neither the answer nor the node's recorded response for this signal carries a matching symbol/asset field. A successful purchase would not complete this goal`,
+        );
+      }
     }
   }
   if (criteria.expectedChain && answer) {

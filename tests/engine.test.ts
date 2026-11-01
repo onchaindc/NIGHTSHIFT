@@ -716,6 +716,67 @@ describe("goal-specific verification", () => {
     expect(done.error).toMatch(/not about the requested asset/);
   });
 
+  describe("asset identity when the intent shape carries no asset field (real CRYPTO_PRICE_USD delivery)", () => {
+    // The node's ask body reads the miner output into the intent shape:
+    // {price_usd: 77957.665} — numeric-only, no asset field (same shape as the
+    // served record keeps for operation e0f11025's predecessor). Asset
+    // identity must then be proven by the recorded purchased response for the
+    // SAME signal, which the answer match already verified.
+    const btcRecord = (answer: Record<string, unknown>) => async (h: string) =>
+      ({
+        signal_hash: h,
+        result: { execution: { result: answer } },
+        payload: { response: answer },
+        signal: { created_at: new Date().toISOString() },
+      });
+
+    it("completes a numeric-only answer whose recorded purchased response carries the requested asset", async () => {
+      const answer = { data: { amount: "77957.665", base: "BTC", currency: "USD" } };
+      const dep = makeDeps({
+        askAuto: async () => ({ ...GOOD_ANSWER, answer: { price_usd: 77957.665 } }),
+        lookupSignal: btcRecord(answer),
+      });
+      const task = await createdTask("What is the BTC price in USD?", true);
+      const done = await approveTask(task.id, dep);
+      expect(done.state).toBe("completed");
+    });
+
+    it("completes without ever naming the asset inside the answer, only through the recorded response", async () => {
+      const answer = { amount: "77957.665", base: "BTC", currency: "USD" };
+      const dep = makeDeps({
+        askAuto: async () => ({ ...GOOD_ANSWER, answer: { price_usd: 77957.665 } }),
+        lookupSignal: btcRecord(answer),
+      });
+      const task = await createdTask("What is the BTC price in USD?", true);
+      const done = await approveTask(task.id, dep);
+      expect(done.state).toBe("completed");
+    });
+
+    it("refuses when the recorded purchased response names a different asset", async () => {
+      const answer = { data: { amount: "3000.00", base: "SOL", currency: "USD" } };
+      const dep = makeDeps({
+        askAuto: async () => ({ ...GOOD_ANSWER, answer: { price_usd: 3000 } }),
+        lookupSignal: btcRecord(answer),
+      });
+      const task = await createdTask("What is the BTC price in USD?", true);
+      const done = await approveTask(task.id, dep);
+      expect(done.state).toBe("failed");
+      expect(done.error).toMatch(/not about the requested asset/);
+    });
+
+    it("refuses when neither the answer nor the recorded response names the asset anywhere", async () => {
+      const answer = { amount_usd: 77957.665 };
+      const dep = makeDeps({
+        askAuto: async () => ({ ...GOOD_ANSWER, answer: { price_usd: 77957.665 } }),
+        lookupSignal: btcRecord(answer),
+      });
+      const task = await createdTask("What is the BTC price in USD?", true);
+      const done = await approveTask(task.id, dep);
+      expect(done.state).toBe("failed");
+      expect(done.error).toMatch(/not about the requested asset/);
+    });
+  });
+
   it("whenever a priced attempt never delivers, the ledger flags it as uncertain instead of silently zero", async () => {
     let n = 0;
     const dep = makeDeps({
