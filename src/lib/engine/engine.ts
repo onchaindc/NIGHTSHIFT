@@ -249,7 +249,7 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
     event(
       task,
       "criteria_defined",
-      `Cost: PAID intelligence (Telegraph). Requires TELEGRAPH_EVM_PRIVATE_KEY (a Base Sepolia wallet funded with test USDC). Maximum ${"$"}${(limitUsdCents / 100).toFixed(2)}; refused before signing if the network prices above what remains.`,
+      `Cost: PAID intelligence (Telegraph). Requires TELEGRAPH_EVM_PRIVATE_KEY (a wallet on the network's chain, Ethereum Sepolia, funded with the network's test token). Maximum ${"$"}${(limitUsdCents / 100).toFixed(2)}; refused before signing if the network prices above what remains.`,
       now,
     );
   }
