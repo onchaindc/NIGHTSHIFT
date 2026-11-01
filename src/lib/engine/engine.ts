@@ -5,7 +5,7 @@ import { verifyTask, VerificationFailure } from "./verify";
 import { extractGasGwei, extractUsdCost } from "./planner";
 import { canTransition, type ActionId, type ExecutionEvent, type ExecutionEventType, type TaskRecord, type TaskState, type TelegraphAnswer, type Evidence, type PlanStep, type VerificationCriteria, type JobType, type WatchRef } from "./types";
 import * as telegraph from "@/lib/telegraph/client";
-import { executeWatchCheck, executeWatchCorroborate, executeWatchInvestigate, executeWatchDeliver, executeWatchReport } from "@/lib/watch/execute";
+import { executeWatchCheck, executeWatchCorroborate, executeWatchRepoInvestigate, executeWatchInvestigate, executeWatchDeliver, executeWatchReport } from "@/lib/watch/execute";
 import type { WatchRunState } from "@/lib/watch/types";
 import { getGasPrice, getTransactionReceipt, rpcForChainId } from "@/lib/chain/rpc";
 import type { ChainReceipt, ChainGasPrice } from "@/lib/chain/rpc";
@@ -281,9 +281,21 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
 /* Approval flow                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Approval is IDEMPOTENT: once a plan has approval, execution begins exactly
+ * once. An approve retried while the plan runs (or after it finished) returns
+ * the SAME task with no new run, so a repeated click or a dropped-connection
+ * retry can never re-execute steps or re-pay for intelligence. Only the
+ * awaiting_approval state accepts a fresh approval transition.
+ */
 export async function approveTask(id: string, deps: EngineDeps = defaultDeps()): Promise<TaskRecord> {
   const task = await getTask(id);
   if (!task) throw new EngineError(`task ${id} not found`);
+  if (task.state !== "awaiting_approval") {
+    // Already approved concurrently (or beyond): return the live task and let
+    // its real state speak, never start the plan a second time.
+    return task;
+  }
   transition(task, "executing");
   event(task, "plan_approved", "Plan approved by the user, execution begins", deps.now);
   await saveTask(task);
@@ -328,6 +340,9 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
         if (task.state !== "executing") return task;
       } else if (step.kind === "watch_corroborate") {
         await executeWatchCorroborate(task, deps, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "watch_repo_investigate") {
+        await executeWatchRepoInvestigate(task, deps, outputs);
         if (task.state !== "executing") return task;
       } else if (step.kind === "watch_investigate") {
         await executeWatchInvestigate(task, deps, outputs);

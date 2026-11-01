@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
+  ChevronRight,
   CircleDot,
   GitBranch,
   Rss,
@@ -297,12 +298,14 @@ function WatchRow({
   onDelete,
   busy,
   runError,
+  awaitingApprovalTaskId,
 }: {
   watch: WatchConfig;
   onRun: (id: string, investigate: boolean) => void;
   onDelete: (id: string) => void;
   busy: string | null;
   runError: string | null;
+  awaitingApprovalTaskId: string | null;
 }) {
   const [confirming, setConfirming] = useState(false);
   const baselineCount = Object.keys(watch.fingerprints ?? {}).length;
@@ -395,6 +398,20 @@ function WatchRow({
             Runs are recorded in History →
           </Link>
         </div>
+        {awaitingApprovalTaskId && (
+          <div className="mt-2.5 rounded-md border border-amber/40 bg-amber/5 px-3 py-2.5">
+            <p className="text-[12.5px] leading-relaxed text-amber-soft">
+              The check + investigation plan is built and waiting for your approval before anything is paid. The
+              operation keeps its own task page the whole way through.
+            </p>
+            <Link
+              href={`/tasks/${awaitingApprovalTaskId}`}
+              className="mt-2 inline-flex min-h-9 items-center gap-1 text-[12px] font-medium text-amber transition-colors hover:text-amber-soft"
+            >
+              Inspect the plan &amp; approve on the task page <ChevronRight size={12} aria-hidden />
+            </Link>
+          </div>
+        )}
         {runError && (
           <p role="alert" className="mt-2.5 rounded-md border border-risk/40 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">
             {runError}
@@ -415,6 +432,7 @@ export default function Watch() {
   const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
+  const [awaitingApproval, setAwaitingApproval] = useState<Record<string, string>>({});
   const [intervalLabel, setIntervalLabel] = useState<string>("10 minutes");
   const [sched, setSched] = useState<{
     degraded: boolean;
@@ -480,9 +498,20 @@ export default function Watch() {
       if (!res.ok) {
         setRunErrors((prev) => ({ ...prev, [id]: body.error ?? `status ${res.status}` }));
       } else if (body.task && body.task.state === "awaiting_approval") {
-        setRunErrors((prev) => ({ ...prev, [id]: `Plan built and waiting for your approval before the paid step. Approve it in the Approvals view (task ${body.task!.id.slice(0, 8)}).` }));
+        // The plan is real and resumable: point the user straight at the task
+        // it belongs to, so approval never loses the operation.
+        setAwaitingApproval((prev) => ({ ...prev, [id]: body.task!.id }));
       } else if (body.task && body.task.state === "failed") {
-        setRunErrors((prev) => ({ ...prev, [id]: `Check failed: ${body.task!.error ?? "unknown error"}. Open the run for the full timeline.` }));
+        setAwaitingApproval((prev) => {
+          const { [id]: _, ...rest } = prev;
+          return rest;
+        });
+        setRunErrors((prev) => ({ ...prev, [id]: `Check failed: ${body.task!.error ?? "unknown error"}. Open the run from the run list below for the full timeline.` }));
+      } else if (body.task) {
+        setAwaitingApproval((prev) => {
+          const { [id]: _, ...rest } = prev;
+          return rest;
+        });
       }
     } catch (err) {
       setRunErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : String(err) }));
@@ -576,6 +605,7 @@ export default function Watch() {
               onDelete={removeWatch}
               busy={busy}
               runError={runErrors[w.id] ?? null}
+              awaitingApprovalTaskId={awaitingApproval[w.id] ?? null}
             />
           ))}
         </div>

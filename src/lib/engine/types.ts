@@ -1,3 +1,5 @@
+import type { RepoReport } from "@/lib/watch/repo-intel";
+
 /**
  * NIGHTSHIFT task engine — shared types.
  *
@@ -53,6 +55,9 @@ export type ExecutionEventType =
   | "watch_corroborated"
   | "watch_paid_skipped"
   | "watch_report_ready"
+  // Repository Intelligence events (recorded reads + classified findings)
+  | "repo_intel_scope"
+  | "repo_intel_finding"
   | "delivery_started"
   | "delivery_succeeded"
   | "delivery_failed"
@@ -136,6 +141,12 @@ export interface TaskResult {
   /** Evidence backing the summary. A task is completed ONLY when evidence verifies. */
   evidence: Evidence[];
   completedAt: number;
+  /**
+   * A completed Repository Intelligence report, present only when the
+   * investigation stage actually ran. Its absence is what distinguishes a
+   * routine no-change check from a completed technical examination.
+   */
+  repoReport?: RepoReport;
 }
 
 export type Evidence =
@@ -173,6 +184,16 @@ export type Evidence =
       rpcUrl: string;
     }
   | {
+      /**Repository Intelligence evidence: a classified finding restating data
+       * actually fetched from GitHub (commit hashes, advisory ids, versions). */
+      kind: "repo_intel";
+      findingTitle: string;
+      severity: string;
+      category: string;
+      evidence: string[];
+      url: string | null;
+    }
+  | {
       /** Free research evidence: a real read of a public source (e.g. a price API). */
       kind: "public_source_lookup";
       url: string;
@@ -193,6 +214,7 @@ export type PlanStepKind =
   | "watch_check"
   | "watch_corroborate"
   | "watch_investigate"
+  | "watch_repo_investigate"
   | "watch_deliver"
   | "watch_report";
 
