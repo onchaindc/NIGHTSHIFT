@@ -94,7 +94,7 @@ export default function Approvals() {
             <p className="x-label !text-amber/80">Exposure if all approved</p>
             <p className="mt-1 tabular text-[20px] font-semibold leading-none text-amber">{money(totalCeiling)}</p>
             <p className="mt-1 text-[10.5px] text-ink-faint">
-              {pending.length} plan{pending.length === 1 ? "" : "s"} · most is only spent when verified steps run
+              {pending.length} plan{pending.length === 1 ? "" : "s"} · each task spends at most its own limit
             </p>
           </div>
         )}

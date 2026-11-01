@@ -129,7 +129,7 @@ async function autoScan(): Promise<void> {
     const interval = watchIntervalMs();
     const watches = await listWatches();
     const now = Date.now();
-    await reconcileStaleWatchTasks(now);
+    await reconcileStaleTasks(now);
     for (const w of watches) {
       const due = w.lastCheckedAt === null || now - w.lastCheckedAt >= interval;
       if (!due) continue;
@@ -195,6 +195,47 @@ async function autoScan(): Promise<void> {
 /** One immediate scan; exported for tests and manual recovery. */
 export async function runAutoScanOnce(): Promise<void> {
   await autoScan();
+}
+
+/**
+ * Interrupted-run recovery for ordinary goal tasks. A paid or free operation
+ * whose worker died mid-run (frozen lambda, deploy, crash) leaves its task
+ * record in executing/verifying (or the transient pre-run states) forever;
+ * without this every such task pollutes the Overview and History as
+ * "Working" while its activity log already shows the failed purchases.
+ *
+ * SAFETY: the record only gets an honest terminal state, after a grace
+ * window far beyond any legitimate run (the request keeps running up to
+ * maxDuration), guarded by canTransition so a live runner is never touched
+ * and reconciliation is never applied twice. Spend entries recorded before
+ * the interruption stay on record; nothing is marked complete.
+ */
+export async function reconcileStaleTasks(now: number, graceMs = 15 * 60_000): Promise<number> {
+  const watchReconciled = await reconcileStaleWatchTasks(now, graceMs);
+  const { listTasks, getTask, saveTask } = await import("@/lib/engine/store");
+  let reconciled = 0;
+  try {
+    for (const t of await listTasks()) {
+      if (t.jobType === "protocol_watch") continue; // handled by reconcileStaleWatchTasks
+      if (t.state !== "created" && t.state !== "planning" && t.state !== "executing" && t.state !== "verifying") continue;
+      if (now - t.updatedAt <= graceMs) continue; // could still be a live run
+      const fresh = await getTask(t.id);
+      if (!fresh || fresh.state !== t.state || !canTransition(fresh.state, "failed")) continue;
+      fresh.state = "failed";
+      fresh.error = "Execution was interrupted before a result was recorded (the worker stopped mid-run). Nothing was completed; relaunch the objective if it still matters.";
+      fresh.events.push({
+        id: randomUUID(),
+        ts: now,
+        type: "task_failed",
+        message: "Execution was interrupted mid-run (worker loss). Nothing was completed; recorded spend entries stay on the record.",
+      });
+      await saveTask(fresh);
+      reconciled++;
+    }
+  } catch (err) {
+    console.error("stale task reconciliation failed:", err);
+  }
+  return watchReconciled + reconciled;
 }
 
 /**

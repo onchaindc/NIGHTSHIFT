@@ -615,7 +615,7 @@ export async function executeWatchDeliver(
       { failed: outcome.failed, pendingRetry: true },
     );
   } else if (fresh.length === 0) {
-    await tools.event(task, "delivery_skipped", "All detected changes were already recorded as alerts — no duplicate notification sent.");
+    await tools.event(task, "delivery_skipped", "All detected changes were already recorded as alerts, so no duplicate notification was sent.");
   }
 }
 

@@ -110,7 +110,7 @@ function relSummary(sourceLabel: string, summary: string): string {
 export function alertText(alerts: WatchAlert[], baseReportUrl: string | null): string {
   const first = alerts[0];
   const lines: string[] = [];
-  lines.push(`🔎 Protocol Watch — ${first.protocol} (${first.watchName})`);
+  lines.push(`🔎 Protocol Watch: ${first.protocol} (${first.watchName})`);
   const observed = new Date(first.observedAt).toISOString().replace("T", " ").slice(0, 16);
   for (const a of alerts) {
     lines.push("");
@@ -119,7 +119,7 @@ export function alertText(alerts: WatchAlert[], baseReportUrl: string | null): s
     if (a.before?.summary && change) lines.push(`  ${change.slice(0, 200)}`);
     if (a.detail) lines.push(`  → ${a.detail.replace(/\s+/g, " ").slice(0, 240)}`);
     if (a.severity === "high") {
-      lines.push("  Importance: security-relevant keywords in the source text — NOT a confirmed incident; verify at the evidence link.");
+      lines.push("  Importance: security-relevant keywords in the source text. Not a confirmed incident; verify at the evidence link.");
     } else if (a.severity === "notable") {
       lines.push("  Importance: breaking/deprecation/governance keywords in the source text.");
     }

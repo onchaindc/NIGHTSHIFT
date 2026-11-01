@@ -217,7 +217,7 @@ function JobConfig({
                   id: "paid" as const,
                   title: "Paid research",
                   price: "up to your ceiling",
-                  blurb: "Buys an answer on the Telegraph network. Requires the paid-research wallet configured first — check Settings.",
+                  blurb: "Buys an answer on the Telegraph network. Requires the paid-research wallet in Settings to be configured first.",
                 },
                 {
                   id: "auto" as const,
@@ -464,7 +464,7 @@ function OperationMonitor({
         {task && running && !awaiting && (
           <div className="space-y-3">
             <p className="text-[12px] text-ink-faint" aria-live="polite">
-              Working — updates appear here automatically.
+              Working. Updates appear here automatically.
             </p>
             <div className="max-h-56 overflow-y-auto rounded-md border border-edge bg-panel-2 px-3.5 py-2">
               <ActivityLog events={task.events.slice(-8)} />
