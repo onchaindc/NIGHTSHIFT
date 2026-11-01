@@ -8,8 +8,8 @@ import { humanize } from "@/lib/ui/humanize";
  */
 
 const CAUSES = [
-  "Telegraph paid inference is not configured: the task would require an X402 payment. Set TELEGRAPH_EVM_PRIVATE_KEY (a Base Sepolia wallet funded with test USDC) to enable real purchases.",
-  "Cost: PAID intelligence (Telegraph). Requires TELEGRAPH_EVM_PRIVATE_KEY (a Base Sepolia wallet funded with test USDC). Maximum $1.00.",
+  "Telegraph paid inference is not configured: the task would require an X402 payment. Set TELEGRAPH_EVM_PRIVATE_KEY to a wallet on the challenge's chain (Ethereum Sepolia, eip155:11155111 on the current network) holding the network's test token, to enable real purchases.",
+  "Cost: PAID intelligence (Telegraph). Requires TELEGRAPH_EVM_PRIVATE_KEY (a wallet on the network's chain, Ethereum Sepolia, funded with the network's test token). Maximum $1.00.",
   "no external trigger is configured (NIGHTSHIFT_EXTERNAL_CRON): scheduled Protocol Watch checks do not run",
   "authorization required: this deployment gates watch management behind a bearer token (NIGHTSHIFT_API_TOKEN)",
 ];

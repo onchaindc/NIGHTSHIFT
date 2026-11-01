@@ -684,10 +684,10 @@ describe("goal-specific verification", () => {
         n++;
         if (n === 1) {
           // Settled-challenge scenario: priced, then routing failed.
-          o.onChallenge?.({ amountUsdCents: 1 });
+          o.onChallenge?.({ amountUsdCents: 1, scheme: "exact", network: "eip155:11155111" });
           throw new Error("HTTP 502 request failed");
         }
-        o.onChallenge?.({ amountUsdCents: 1 });
+        o.onChallenge?.({ amountUsdCents: 1, scheme: "exact", network: "eip155:11155111" });
         return { ...GOOD_ANSWER };
       },
     });    const task = await createdTask("goal twenty-one", true);
