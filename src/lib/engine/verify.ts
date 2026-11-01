@@ -189,14 +189,15 @@ export function signalRecordMatchesAnswer(record: SignalRecord | null, answer: u
   if (answer === null || typeof answer !== "object") return false;
 
   const answerStrings = flattenStrings(answer);
-  if (answerStrings.length === 0) return false;
   const sigs = substantiveStrings(answer);
   if (sigs.length === 0) {
     // No long text to anchor on: numeric-facts answers (e.g. CRYPTO_PRICE_USD,
-    // where the record holds {data:{amount,"base",currency}} and the delivered
-    // shape may carry the same facts in a flat form). Verify only when EVERY
-    // number and EVERY non-URL string the answer carries is recorded verbatim.
-    // An answer with neither numbers nor text signatures has nothing that
+    // where the record holds {data:{amount,"base",currency}} and the ask body
+    // reads result into the intent shape — a numeric-ONLY object such as
+    // {price_usd: 77957.445} with no asset string at all). Verify only when
+    // EVERY number and EVERY non-URL string the answer carries is recorded
+    // verbatim: a tampered price is a number the record never held, so it
+    // refuses. An answer with neither numbers nor strings has nothing that
     // distinguishes it from noise; refuse rather than wave it through.
     const numbers = collectNumbers(answer);
     if (numbers.length === 0) return false;

@@ -528,7 +528,16 @@ async function executeTelegraphAsk(task: TaskRecord, deps: EngineDeps): Promise<
       minerId: answer.minerId,
     },
   );
-  event(task, "step_succeeded", `Answer received from ${answer.minerName ?? answer.minerId} (signal ${answer.signalHash})`, now);
+  // Persist exactly what was delivered and what the node recorded for it: a
+  // verifi-cation refusal should never have to be re-diagnosed with another
+  // paid request (the answer itself is task evidence, not a secret).
+  event(
+    task,
+    "step_succeeded",
+    `Answer received from ${answer.minerName ?? answer.minerId} (signal ${answer.signalHash})`,
+    now,
+    { deliveredAnswer: answer.answer },
+  );
   return answer;
 }
 

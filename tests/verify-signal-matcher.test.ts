@@ -84,6 +84,41 @@ const OP7188C593_RECORD: SignalRecord = {
   verification: { algorithm: "keccak256", commitment: "payload", verified: true },
 } as unknown as SignalRecord;
 
+/**
+ * Real signal record served for operation d59b2d92 (signal 0x2da86e50…3f46,
+ * same miner and intent). Includes the full rich record (routing with
+ * reasoning text, cost_usd, duration_ms) exactly as the node serves it.
+ */
+const OPD59B2D92_RECORD: SignalRecord = {
+  signal_hash: "0x2da86e50bc55b5a88fd5dd841d93171d3826389d5d4eb3889cabee8061c31f46",
+  kind: "direct_result",
+  result: {
+    id: "81c43059-2ece-4496-a422-20abf06742f0",
+    type: "direct",
+    source: "user",
+    status: "success",
+    routing_mode: "auto",
+    routing: {
+      subnet_id: "190069",
+      subnet_name: "Cp Coinbase",
+      miner_slug: "cp-coinbase",
+      reasoning:
+        "Intent: The query 'btc price' directly asks for the current price of Bitcoin (BTC), which maps to the CRYPTO_PRICE_USD intent. As a fallback, WEB_SEARCH_GENERAL is appropriate for retrieving up-to-date market data.",
+      intent: "CRYPTO_PRICE_USD",
+    },
+    execution: { result: { data: { amount: "77957.445", base: "BTC", currency: "USD" } }, cost_usd: 0.01, duration_ms: 431 },
+  },
+  payload: {
+    intent_id: "CRYPTO_PRICE_USD",
+    miner_slug: "cp-coinbase",
+    subnet_id: "190069",
+    wallet_address: "0xE00Ecb51e1bA79731E78D443A90e3AD200107c4b",
+    request: "btc price",
+    response: { data: { amount: "77957.445", base: "BTC", currency: "USD" } },
+  } as unknown as Record<string, unknown>,
+  verification: { algorithm: "keccak256", commitment: "payload", verified: true },
+} as unknown as SignalRecord;
+
 describe("signal record vs accepted answer", () => {
   it("verifies an intent-shaped answer against the raw recorded output (the live case that previously refused)", () => {
     expect(signalRecordMatchesAnswer(RAW_RECORD, INTENT_ANSWER)).toBe(true);
@@ -154,6 +189,31 @@ describe("signal record vs accepted answer", () => {
       expect(
         signalRecordMatchesAnswer(OP7188C593_RECORD, { amount: "78045.525", base: "BTC", currency: "USD", note: "own commentary that is nowhere in the node record" }),
       ).toBe(false);
+    });
+  });
+
+  describe("operation d59b2d92 (the ask body reads result into the intent shape: numeric-only)", () => {
+    // The node's documented 200 body for CRYPTO_PRICE_USD carries
+    // "result": {"price_usd": 77648.845} — result_shape "intent": a bare
+    // number with NO asset string. An object answer that flattens to zero
+    // strings must still reach the numeric-facts check instead of being
+    // waved to refusal.
+    it("verifies the exact delivered shape {price_usd: <number>} against the raw recorded output", () => {
+      expect(signalRecordMatchesAnswer(OPD59B2D92_RECORD, { price_usd: 77957.445 })).toBe(true);
+    });
+
+    it("verifies the same delivered shape against the sibling 7188c593 record", () => {
+      expect(signalRecordMatchesAnswer(OP7188C593_RECORD, { price_usd: 78045.525 })).toBe(true);
+    });
+
+    it("refuses a tampered price the record never held", () => {
+      expect(signalRecordMatchesAnswer(OPD59B2D92_RECORD, { price_usd: 77957.446 })).toBe(false);
+      expect(signalRecordMatchesAnswer(OPD59B2D92_RECORD, { price_usd: 99999 })).toBe(false);
+    });
+
+    it("refuses a numeric answer whose number is absent from the record", () => {
+      expect(signalRecordMatchesAnswer(OPD59B2D92_RECORD, 78000)).toBe(false);
+      expect(signalRecordMatchesAnswer(OPD59B2D92_RECORD, { foo: 1 })).toBe(false);
     });
   });
 });
