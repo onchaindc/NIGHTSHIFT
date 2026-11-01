@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
-  ArrowUpRight,
   ChevronRight,
   Crosshair,
   Radar,
@@ -94,33 +93,22 @@ function buildMetrics(tasks: TaskRecord[], protocolWatch: number, watchAlerts: n
   ];
 }
 
-function MetricTile({ m }: { m: Metric }) {
-  const Icon = m.icon;
+function MetricCell({ m }: { m: Metric }) {
   return (
     <Link
       href={m.href}
-      className="group relative rounded-lg border border-edge bg-panel p-4 transition-colors hover:border-edge-strong"
+      className={`group block px-5 py-5 transition-colors hover:bg-panel-2/60 ${
+        m.tone?.startsWith("text-amber") ? "sm:border-l-2 sm:border-l-amber/60 sm:bg-amber/[0.03]" : ""
+      }`}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-baseline justify-between gap-2">
         <p className="x-label">{m.label}</p>
-        <span
-          aria-hidden
-          className={`grid h-7 w-7 place-items-center rounded-md border transition-colors ${
-            m.tone?.startsWith("text-amber")
-              ? "border-amber/40 bg-amber/10 text-amber"
-              : "border-edge bg-panel-2 text-ink-faint group-hover:text-ink-soft"
-          }`}
-        >
-          <Icon size={13} strokeWidth={1.8} />
-        </span>
+        {m.tone?.startsWith("text-amber") && (
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
+        )}
       </div>
-      <p className={`mt-3 tabular text-[27px] font-semibold leading-none ${m.tone ?? "text-ink"}`}>{m.value}</p>
-      <p className="mt-1.5 text-[11.5px] text-ink-faint">{m.sub}</p>
-      <ArrowUpRight
-        size={13}
-        aria-hidden
-        className="absolute right-3 bottom-3 text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
-      />
+      <p className={`mt-3 tabular text-[30px] font-semibold leading-none ${m.tone ?? "text-ink"}`}>{m.value}</p>
+      <p className="mt-2 text-[11.5px] text-ink-faint">{m.sub}</p>
     </Link>
   );
 }
@@ -401,24 +389,29 @@ const CAPABILITIES = [
 
 function CapabilityStrip() {
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      {CAPABILITIES.map((c) => (
-        <div key={c.name} className={c.status === "available" ? "rounded-lg border border-edge bg-panel p-4" : "rounded-lg border border-edge bg-panel/40 p-4"}>
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-[13px] font-semibold text-ink">{c.name}</h3>
+    <div className="overflow-hidden rounded-lg border border-edge">
+      {CAPABILITIES.map((c, i) => (
+        <div
+          key={c.name}
+          className={`flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-4 ${
+            i > 0 ? "border-t border-edge" : ""
+          } ${c.status === "planned" ? "bg-panel/40" : "bg-panel"}`}
+        >
+          <div className="flex min-w-[240px] flex-wrap items-center gap-3">
+            <h3 className="text-[13.5px] font-semibold text-ink">{c.name}</h3>
             {c.status === "available" ? (
-              <span className="inline-flex items-center gap-1.5 rounded-sm border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">
+              <span className="inline-flex items-center gap-1.5 text-[10.5px] font-medium text-teal">
                 <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-teal" />
                 Live
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] font-medium text-ink-faint">
+              <span className="inline-flex items-center gap-1.5 text-[10.5px] font-medium text-ink-faint">
                 <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ink-faint" />
                 Planned
               </span>
             )}
           </div>
-          <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">{c.blurb}</p>
+          <p className="max-w-[52ch] flex-1 text-[12.5px] leading-relaxed text-ink-soft">{c.blurb}</p>
         </div>
       ))}
     </div>
@@ -553,16 +546,17 @@ export default function Overview() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
-      {/* Page head */}
+      {/* Page head: editorial statement, no chrome */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-2xl">
-          <p className="x-label">Autonomous intelligence operations</p>
-          <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Overview</h1>
-          <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
+          <p className="x-tag">NS-CNS/00 · WORKSPACE</p>
+          <h1 className="x-display-1 mt-3 text-ink">Overview</h1>
+          <p className="mt-3 max-w-[58ch] text-[13.5px] leading-relaxed text-ink-soft">
             The real state of this workspace: what is running, what is verified, and what it actually cost. Every number
             comes from the task store — nothing is estimated or simulated.
           </p>
         </div>
+        <p className="x-tag hidden lg:block">DATED · {new Date().toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" }).toUpperCase()}</p>
       </div>
 
       {tasks !== null && loadFailed && (
@@ -572,9 +566,9 @@ export default function Overview() {
       )}
 
       {tasks === null && !loadFailed && (
-        <div aria-live="polite" className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div aria-live="polite" className="mt-8 grid gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-2 xl:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-[118px] rounded-lg bg-panel-2 motion-safe:animate-pulse" />
+            <div key={i} className="h-[118px] bg-panel-2 motion-safe:animate-pulse" />
           ))}
         </div>
       )}
@@ -582,9 +576,9 @@ export default function Overview() {
       {tasks !== null && !loadFailed && (
         <div className="mt-8 space-y-10">
           <section aria-label="Metrics">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-px overflow-hidden rounded-lg border border-edge bg-edge sm:grid-cols-2 xl:grid-cols-4">
               {metrics.map((m) => (
-                <MetricTile key={m.label} m={m} />
+                <MetricCell key={m.label} m={m} />
               ))}
             </div>
           </section>
@@ -592,7 +586,7 @@ export default function Overview() {
           {status !== null || statusDown ? (
             <section aria-label="Connected services">
               <div className="mb-3 flex items-baseline justify-between gap-2">
-                <h2 className="x-label">Connected services</h2>
+              <p className="x-label"><span className="text-amber">01</span> · CONNECTED SERVICES</p>
               </div>
               <SystemStrip status={status} down={statusDown} />
             </section>
@@ -600,7 +594,7 @@ export default function Overview() {
 
           <section aria-label="Active operations">
             <div className="mb-3 flex items-baseline justify-between gap-2">
-              <h2 className="x-label">Active operations</h2>
+              <h2 className="x-label"><span className="text-amber">02</span> · ACTIVE OPERATIONS</h2>
               <span className="tabular text-[11px] text-ink-faint">{active.length} running</span>
             </div>
             {active.length === 0 ? (
@@ -636,7 +630,7 @@ export default function Overview() {
 
           <section aria-label="Live activity">
             <div className="mb-3 flex items-baseline justify-between gap-2">
-              <h2 className="x-label">Live activity</h2>
+              <h2 className="x-label"><span className="text-amber">03</span> · LIVE ACTIVITY</h2>
               <span className="inline-flex items-center gap-1.5 text-[11px] text-ink-faint">
                 <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber motion-safe:animate-pulse" />
                 refreshes every 2.5 s
@@ -647,7 +641,7 @@ export default function Overview() {
 
           <section aria-label="Capabilities">
             <div className="mb-3 flex items-baseline justify-between gap-2">
-              <h2 className="x-label">Capabilities</h2>
+              <h2 className="x-label"><span className="text-amber">04</span> · CAPABILITIES</h2>
           <Link href="/agents" className="inline-flex min-h-8 items-center gap-1 text-[11.5px] font-medium text-amber hover:text-amber-soft">
                 Full capability matrix <ChevronRight size={12} aria-hidden />
               </Link>

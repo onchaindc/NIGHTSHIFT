@@ -82,8 +82,8 @@ export default function Approvals() {
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-2xl">
-          <p className="x-label">Decisions before money moves</p>
-          <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Approvals</h1>
+          <p className="x-tag">NS-WSP/13 · GATES</p>
+          <h1 className="x-display-1 mt-3 text-ink">Approvals</h1>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
             Operations whose plans are ready but not yet paid for. Approving lets the agent make its planned purchase
             within the ceiling; rejecting stops the task with nothing spent.

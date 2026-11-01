@@ -43,8 +43,16 @@ async function run(browser, viewport, label) {
   page.on("console", (m) => { if (m.type === "error") errors.push(m.text().slice(0, 160)); });
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 160)));
 
-  // 1. Overview
+  // 1a. Landing page (/)
   await page.goto(base + "/", { waitUntil: "networkidle", timeout: 45000 });
+  await page.waitForTimeout(1000);
+  const landingText = await page.locator("body").textContent();
+  const landingHasShell = await page.locator("aside nav").count();
+  note(`${label} landing: hero=${landingText.includes("Give it the outcome")}, schematic=${(await page.locator("svg[role=img]").count()) > 0}, cta-console=${(await page.locator("header a[href='/console']").count()) > 0}, intel=${/Operations run/.test(landingText)}, shell-free=${landingHasShell === 0}`);
+  await page.screenshot({ path: `.data/shots/cc-${label}-landing.jpeg`, type: "jpeg", quality: 70 });
+
+  // 1b. Workspace Overview (/console)
+  await page.goto(base + "/console", { waitUntil: "networkidle", timeout: 45000 });
   await page.waitForTimeout(1200);
   const headerText = await page.locator("header").textContent();
   note(`${label} header: NIGHTSHIFT=${headerText.includes("NIGHTSHIFT")}, context Overview=${headerText.includes("Overview:") || headerText.includes("Overview")}, status=${/Operational|Degraded|API unreachable|Store unavailable|Checking/.test(headerText)}`);

@@ -538,8 +538,8 @@ export default function Operations() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="max-w-2xl">
-        <p className="x-label">Command the shift</p>
-        <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Operations</h1>
+        <p className="x-tag">NS-WSP/11 · LAUNCH</p>
+        <h1 className="x-display-1 mt-3 text-ink">Operations</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
           Pick a job, configure it once, launch. Every operation runs through the same engine with your ceiling,
           your approval rule, and verifiable outcomes.

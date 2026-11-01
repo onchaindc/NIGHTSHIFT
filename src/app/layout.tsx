@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
-import Shell from "@/components/shell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,18 +14,28 @@ const geistMono = Geist_Mono({
   display: "swap",
 });
 
+/** Editorial display voice for heroes and page statements. */
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-instrument",
+  weight: "400",
+  style: ["normal", "italic"],
+  subsets: ["latin"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "NIGHTSHIFT · Command Center",
+  title: {
+    default: "NIGHTSHIFT",
+    template: "%s · NIGHTSHIFT",
+  },
   description:
-    "Hand off a goal. Nightshift buys the data it needs within your budget, checks the result against public records, and shows its receipts.",
+    "Give it the outcome. Nightshift buys the data it needs within your budget, checks the result against public records, and shows its receipts.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full">
-        <Shell>{children}</Shell>
-      </body>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}>
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }

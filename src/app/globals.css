@@ -11,6 +11,8 @@
 @theme {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* Editorial display voice: heroes and page statements. */
+  --font-display: var(--font-instrument), Georgia, "Times New Roman", serif;
 
   /* Surfaces: midnight charcoal → graphite, cool but not blue */
   --color-night: #0a0b0d;
@@ -83,6 +85,40 @@ body {
 .tabular {
   font-family: var(--font-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
+}
+
+/* Display type scale: the editorial voice of the product. */
+.x-display-hero {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(2.9rem, 7.2vw, 6.25rem);
+  line-height: 0.98;
+  letter-spacing: -0.015em;
+}
+
+.x-display-1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.9rem, 3.4vw, 2.75rem);
+  line-height: 1.06;
+  letter-spacing: -0.01em;
+}
+
+.x-display-2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.45rem, 2.4vw, 1.9rem);
+  line-height: 1.12;
+}
+
+/* Micro mono metadata marks (document-control style). */
+.x-tag {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
 }
 
 /* Editorial section labels */

@@ -22,7 +22,7 @@ import {
  */
 
 const NAV = [
-  { href: "/", label: "Overview", icon: Compass },
+  { href: "/console", label: "Overview", icon: Compass },
   { href: "/operations", label: "Operations", icon: Terminal },
   { href: "/watch", label: "Protocol Watch", icon: Radar },
   { href: "/approvals", label: "Approvals", icon: ShieldCheck },
@@ -81,7 +81,7 @@ function systemState(status: StatusBody | null, down: boolean): SystemState {
 
 /** Contextual header: section label on the left, one primary action on the right. */
 const CONTEXT: Record<string, string> = {
-  "/": "Overview",
+  "/console": "Overview",
   "/operations": "Operations",
   "/watch": "Protocol Watch",
   "/approvals": "Approvals",
@@ -94,7 +94,7 @@ function contextLabel(pathname: string): string {
   const normalized = "/" + pathname.split("/").slice(1).join("/");
   if (CONTEXT[normalized]) return CONTEXT[normalized];
   if (normalized.startsWith("/tasks/")) return CONTEXT["operations"];
-  return CONTEXT["/"];
+  return CONTEXT["/console"];
 }
 
 function NavLink({ href, label, icon: Icon, active, onClick }: {
@@ -135,7 +135,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { status, down } = useSystemStatus();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const isActive = (href: string) => (href === "/console" ? pathname === "/console" : pathname.startsWith(href));
   const state = systemState(status, down);
 
   // The drawer is a real navigation state, not decoration: route changes close it.

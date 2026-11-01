@@ -513,8 +513,8 @@ export default function Watch() {
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <p className="x-label">Continuous protocol monitoring</p>
-          <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Protocol Watch</h1>
+          <p className="x-tag">NS-WSP/12 · MONITORING</p>
+          <h1 className="x-display-1 mt-3 text-ink">Protocol Watch</h1>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
             Monitor a protocol's legitimate public sources, detect real changes against recorded baselines, and
             deliver a verified report. Free checks are always safe; investigation costs only what you allow.
