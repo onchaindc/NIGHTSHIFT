@@ -146,7 +146,7 @@ export default function Agents() {
           </div>
           <p className="px-4 pb-3.5 text-[12px] leading-relaxed text-ink-soft sm:px-5">
             Continuous monitoring of real protocol sources with baselined change detection, an idempotent alert
-            ledger, and verified delivery — scheduled, recovered, and free to run.
+            ledger, and verified delivery. Scheduled, recovered, and free to run.
           </p>
         </article>
 

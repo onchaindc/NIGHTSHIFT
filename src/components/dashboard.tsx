@@ -553,7 +553,7 @@ export default function Overview() {
           <h1 className="x-display-1 mt-3 text-ink">Overview</h1>
           <p className="mt-3 max-w-[58ch] text-[13.5px] leading-relaxed text-ink-soft">
             The real state of this workspace: what is running, what is verified, and what it actually cost. Every number
-            comes from the task store — nothing is estimated or simulated.
+            comes from the task store; nothing is estimated or simulated.
           </p>
         </div>
         <p className="x-tag hidden lg:block">DATED · {new Date().toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" }).toUpperCase()}</p>

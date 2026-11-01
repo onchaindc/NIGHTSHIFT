@@ -173,7 +173,7 @@ const STAGES = [
   },
   {
     n: "04",
-    title: "Verification, not vibes",
+    title: "Verification against evidence",
     body: "Every result is checked against independent sources: chain reads, cross-checked gas telemetry, corroborated protocol findings. A claim without evidence is a failure, not a conclusion.",
     artifact: "CROSS-CHECKS",
   },
@@ -199,8 +199,8 @@ const CONTROLS = [
     body: "Summaries are backed by receipts, chain reads and corroborated findings. Unverified summaries are labelled as such.",
   },
   {
-    title: "Recovery, not retries",
-    body: "Alert delivery is exactly-once: a failed Telegram send is recorded, backed off, and retried until it is confirmed delivered.",
+    title: "Exactly-once alert delivery",
+    body: "A failed Telegram send is recorded, backed off, and retried until it is confirmed delivered. Nothing is silently dropped.",
   },
 ];
 
@@ -290,7 +290,7 @@ export default async function LandingPage() {
                 <p className="x-label mt-2">Protocol changes detected</p>
               </div>
             </div>
-            <p className="x-tag mt-8">LIVE COUNTS FROM THE PRODUCTION TASK STORE · REFRESHED HOURLY</p>
+            <p className="x-tag mt-8">LIVE COUNTS FROM THE PRODUCTION TASK STORE · REFRESHED EVERY MINUTE</p>
           </div>
         </section>
       )}

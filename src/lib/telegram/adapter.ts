@@ -178,7 +178,7 @@ export function blockedReport(t: TaskRecord): string {
   const reason = clampLine(humanize(t.error ?? blockerEvent?.message ?? "the plan was blocked"), 400);
   const lines = [`⛔ BLOCKED [${id}]`, "", reason, ""];
   if (t.spend.spentUsdCents > 0) lines.push(`Spent: $${(t.spend.spentUsdCents / 100).toFixed(2)} (limit $${(t.spend.limitUsdCents / 100).toFixed(2)})`);
-  else lines.push("Nothing was executed and nothing was spent — no payment was signed.");
+  else lines.push("Nothing was executed and nothing was spent. No payment was signed.");
   const reportLink = webReportLink(t.id);
   if (reportLink) lines.push("", `Full record: ${reportLink}`);
   return lines.join("\n").slice(0, 4000);
@@ -219,7 +219,7 @@ function formatFinal(t: TaskRecord): string {
   const lines = [`✅ COMPLETED [${id}]`];
   const intent = t.criteria.goalIntent ?? "information";
   if (intent === "preparation") {
-    lines.push("Preparation material produced — NIGHTSHIFT did NOT execute any action, and that remains unverified.");
+    lines.push("Preparation material produced. NIGHTSHIFT did not execute any action, so it remains unverified.");
   }
   if (t.result) {
     // The recorded summary already carries the actual answer, its real source
@@ -418,7 +418,7 @@ export async function handleUpdate(update: TgUpdate, deps: TelegramDeps = {}): P
     }
     case "/paid": {
       if (!arg) {
-        await send(chatId, "Usage: /paid <what you want researched> — explicitly starts a PAID Telegraph research task (needs TELEGRAPH_EVM_PRIVATE_KEY) and waits for your /approve before anything is spent.");
+        await send(chatId, "Usage: /paid <what you want researched>. Explicitly starts a PAID Telegraph research task and waits for your /approve before anything is spent.");
         return;
       }
       let task: TaskRecord;

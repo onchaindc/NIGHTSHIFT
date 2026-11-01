@@ -186,7 +186,7 @@ export function EvidenceList({ evidence }: { evidence: NonNullable<TaskRecord["r
               {ev.kind === "chain_gas_crosscheck" &&
                 `${ev.answerGasGwei} gwei purchased vs ${ev.chainGasGwei.toFixed(6)} gwei from our own node read on ${ev.chain}, agreed: ${ev.agreed ? "yes" : "no"} (${ev.rpcUrl})`}
               {ev.kind === "watch_finding" &&
-                `${ev.findingKind} from a real source read, confidence ${ev.confidence}${ev.corroboratedBy?.length ? `, corroborated by ${ev.corroboratedBy.join(", ")}` : ""}${ev.url ? ` — ${ev.url}` : ""}`}
+                `${ev.findingKind} from a real source read, confidence ${ev.confidence}${ev.corroboratedBy?.length ? `, corroborated by ${ev.corroboratedBy.join(", ")}` : ""}${ev.url ? `, source: ${ev.url}` : ""}`}
             </td>
           </tr>
         ))}

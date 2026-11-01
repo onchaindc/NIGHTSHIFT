@@ -268,7 +268,7 @@ describe("protocol watch delivery", () => {
     expect(sends).toHaveLength(1);
     // Concise alert: named protocol, what changed, importance keyword,
     // evidence link, observation time, full-report pointer.
-    expect(sends[0]).toContain("🔎 Protocol Watch — Uniswap (Core watch)");
+    expect(sends[0]).toContain("🔎 Protocol Watch: Uniswap (Core watch)");
     expect(sends[0]).toContain("Releases: Release v4.1.0");
     expect(sends[0]).toContain("was: Release v1.0.0");
     expect(sends[0]).toContain("Importance:");
@@ -559,7 +559,7 @@ describe("alert ledger reliability (dedupe, retry)", () => {
     // explicit that nothing is a confirmed security incident.
     expect(sends).toHaveLength(1);
     expect(sends[0]).toContain("Importance: security-relevant keywords");
-    expect(sends[0]).toContain("NOT a confirmed incident");
+    expect(sends[0]).toContain("Not a confirmed incident");
   });
 });
 

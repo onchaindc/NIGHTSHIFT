@@ -139,15 +139,15 @@ function decodeChallenge(headerValue: string | null): PaymentChallenge | null {
   }
 }
 
-function evmChallengeAmountCents(challenge: PaymentChallenge | null): number | null {
+function evmChallengeOffer(challenge: PaymentChallenge | null): { network?: string; asset?: string; amountCents: number } | null {
   const evm = challenge?.accepts?.find((a) => a.scheme === "exact" && a.network?.startsWith("eip155:"));
-  if (!evm || !evm.amount) {
-    // Fall back to the human body summary if the header was unreadable.
-    const withPrice = challenge?.accepts?.find((a) => a.price);
-    if (withPrice?.price) return Math.round(parseFloat(withPrice.price.replace(/[^0-9.]/g, "")) * 100);
+  if (!evm || (!evm.amount && !evm.price)) {
     return null;
   }
-  return Number(evm.amount) / 10000; // 6-decimal USDC units: 10000 uUSDC = $0.01 = 1 cent
+  if (evm.amount) {
+    return { network: evm.network, asset: evm.asset, amountCents: Number(evm.amount) / 10000 }; // 6-decimal USDC units: 10000 uUSDC = $0.01 = 1 cent
+  }
+  return { network: evm.network, asset: evm.asset, amountCents: Math.round(parseFloat(evm.price!.replace(/[^0-9.]/g, "")) * 100) };
 }
 
 interface AskResultBody {
@@ -184,6 +184,10 @@ export interface AskOptions {
 export async function askAuto(opts: AskOptions): Promise<TelegraphAnswer> {
   const node = telegraphNodeUrl();
   const body = JSON.stringify({ query: opts.query });
+  // The challenge we priced ourselves (asset, network) is later mirrored into
+  // the paying client's spend controls, so the payment payload can only ever
+  // be built for exactly the offer whose amount we checked against the budget.
+  let probedOffer: { network?: string; asset?: string; amountCents: number } | null = null;
 
   // Step 1: free attempt. Receipt shows the challenge; nothing is charged.
   const probe = await fetch(`${node}/engine/v1/ask`, {
@@ -194,14 +198,15 @@ export async function askAuto(opts: AskOptions): Promise<TelegraphAnswer> {
 
   if (probe.status === 402) {
     const challenge = decodeChallenge(probe.headers.get("payment-required"));
-    const amountCents = evmChallengeAmountCents(challenge);
-    if (amountCents === null) {
+    const offer = evmChallengeOffer(challenge);
+    if (!offer) {
       throw new Error(`Telegraph 402 challenge could not be read (no acceptable scheme?)`);
     }
-    if (amountCents > opts.remainingBudgetUsdCents) {
-      throw new TelegraphBudgetExceededError(amountCents, opts.remainingBudgetUsdCents);
+    if (offer.amountCents > opts.remainingBudgetUsdCents) {
+      throw new TelegraphBudgetExceededError(offer.amountCents, opts.remainingBudgetUsdCents);
     }
-    opts.onChallenge?.({ amountUsdCents: amountCents });
+    opts.onChallenge?.({ amountUsdCents: offer.amountCents });
+    probedOffer = offer;
   } else if (!probe.ok) {
     throw new Error(`Telegraph ask failed: HTTP ${probe.status} ${(await probe.text()).slice(0, 300)}`);
   }
@@ -215,10 +220,20 @@ export async function askAuto(opts: AskOptions): Promise<TelegraphAnswer> {
   }
 
   // Build the x402 client lazily so a missing/malformed key only fails when a
-  // purchase is actually required.
+  // purchase is actually required. It is registered against the exact network
+  // string the challenge used: a wildcard-only registration can fail the
+  // payer's own default-asset resolution at payment-payload creation time,
+  // rejecting every requirement before anything is signed.
   const account = privateKeyToAccount(process.env.TELEGRAPH_EVM_PRIVATE_KEY as `0x${string}`);
+  const paymentNetwork: `${string}:${string}` = probedOffer?.network && probedOffer.network.startsWith("eip155:") ? (probedOffer.network as `${string}:${string}`) : "eip155:*";
   const fetchWithPayment = wrapFetchWithPaymentFromConfig(fetch, {
-    schemes: [{ network: "eip155:*", client: new ExactEvmScheme(account) }],
+    schemes: [{ network: paymentNetwork, client: new ExactEvmScheme(account) }],
+    // Allow exactly the asset the challenge priced. The network's own default
+    // asset resolution can fail for this node's token (address or network key
+    // not in the payer's registry), which rejects every payment requirement
+    // with a spendControls error before any signature exists. The allowlist
+    // mirrors the offer the engine itself priced; anything else still fails.
+    ...(probedOffer?.asset ? { spendControls: { allowedAssets: [{ network: paymentNetwork, asset: probedOffer.asset }] } } : {}),
   });
 
   const res = await fetchWithPayment(`${node}/engine/v1/ask`, {

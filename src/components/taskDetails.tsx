@@ -180,7 +180,7 @@ export default function TaskDetails({ id }: { id: string }) {
         <Link href="/history" className="inline-flex min-h-10 items-center gap-1 text-[12.5px] font-medium text-amber transition-colors hover:text-amber-soft">
           <ChevronLeft size={13} aria-hidden /> History
         </Link>
-        <Link href="/" className="inline-flex min-h-10 items-center text-[12.5px] font-medium text-amber transition-colors hover:text-amber-soft">
+        <Link href="/console" className="inline-flex min-h-10 items-center text-[12.5px] font-medium text-amber transition-colors hover:text-amber-soft">
           Overview <ChevronRight size={13} aria-hidden />
         </Link>
       </nav>

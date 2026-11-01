@@ -60,7 +60,7 @@ export default function Settings() {
                   name: "Paid research",
                   configured: status.services.telegraph,
                   detail: "Buys answers on the Telegraph network with an auditable receipt and x402 settlement.",
-                  setup: "TELEGRAPH_EVM_PRIVATE_KEY — the paid-research wallet key",
+                  setup: "TELEGRAPH_EVM_PRIVATE_KEY (the paid-research wallet key)",
                 },
                 {
                   name: "Telegram bot",
