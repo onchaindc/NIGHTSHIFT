@@ -395,20 +395,38 @@ class PostgresPersistence implements Persistence {
   }
 
   // tasks (validated/normalized in engine/store.ts; this is pure storage)
+  // Legacy rows were written with a JSON-encoded string in the data column
+  // (double-encoded jsonb). Every read decodes that shape so consumers see an
+  // object, regardless of which writer produced the row.
+  decodeJsonbValue(v: unknown): unknown {
+    if (typeof v === "string") {
+      try {
+        return JSON.parse(v) as unknown;
+      } catch {
+        return v;
+      }
+    }
+    return v;
+  }
   async getTask(id: string): Promise<TaskRecord | null> {
     const client = dbSql();
     const rows = await client<Record<string, unknown>[]>`select data from ns_tasks where id = ${id}`;
-    return rows.length > 0 ? (rows[0].data as TaskRecord) : null;
+    return rows.length > 0 ? (this.decodeJsonbValue(rows[0].data) as TaskRecord) : null;
   }
   async listTasks(): Promise<TaskRow[]> {
     const client = dbSql();
     const rows = await client<Record<string, unknown>[]>`select id, created_at, state, data from ns_tasks order by created_at desc`;
-    return rows.map((r: Record<string, unknown>) => ({
-      id: String(r.id),
-      createdAt: Number(r.created_at),
-      state: String(r.state),
-      data: r.data as TaskRecord,
-    }));
+    return rows.map((r: Record<string, unknown>) => {
+      const data = this.decodeJsonbValue(r.data) as TaskRecord;
+      // Legacy rows may carry null scalar columns while the embedded record
+      // still holds the truth; fall back before letting "null" become a state.
+      return {
+        id: String(r.id),
+        createdAt: Number(r.created_at ?? data?.createdAt ?? 0),
+        state: String(r.state ?? data?.state ?? "created"),
+        data,
+      };
+    });
   }
   async saveTask(task: TaskRecord): Promise<void> {
     const client = dbSql();
@@ -431,12 +449,12 @@ class PostgresPersistence implements Persistence {
   async listWatches(): Promise<WatchConfig[]> {
     const client = dbSql();
     const rows = await client<Record<string, unknown>[]>`select data from ns_watches order by created_at desc`;
-    return rows.map((r: Record<string, unknown>) => r.data as WatchConfig);
+    return rows.map((r: Record<string, unknown>) => this.decodeJsonbValue(r.data) as WatchConfig);
   }
   async getWatch(id: string): Promise<WatchConfig | null> {
     const client = dbSql();
     const rows = await client<Record<string, unknown>[]>`select data from ns_watches where id = ${id}`;
-    return rows.length > 0 ? (rows[0].data as WatchConfig) : null;
+    return rows.length > 0 ? (this.decodeJsonbValue(rows[0].data) as WatchConfig) : null;
   }
   async insertWatch(watch: WatchConfig): Promise<void> {
     const client = dbSql();
@@ -459,7 +477,7 @@ class PostgresPersistence implements Persistence {
     return (await client.begin(async (tx) => {
       const locked = await tx<Record<string, unknown>[]>`select data from ns_watches where id = ${id} for update`;
       if (locked.length === 0) return null;
-      const watch = locked[0].data as WatchConfig;
+      const watch = this.decodeJsonbValue(locked[0].data) as WatchConfig;
       const next = JSON.parse(JSON.stringify(watch)) as WatchConfig;
       mutate(next);
       next.updatedAt = Date.now();

@@ -2,9 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  ArrowUpRight,
+  ChevronRight,
+  Crosshair,
+  Radar,
+  ShieldCheck,
+  Wallet,
+} from "lucide-react";
 import type { ExecutionEvent, TaskRecord } from "@/lib/engine/types";
 import {
-  phaseState,
+  STATUS,
   StatusChip,
   clockOf,
   isLive,
@@ -13,15 +22,16 @@ import {
   money,
   FeedChip,
 } from "@/components/taskParts";
-
+import type { StatusBody } from "@/components/shell-types";
 /**
- * Command Center dashboard. Every number here is computed from the real task
- * store: active operations, pending approvals, actual spend recorded today,
- * completed tasks, and the live activity feed built from real task events.
+ * Overview: the honest state of the system, drawn from real data only —
+ * integration health from /api/status, live counts and spend from the task
+ * store, watch coverage from the watch API, and an activity tape of real
+ * events. No simulated numbers anywhere.
  */
 
 /* ------------------------------------------------------------------ */
-/* Metric cards                                                        */
+/* Metric tiles                                                        */
 /* ------------------------------------------------------------------ */
 
 function startOfToday(): number {
@@ -30,185 +40,161 @@ function startOfToday(): number {
   return d.getTime();
 }
 
-function Metrics({ tasks }: { tasks: TaskRecord[] }) {
-  const real = tasks.filter((t) => !isTestRun(t));
+interface Metric {
+  label: string;
+  value: string;
+  sub: string;
+  href: string;
+  tone?: string;
+  icon: typeof ShieldCheck;
+}
+
+function buildMetrics(tasks: TaskRecord[], protocolWatch: number, watchAlerts: number): Metric[] {  const real = tasks.filter((t) => !isTestRun(t));
   const active = real.filter((t) => isOpen(t.state)).length;
   const approvals = real.filter((t) => t.state === "awaiting_approval").length;
-  const completed = real.filter((t) => t.state === "completed").length;
   const since = startOfToday();
   let spendToday = 0;
   for (const t of real) {
     if (t.state === "blocked") continue; // blocked tasks are never charged, by design
     for (const e of t.spend.entries) if (e.ts >= since) spendToday += e.amountUsdCents;
   }
-
-  const cards = [
-    { label: "Active operations", value: String(active), sub: "running or awaiting approval", href: "/operations" },
-    { label: "Pending approvals", value: String(approvals), sub: approvals > 0 ? "needs your decision" : "nothing waiting", href: "/approvals", tone: approvals > 0 ? "text-gold" : "" },
-    { label: "Spend today", value: money(spendToday), sub: "actual recorded amounts", href: "/history" },
-    { label: "Completed tasks", value: String(completed), sub: "all verified, none assumed", href: "/history" },
+  return [
+    {
+      label: "Active operations",
+      value: String(active),
+      sub: "running or awaiting approval",
+      href: "/operations",
+      icon: Activity,
+      tone: active > 0 ? "text-ink" : "text-ink-faint",
+    },
+    {
+      label: "Pending approvals",
+      value: String(approvals),
+      sub: approvals > 0 ? "waiting on your decision" : "nothing waiting",
+      href: "/approvals",
+      tone: approvals > 0 ? "text-amber" : "text-ink-faint",
+      icon: ShieldCheck,
+    },
+    {
+      label: "Spend today",
+      value: money(spendToday),
+      sub: "recorded receipts only",
+      href: "/history",
+      icon: Wallet,
+      tone: spendToday > 0 ? "text-amber" : "text-ink-faint",
+    },
+    {
+      label: "Protocol Watch",
+      value: String(watchAlerts),
+      sub: protocolWatch === 0 ? "no watches configured" : `${protocolWatch} watch${protocolWatch === 1 ? "" : "es"} · ${watchAlerts} finding${watchAlerts === 1 ? "" : "s"}`,
+      href: "/watch",
+      icon: Radar,
+      tone: watchAlerts > 0 ? "text-amber" : "text-ink-faint",
+    },
   ];
+}
+
+function MetricTile({ m }: { m: Metric }) {
+  const Icon = m.icon;
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {cards.map((c) => (
-        <Link
-          key={c.label}
-          href={c.href}
-          className="group rounded-lg border border-edge bg-panel p-4 transition-colors hover:border-edge-strong"
+    <Link
+      href={m.href}
+      className="group relative rounded-lg border border-edge bg-panel p-4 transition-colors hover:border-edge-strong"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="x-label">{m.label}</p>
+        <span
+          aria-hidden
+          className={`grid h-7 w-7 place-items-center rounded-md border transition-colors ${
+            m.tone?.startsWith("text-amber")
+              ? "border-amber/40 bg-amber/10 text-amber"
+              : "border-edge bg-panel-2 text-ink-faint group-hover:text-ink-soft"
+          }`}
         >
-          <div className="flex items-start justify-between">
-            <p className="x-label">{c.label}</p>
-            <span aria-hidden className="text-ink-faint transition-colors group-hover:text-ink-soft">→</span>
-          </div>
-          <p className={`mt-2 tabular text-[26px] font-semibold leading-none ${c.tone ?? "text-ink"}`}>{c.value}</p>
-          <p className="mt-1.5 text-[11.5px] text-ink-faint">{c.sub}</p>
-        </Link>
-      ))}
-    </div>
+          <Icon size={13} strokeWidth={1.8} />
+        </span>
+      </div>
+      <p className={`mt-3 tabular text-[27px] font-semibold leading-none ${m.tone ?? "text-ink"}`}>{m.value}</p>
+      <p className="mt-1.5 text-[11.5px] text-ink-faint">{m.sub}</p>
+      <ArrowUpRight
+        size={13}
+        aria-hidden
+        className="absolute right-3 bottom-3 text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
+      />
+    </Link>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Your Agents: capability, honestly                                   */
+/* System strip: real integration health from /api/status              */
 /* ------------------------------------------------------------------ */
 
-const AGENTS = [
-  {
-    id: "research",
-    name: "Research & Verify",
-    blurb: "Pays for intelligence, then proves it: settlement on chain, ledger reconciliation, independent reads.",
-    status: "available" as const,
-  },
-  {
-    id: "code",
-    name: "Code Agent",
-    blurb: "Read/write repository work. Capability not implemented yet.",
-    status: "planned" as const,
-  },
-  {
-    id: "ops",
-    name: "Ops Agent",
-    blurb: "Deployments and infrastructure actions. Capability not implemented yet.",
-    status: "planned" as const,
-  },
-  {
-    id: "data",
-    name: "Data Agent",
-    blurb: "Analytics pipelines over real exports. Capability not implemented yet.",
-    status: "planned" as const,
-  },
-];
-
-function AgentCards() {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {AGENTS.map((a) => (
-        <div key={a.id} className="rounded-lg border border-edge bg-panel p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-[13.5px] font-semibold text-ink">{a.name}</h3>
-            {a.status === "available" ? (
-              <span className="inline-flex items-center gap-1.5 rounded-sm border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-teal" />
-                Available
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] font-medium text-ink-faint">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ink-faint" />
-                Planned
-              </span>
-            )}
-          </div>
-          <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">{a.blurb}</p>
-          {a.status === "available" ? (
-            <Link href="/operations" className="mt-3 inline-flex min-h-8 items-center text-[11.5px] font-medium text-teal hover:underline underline-offset-2">
-              Launch an operation →
-            </Link>
-          ) : (
-            <p className="mt-3 text-[11.5px] text-ink-faint">Shown here only as planned. Never displayed as active.</p>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Active operations + approval actions                                */
-/* ------------------------------------------------------------------ */
-
-function PhaseDots({ task }: { task: TaskRecord }) {
-  const p = phaseState(task);
-  const steps = [
-    { label: "Plan", done: p.plan, live: p.plan && !p.buy && !p.stopped },
-    { label: "Buy", done: p.paid, live: p.buy && !p.paid && !p.stopped },
-    { label: "Verify", done: p.verified, live: p.paid && !p.verified && !p.stopped },
+function SystemStrip({ status, down }: { status: StatusBody | null; down: boolean }) {
+  const items = [
+    { label: "Task store", ok: down ? null : status ? status.store === "ok" : null, detail: down ? "unreachable" : status ? (status.store === "ok" ? "reachable" : "unreachable") : "checking" },
+    { label: "Telegraph (paid research)", ok: down ? null : status?.services.telegraph ?? null, detail: "paid intelligence network" },
+    { label: "Telegram bot", ok: down ? null : status?.services.telegram ?? null, detail: "@nightshiftagent_bot" },
+    { label: "Chain RPC", ok: down ? null : status?.services.chainRpc ?? null, detail: "read-only verification" },
   ];
   return (
-    <ol className="flex items-center gap-1.5" aria-label="Progress">
+    <div className="overflow-hidden rounded-lg border border-edge bg-panel">
+      <ul className="grid grid-cols-1 divide-y divide-edge sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+        {items.map((s) => {
+          const unknown = s.ok === null || s.ok === undefined;
+          return (
+            <li key={s.label} className="flex items-center gap-3 px-4 py-3">
+              <span
+                aria-hidden
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                  unknown ? "bg-ink-faint motion-safe:animate-pulse" : s.ok ? "bg-teal" : "bg-risk"
+                }`}
+              />
+              <div className="min-w-0">
+                <p className="truncate text-[12.5px] font-medium text-ink">{s.label}</p>
+                <p className="truncate text-[10.5px] text-ink-faint">
+                  {unknown ? "checking…" : s.ok ? s.detail : "not configured"}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Active operations with a real phase rail                            */
+/* ------------------------------------------------------------------ */
+
+function PhaseRail({ task }: { task: TaskRecord }) {
+  const stopped = task.state === "failed" || task.state === "blocked" || task.state === "rejected";
+  const p = { plan: task.events.some((e) => e.type === "plan_created"), buy: task.events.some((e) => e.type === "spend_recorded"), verify: task.events.some((e) => e.type === "verification_passed") };
+  const steps = [
+    { label: "Plan", done: p.plan, live: !p.plan && !p.buy && !stopped },
+    { label: "Purchase", done: p.buy, live: p.plan && !p.buy && !stopped },
+    { label: "Verify", done: p.verify, live: p.buy && !p.verify && !stopped, },
+  ];
+  return (
+    <ol className="flex items-center gap-0" aria-label="Execution phases">
       {steps.map((s, i) => (
-        <li key={s.label} className="flex items-center gap-1.5">
-          {i > 0 && <span className="h-px w-4 bg-edge" aria-hidden />}
+        <li key={s.label} className="flex items-stretch">
+          {i > 0 && (
+            <span
+              aria-hidden
+              className={`mx-2 self-center h-[2px] w-8 rounded-full ${s.live ? "rail-live bg-amber/20" : s.done ? "bg-teal/70" : "bg-edge"}`}
+            />
+          )}
           <span
-            className={`inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 text-[12px] ${
-              s.live ? "font-medium text-ink" : s.done ? "text-ink-soft" : "text-ink-faint"
+            className={`rounded-sm px-2 py-0.5 text-[11.5px] ${
+              s.live ? "font-medium text-amber" : s.done ? "text-ink-soft" : "text-ink-faint"
             }`}
           >
-            <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${
-                s.live ? "bg-teal motion-safe:animate-pulse" : s.done ? "bg-teal" : "bg-edge-strong"
-              }`}
-              aria-hidden
-            />
             {s.label}
           </span>
         </li>
       ))}
     </ol>
-  );
-}
-
-function ApprovalActions({
-  task,
-  onAction,
-  busy,
-  error,
-}: {
-  task: TaskRecord;
-  onAction: (id: string, action: "approve" | "reject") => void;
-  busy: boolean;
-  error: string | null;
-}) {
-  const awaiting = task.state === "awaiting_approval";
-  if (!awaiting) return null;
-  return (
-    <div className="mt-3 rounded-md border border-gold/40 bg-gold/5 p-3">
-      <p className="text-[12.5px] leading-relaxed text-gold">
-        The plan is ready. Nothing has been spent yet. Approving lets it purchase within the ceiling and run the checks.
-      </p>
-      <div className="mt-2.5 flex gap-2">
-        <button
-          type="button"
-          onClick={() => onAction(task.id, "approve")}
-          disabled={busy}
-          className="min-h-10 flex-1 rounded-md bg-ink px-4 py-2 text-[13px] font-medium text-night transition-colors hover:bg-ink/85 disabled:opacity-50 sm:flex-none sm:px-5"
-        >
-          {busy ? "Approving…" : "Approve and continue"}
-        </button>
-        <button
-          type="button"
-          onClick={() => onAction(task.id, "reject")}
-          disabled={busy}
-          className="min-h-10 rounded-md border border-edge bg-panel px-4 py-2 text-[13px] text-ink-soft transition-colors hover:border-risk/50 hover:text-risk disabled:opacity-50"
-        >
-          {busy ? "Working…" : "Reject"}
-        </button>
-      </div>
-      {error && (
-        <p role="alert" className="mt-2.5 rounded-md border border-risk/40 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">
-          {error}
-        </p>
-      )}
-    </div>
   );
 }
 
@@ -227,12 +213,11 @@ function ActiveOperation({
   const spent = task.spend.spentUsdCents;
   const limit = task.spend.limitUsdCents;
   const pct = Math.min(100, Math.round((spent / Math.max(limit, 1)) * 100));
-  const startedAt = task.createdAt;
-  const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
-  const elapsedLabel = elapsed < 120 ? `${elapsed}s elapsed` : `${Math.round(elapsed / 60)}m elapsed`;
+  const elapsed = Math.max(1, Math.round((Date.now() - task.createdAt) / 1000));
+  const elapsedLabel = elapsed < 120 ? `${elapsed}s` : `${Math.round(elapsed / 60)}m`;
 
   return (
-    <article data-task-id={task.id} data-state={task.state} className="rounded-lg border border-edge bg-panel">
+    <article data-task-id={task.id} data-state={task.state} className="rise-in rounded-lg border border-edge bg-panel transition-colors hover:border-edge-strong">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-edge px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-2">
           <StatusChip state={task.state} />
@@ -245,25 +230,58 @@ function ActiveOperation({
         </span>
       </div>
       <div className="px-4 py-3.5">
-        <p className="text-[14px] font-medium leading-snug text-ink">{task.goal}</p>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <PhaseDots task={task} />
+        <Link href={`/tasks/${task.id}`} className="text-[14.5px] font-medium leading-snug text-ink transition-colors hover:text-amber">
+          {task.goal}
+        </Link>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <PhaseRail task={task} />
           {spent > 0 && (
             <span className="tabular text-[11px] text-ink-faint">
               {money(spent)} of {money(limit)}
               <span className="ml-2 inline-block h-1 w-20 rounded-sm bg-edge align-middle">
-                <span className="block h-full rounded-sm bg-teal" style={{ width: `${pct}%` }} />
+                <span className="block h-full rounded-sm bg-amber" style={{ width: `${pct}%` }} />
               </span>
             </span>
           )}
         </div>
         {lastEvent && isLive(task.state) && (
-          <p className="mt-2.5 text-[12.5px] leading-snug text-ink-soft">{lastEvent.message}</p>
+          <p className="mt-2.5 line-clamp-2 text-[12.5px] leading-snug text-ink-soft">{lastEvent.message}</p>
         )}
-        <ApprovalActions task={task} onAction={onAction} busy={busy} error={error} />
+
+        {task.state === "awaiting_approval" && (
+          <div className="mt-3 rounded-lg border border-amber/40 bg-amber/5 p-3.5">
+            <p className="text-[12.5px] leading-relaxed text-amber-soft">
+              The plan is ready and nothing has been spent. Approving lets it purchase within the ceiling and run the checks.
+            </p>
+            <div className="mt-2.5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => onAction(task.id, "approve")}
+                disabled={busy}
+                className="btn-primary !min-h-9 !text-[12.5px] !px-4 disabled:opacity-50"
+              >
+                {busy ? "Approving…" : "Approve and continue"}
+              </button>
+              <button
+                type="button"
+                onClick={() => onAction(task.id, "reject")}
+                disabled={busy}
+                className="btn-quiet !min-h-9 !text-[12.5px] hover:border-risk/50 hover:text-risk disabled:opacity-50"
+              >
+                {busy ? "Working…" : "Reject"}
+              </button>
+            </div>
+            {error && (
+              <p role="alert" className="mt-2.5 rounded-md border border-risk/40 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">
+                {error}
+              </p>
+            )}
+          </div>
+        )}
+
         <p className="mt-3 text-right">
-          <Link href={`/tasks/${task.id}`} className="text-[12px] font-medium text-blue hover:underline underline-offset-2">
-            Open operation →
+          <Link href={`/tasks/${task.id}`} className="inline-flex min-h-8 items-center gap-1 text-[12px] font-medium text-amber transition-colors hover:text-amber-soft">
+            Open operation <ChevronRight size={12} aria-hidden />
           </Link>
         </p>
       </div>
@@ -272,7 +290,7 @@ function ActiveOperation({
 }
 
 /* ------------------------------------------------------------------ */
-/* Live activity feed                                                  */
+/* Live activity tape: real events, newest first                       */
 /* ------------------------------------------------------------------ */
 
 interface FeedRow {
@@ -289,6 +307,7 @@ interface FeedRow {
 function agentOf(t: TaskRecord): string {
   if ((t.plan ?? []).some((s) => s.kind === "telegraph_ask" || s.kind === "cross_check")) return "research";
   if (t.state === "verifying") return "research";
+  if ((t.plan ?? []).some((s) => s.kind.startsWith("watch"))) return "watch";
   return "dispatch";
 }
 
@@ -311,8 +330,8 @@ function ActivityFeed({ tasks, loading }: { tasks: TaskRecord[]; loading: boolea
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-edge bg-panel px-5 py-8 text-center">
-        <p className="mx-auto max-w-sm text-[13px] text-ink-soft">
+      <div className="rounded-lg border border-dashed border-edge bg-panel/40 px-5 py-10 text-center">
+        <p className="mx-auto max-w-sm text-[13px] leading-relaxed text-ink-soft">
           {loading ? "Loading activity…" : "No activity yet. Launch an operation and every step, cost, and outcome will appear here as it happens."}
         </p>
       </div>
@@ -324,21 +343,26 @@ function ActivityFeed({ tasks, loading }: { tasks: TaskRecord[]; loading: boolea
       {/* Desktop table */}
       <table className="hidden w-full text-left md:table">
         <thead>
-          <tr className="border-b border-edge text-[10.5px] uppercase tracking-wider text-ink-faint">
-            <th className="px-4 py-2.5 font-medium">Time</th>
-            <th className="px-4 py-2.5 font-medium">Agent</th>
-            <th className="px-4 py-2.5 font-medium">Message</th>
-            <th className="px-4 py-2.5 text-right font-medium">Cost</th>
-            <th className="px-4 py-2.5 font-medium">Type</th>
+          <tr className="border-b border-edge">
+            {["Time", "Agent", "Event", "Cost", "Kind"].map((h, i) => (
+              <th
+                key={h}
+                className={`x-label px-4 py-2.5 ${i === 3 ? "text-right" : ""} ${i === 4 ? "" : "text-left"}`}
+              >
+                {h}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.eventId} className="border-b border-edge/60 last:border-0 hover:bg-panel-2/60">
+            <tr key={r.eventId} className="border-b border-edge/60 last:border-0 transition-colors hover:bg-panel-2/60">
               <td className="px-4 py-2.5 tabular text-[11.5px] text-ink-faint">{clockOf(r.ts)}</td>
               <td className="px-4 py-2.5 tabular text-[11.5px] text-ink-soft">{r.agent}</td>
-              <td className="max-w-[52ch] truncate px-4 py-2.5 text-[12.5px] text-ink" title={r.message}>
-                <Link href={`/tasks/${r.taskId}`} className="transition-colors hover:text-teal">{r.message}</Link>
+              <td className="max-w-[52ch] truncate px-4 py-2.5 text-[12.5px]">
+                <Link href={`/tasks/${r.taskId}`} className="text-ink transition-colors hover:text-amber" title={r.message}>
+                  {r.message}
+                </Link>
               </td>
               <td className="px-4 py-2.5 text-right tabular text-[11.5px] text-ink-soft">{r.cost != null ? money(r.cost) : ""}</td>
               <td className="px-4 py-2.5"><FeedChip type={r.type} /></td>
@@ -354,7 +378,9 @@ function ActivityFeed({ tasks, loading }: { tasks: TaskRecord[]; loading: boolea
               <span className="tabular text-[11px] text-ink-faint">{clockOf(r.ts)} · {r.agent}</span>
               <FeedChip type={r.type} />
             </div>
-            <p className="mt-1 text-[12.5px] leading-snug text-ink">{r.message}</p>
+            <Link href={`/tasks/${r.taskId}`} className="mt-1 block text-[12.5px] leading-snug text-ink">
+              {r.message}
+            </Link>
             {r.cost != null && <p className="mt-0.5 tabular text-[11px] text-ink-soft">{money(r.cost)}</p>}
           </li>
         ))}
@@ -364,11 +390,51 @@ function ActivityFeed({ tasks, loading }: { tasks: TaskRecord[]; loading: boolea
 }
 
 /* ------------------------------------------------------------------ */
+/* Capability summary (detail lives on /agents, linked below)           */
+/* ------------------------------------------------------------------ */
+
+const CAPABILITIES = [
+  { name: "Research & Verify", blurb: "Buys the best answer within your ceiling, then proves it against the chain.", status: "available" as const },
+  { name: "Protocol Watch", blurb: "Monitors real protocol sources, detects changes, delivers verified alerts.", status: "available" as const },
+  { name: "Code · Ops · Data", blurb: "Planned. Never displayed as active or simulated.", status: "planned" as const },
+];
+
+function CapabilityStrip() {
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      {CAPABILITIES.map((c) => (
+        <div key={c.name} className={c.status === "available" ? "rounded-lg border border-edge bg-panel p-4" : "rounded-lg border border-edge bg-panel/40 p-4"}>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-[13px] font-semibold text-ink">{c.name}</h3>
+            {c.status === "available" ? (
+              <span className="inline-flex items-center gap-1.5 rounded-sm border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-teal" />
+                Live
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] font-medium text-ink-faint">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ink-faint" />
+                Planned
+              </span>
+            )}
+          </div>
+          <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">{c.blurb}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
-export default function Dashboard() {
+export default function Overview() {
   const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
+  const [status, setStatus] = useState<StatusBody | null>(null);
+  const [statusDown, setStatusDown] = useState(false);
+  const [watches, setWatches] = useState<number>(0);
+  const [watchAlerts, setWatchAlerts] = useState<number>(0);
   const [loadFailed, setLoadFailed] = useState(false);
   const [activating, setActivating] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
@@ -378,13 +444,17 @@ export default function Dashboard() {
     if (busy.current) return;
     busy.current = true;
     try {
-      const res = await fetch("/api/tasks", { cache: "no-store" });
-      if (res.ok) {
-        setTasks(((await res.json()) as { tasks: TaskRecord[] }).tasks);
+      const [r, w] = await Promise.all([
+        fetch("/api/tasks", { cache: "no-store" }),
+        fetch("/api/watches", { cache: "no-store" }),
+      ]);
+      if (r.ok) {
+        setTasks(((await r.json()) as { tasks: TaskRecord[] }).tasks);
         setLoadFailed(false);
       } else {
         setLoadFailed(true);
       }
+      if (w.ok) setWatches((((await w.json()) as { watches: Array<{ id: string }> }).watches ?? []).length);
     } catch {
       setLoadFailed(true);
     } finally {
@@ -397,6 +467,53 @@ export default function Dashboard() {
     const id = setInterval(refresh, 2500);
     return () => clearInterval(id);
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/status", { cache: "no-store" });
+        const body = (await res.json()) as StatusBody;
+        if (!cancelled) {
+          setStatus(body);
+          setStatusDown(false);
+        }
+      } catch {
+        if (!cancelled) setStatusDown(true);
+      }
+    };
+    void poll();
+    const id = setInterval(poll, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Watch findings and alerts are counted from real task events: every
+  // detected change is recorded as an event; a settled change carries
+  // evidence in its task record. Only what the store shows is displayed.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/tasks", { cache: "no-store" });
+        const body = (await res.json()) as { tasks: Array<{ events: Array<{ type: string }>; jobType?: string }> };
+        if (cancelled) return;
+        const events = body.tasks ?? [];
+        const findings = events.reduce((n, t) => n + t.events.filter((e) => e.type === "watch_change_detected").length, 0);
+        setWatchAlerts(findings);
+      } catch {
+        /* keep the previous count; the poll refreshes shortly */
+      }
+    }
+    void load();
+    const id = setInterval(load, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   async function act(id: string, action: "approve" | "reject") {
     if (activating) return;
@@ -414,12 +531,16 @@ export default function Dashboard() {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        const text = action === "approve" ? "Could not approve the task: " : "Could not reject the task: ";
-        setActionError((prev) => ({ ...prev, [id]: text + (body.error ?? `status ${res.status}`) }));
+        setActionError((prev) => ({
+          ...prev,
+          [id]: `Could not ${action} the task: ${body.error ?? `status ${res.status}`}`,
+        }));
       }
     } catch (err) {
-      const text = action === "approve" ? "Could not approve the task: " : "Could not reject the task: ";
-      setActionError((prev) => ({ ...prev, [id]: text + (err instanceof Error ? err.message : String(err)) }));
+      setActionError((prev) => ({
+        ...prev,
+        [id]: `Could not ${action} the task: ${err instanceof Error ? err.message : String(err)}`,
+      }));
     } finally {
       setActivating(null);
       void refresh();
@@ -428,70 +549,72 @@ export default function Dashboard() {
 
   const real = (tasks ?? []).filter((t) => !isTestRun(t));
   const active = real.filter((t) => isOpen(t.state));
+  const metrics = buildMetrics(real, watches, watchAlerts);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       {/* Page head */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-[22px] font-semibold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-[12.5px] text-ink-soft">
-            Live view of every operation, drawn from the real task store. Nothing here is simulated.
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="max-w-2xl">
+          <p className="x-label">Autonomous intelligence operations</p>
+          <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Overview</h1>
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
+            The real state of this workspace: what is running, what is verified, and what it actually cost. Every number
+            comes from the task store — nothing is estimated or simulated.
           </p>
         </div>
-        <Link
-          href="/operations"
-          className="inline-flex min-h-10 items-center rounded-md bg-ink px-4 py-2 text-[13px] font-medium text-night transition-colors hover:bg-ink/85"
-        >
-          Launch Operation
-        </Link>
       </div>
 
       {tasks !== null && loadFailed && (
-        <p aria-live="assertive" role="alert" className="mt-5 rounded-md border border-risk/40 bg-risk/5 px-4 py-3 text-[13px] text-risk">
-          Could not load the task list. The dashboard keeps retrying every few seconds.
+        <p aria-live="assertive" role="alert" className="mt-6 rounded-lg border border-risk/40 bg-risk/5 px-4 py-3 text-[13px] text-risk">
+          Could not load the task list. The overview keeps retrying every few seconds.
         </p>
       )}
 
       {tasks === null && !loadFailed && (
-        <div aria-live="polite" className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div aria-live="polite" className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-[104px] rounded-lg bg-panel-2 motion-safe:animate-pulse" />
+            <div key={i} className="h-[118px] rounded-lg bg-panel-2 motion-safe:animate-pulse" />
           ))}
-          <p className="col-span-full pt-2 text-[13px] text-ink-faint">Loading metrics…</p>
         </div>
       )}
 
       {tasks !== null && !loadFailed && (
-        <div className="mt-5 space-y-7">
+        <div className="mt-8 space-y-10">
           <section aria-label="Metrics">
-            <Metrics tasks={real} />
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {metrics.map((m) => (
+                <MetricTile key={m.label} m={m} />
+              ))}
+            </div>
           </section>
 
-          <section aria-label="Your Agents">
-            <div className="mb-3 flex items-baseline justify-between gap-2">
-              <h2 className="text-[14px] font-semibold">Your Agents</h2>
-              <Link href="/agents" className="text-[11.5px] font-medium text-blue hover:underline underline-offset-2">
-                View all →
-              </Link>
-            </div>
-            <AgentCards />
-          </section>
+          {status !== null || statusDown ? (
+            <section aria-label="Connected services">
+              <div className="mb-3 flex items-baseline justify-between gap-2">
+                <h2 className="x-label">Connected services</h2>
+              </div>
+              <SystemStrip status={status} down={statusDown} />
+            </section>
+          ) : null}
 
           <section aria-label="Active operations">
             <div className="mb-3 flex items-baseline justify-between gap-2">
-              <h2 className="text-[14px] font-semibold">Active Operations</h2>
+              <h2 className="x-label">Active operations</h2>
               <span className="tabular text-[11px] text-ink-faint">{active.length} running</span>
             </div>
             {active.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-edge bg-panel/50 px-5 py-8 text-center">
-                <p className="mx-auto max-w-sm text-[13px] text-ink-soft">
-                  Nothing is running right now. Launch an operation to see it here with live progress.
+              <div className="rounded-lg border border-dashed border-edge bg-panel/40 px-5 py-10 text-center">
+                <p className="mx-auto max-w-sm text-[13px] leading-relaxed text-ink-soft">
+                  Nothing is running right now. Hand off a goal and it will appear here with live progress.
                 </p>
+                <Link href="/operations" className="btn-signal mt-5">
+                  <Crosshair size={13} aria-hidden /> Launch an operation
+                </Link>
               </div>
             ) : (
               <div className="space-y-3">
-                {active.map((t) => (
+                {active.slice(0, 4).map((t) => (
                   <ActiveOperation
                     key={t.id}
                     task={t}
@@ -500,19 +623,36 @@ export default function Dashboard() {
                     error={actionError[t.id] ?? null}
                   />
                 ))}
+                {active.length > 4 && (
+                  <p className="pt-1 text-right">
+                    <Link href="/operations" className="inline-flex items-center gap-1 text-[12px] font-medium text-amber hover:text-amber-soft">
+                      All {active.length} active operations <ChevronRight size={12} aria-hidden />
+                    </Link>
+                  </p>
+                )}
               </div>
             )}
           </section>
 
           <section aria-label="Live activity">
             <div className="mb-3 flex items-baseline justify-between gap-2">
-              <h2 className="text-[14px] font-semibold">Live Activity</h2>
+              <h2 className="x-label">Live activity</h2>
               <span className="inline-flex items-center gap-1.5 text-[11px] text-ink-faint">
-                <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-teal motion-safe:animate-pulse" />
-                Live · refreshes every 2.5s
+                <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-amber motion-safe:animate-pulse" />
+                refreshes every 2.5 s
               </span>
             </div>
             <ActivityFeed tasks={tasks ?? []} loading={tasks === null} />
+          </section>
+
+          <section aria-label="Capabilities">
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <h2 className="x-label">Capabilities</h2>
+          <Link href="/agents" className="inline-flex min-h-8 items-center gap-1 text-[11.5px] font-medium text-amber hover:text-amber-soft">
+                Full capability matrix <ChevronRight size={12} aria-hidden />
+              </Link>
+            </div>
+            <CapabilityStrip />
           </section>
         </div>
       )}

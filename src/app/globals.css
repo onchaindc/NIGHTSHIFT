@@ -1,49 +1,56 @@
 @import "tailwindcss";
 
 /*
- * NIGHTSHIFT Command Center design system.
- * Near-black surfaces, subtle borders, restrained teal / gold / blue accents.
- * Geist Sans for the interface, Geist Mono for every numeric readout.
+ * NIGHTSHIFT — operations console design system.
+ * Midnight charcoal and graphite surfaces, warm off-white typography,
+ * one restrained amber signal accent. Geist Sans for the interface,
+ * Geist Mono for every numeric readout. Status colors (teal/risk/blue)
+ * carry STATE, never decoration; amber carries SIGNAL and primary action.
  */
 
 @theme {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
 
-  /* Surfaces */
-  --color-night: #0a0b0e;
-  --color-panel: #101216;
-  --color-panel-2: #15181d;
-  --color-edge: #21262d;
-  --color-edge-strong: #2e353d;
+  /* Surfaces: midnight charcoal → graphite, cool but not blue */
+  --color-night: #0a0b0d;
+  --color-panel: #101215;
+  --color-panel-2: #15181c;
+  --color-panel-3: #1b1f24;
+  --color-edge: #22262c;
+  --color-edge-strong: #32373f;
+  --color-hairline: #22262c;
 
-  /* Ink */
-  --color-ink: #e7eaee;
-  --color-ink-soft: #98a1ab;
-  --color-ink-faint: #5d666f;
+  /* Ink: warm off-white hierarchy */
+  --color-ink: #ece8df;
+  --color-ink-soft: #a29d93;
+  --color-ink-faint: #6a6661;
 
-  /* Signals */
-  --color-teal: #19b586;
-  --color-gold: #d9a441;
-  --color-blue: #4d8fe8;
-  --color-risk: #d4645f;
+  /* Signal: restrained amber (primary actions, live signals, focus of attention) */
+  --color-amber: #d99a3a;
+  --color-amber-deep: #8a6524;
+  --color-amber-soft: #f2e2c4;
+
+  /* Status colors (state only) */
+  --color-teal: #3aa981;
+  --color-blue: #5b8db8;
+  --color-risk: #cf6b62;
 
   /* Legacy aliases so existing class names keep resolving */
-  --color-ivory: #e7eaee;
-  --color-mist: #98a1ab;
-  --color-faint: #5d666f;
-  --color-lamp: #19b586;
-  --color-lamp-deep: #148d68;
-  --color-go: #19b586;
-  --color-amflat: #0a0b0e;
-  --color-stop: #d4645f;
-  --color-amber: #d9a441;
-  --color-accent: #19b586;
-  --color-surface: #101216;
-  --color-surface-2: #15181d;
-  --color-surface-strong: #101216;
-  --color-background: #0a0b0e;
-  --color-background2: #0a0b0e;
+  --color-ivory: #ece8df;
+  --color-mist: #a29d93;
+  --color-faint: #6a6661;
+  --color-lamp: #3aa981;
+  --color-lamp-deep: #2d857f;
+  --color-go: #3aa981;
+  --color-amflat: #0a0b0d;
+  --color-stop: #cf6b62;
+  --color-accent: #d99a3a;
+  --color-surface: #101215;
+  --color-surface-2: #15181c;
+  --color-surface-strong: #101215;
+  --color-background: #0a0b0d;
+  --color-background2: #0a0b0d;
 
   --radius-card: 8px;
 }
@@ -59,10 +66,11 @@ body {
   font-size: 14.5px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: #1a6f57;
+  background: rgba(217, 154, 58, 0.28);
   color: var(--color-ink);
 }
 
@@ -75,6 +83,20 @@ body {
 .tabular {
   font-family: var(--font-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
+}
+
+/* Editorial section labels */
+.x-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+.x-rule {
+  height: 1px;
+  background: var(--color-edge);
 }
 
 /* Disclosure controls get a quiet chevron. */
@@ -100,27 +122,133 @@ details[open] > summary .x-chev {
 
 /* One visible focus style for every interactive control. */
 :where(button, a, input, textarea, [role="switch"], summary):focus-visible {
-  outline: 2px solid var(--color-blue);
+  outline: 2px solid var(--color-amber);
   outline-offset: 2px;
   border-radius: 4px;
 }
 
-.x-label {
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-ink-faint);
-}
-
-.x-rule {
-  height: 1px;
-  background: var(--color-edge);
-}
-
 /* Quiet text selection inputs on dark panels. */
-input, textarea {
+input,
+textarea {
   color-scheme: dark;
+}
+
+/* Primary action: solid warm ivory on charcoal, the one loud element. */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  border-radius: 0.5rem;
+  background: var(--color-ink);
+  color: var(--color-night);
+  padding: 0 1.25rem;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease;
+}
+.btn-primary:hover {
+  background: #f4f1ea;
+}
+.btn-primary:active {
+  transform: translateY(1px);
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(217, 154, 58, 0.5);
+  background: rgba(217, 154, 58, 0.1);
+  color: var(--color-amber);
+  padding: 0 1.25rem;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease;
+}
+.btn-signal:hover {
+  background: rgba(217, 154, 58, 0.18);
+}
+.btn-signal:active {
+  transform: translateY(1px);
+}
+.btn-signal:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-edge);
+  background: var(--color-panel-2);
+  color: var(--color-ink-soft);
+  padding: 0 0.9rem;
+  font-size: 13px;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.btn-quiet:hover {
+  border-color: var(--color-edge-strong);
+  color: var(--color-ink);
+}
+.btn-quiet:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Subtle entrance for rows, panels and the launched-operation monitor. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise-in {
+  animation: rise-in 0.24s ease both;
+}
+.rise-in-item:nth-child(1) { animation-delay: 0ms; }
+.rise-in-item:nth-child(2) { animation-delay: 30ms; }
+.rise-in-item:nth-child(3) { animation-delay: 60ms; }
+.rise-in-item:nth-child(4) { animation-delay: 90ms; }
+
+/* Amber sweep on the live phase rail. */
+@keyframes rail-flow {
+  from { background-position: 0 0; }
+  to { background-position: 24px 0; }
+}
+.rail-live {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-amber) 0 8px,
+    transparent 8px 16px
+  );
+  background-size: 24px 2px;
+  animation: rail-flow 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-live {
+    background-image: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -130,5 +258,6 @@ input, textarea {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

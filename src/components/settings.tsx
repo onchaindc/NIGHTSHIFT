@@ -1,20 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CheckCircle2, CircleAlert, Server, Wallet } from "lucide-react";
 import { money } from "@/components/taskParts";
+import type { StatusBody } from "@/components/shell-types";
 
 /**
  * Settings: a truthful, read-only view of how the system is configured.
- * Integration names only, no secret values. Runtime defaults come from
- * GET /api/status so the page always matches the running server.
+ * Integration names and states only, no secret values. Runtime defaults come
+ * from GET /api/status so the page always matches the running server.
  */
-
-interface StatusBody {
-  ok: boolean;
-  store: "ok" | "unavailable";
-  services: { telegraph: boolean; telegram: boolean; chainRpc: boolean };
-  defaultSpendLimitCents: number;
-}
 
 export default function Settings() {
   const [status, setStatus] = useState<StatusBody | null>(null);
@@ -38,11 +33,12 @@ export default function Settings() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="max-w-2xl">
-        <h1 className="text-[22px] font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
-          How this NIGHTSHIFT instance is configured. Names and states only; secret values are never shown here.
+        <p className="x-label">System configuration</p>
+        <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Settings</h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
+          How this NIGHTSHIFT instance is configured. Names and states only; secret values never appear here.
         </p>
       </div>
 
@@ -53,35 +49,46 @@ export default function Settings() {
       )}
 
       {status && (
-        <div className="mt-5 space-y-4">
-          <section className="rounded-lg border border-edge bg-panel" aria-label="Integrations">
+        <div className="mt-8 space-y-5">
+          <section className="overflow-hidden rounded-lg border border-edge bg-panel" aria-label="Integrations">
             <div className="border-b border-edge px-4 py-3">
-              <h2 className="text-[14px] font-semibold">Integrations</h2>
+              <h2 className="x-label">Integrations</h2>
             </div>
             <ul className="divide-y divide-edge">
               {[
                 {
                   name: "Paid research",
                   configured: status.services.telegraph,
-                  note: "Buys answers on the Telegraph network with an auditable receipt. Setup: add the paid-research wallet key (TELEGRAPH_EVM_PRIVATE_KEY) to the environment.",
+                  detail: "Buys answers on the Telegraph network with an auditable receipt and x402 settlement.",
+                  setup: "TELEGRAPH_EVM_PRIVATE_KEY — the paid-research wallet key",
                 },
                 {
                   name: "Telegram bot",
                   configured: status.services.telegram,
-                  note: "Runs the same operations over @nightshiftagent_bot. Setup: add the bot token (TELEGRAM_BOT_TOKEN) and the webhook secret (TELEGRAM_WEBHOOK_SECRET) to the environment.",
+                  detail: "Runs the same operations over @nightshiftagent_bot, with webhook re-registration and delivery retries.",
+                  setup: "TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET",
                 },
                 {
                   name: "Chain reads (read-only)",
                   configured: status.services.chainRpc,
-                  note: "Reads public chain data for verification. Base Sepolia RPC by default; override with NIGHTSHIFT_CHAIN_RPC_URL. Never signs anything.",
+                  detail: "Reads public chain data for verification. Base Sepolia RPC by default. Never signs anything.",
+                  setup: "NIGHTSHIFT_CHAIN_RPC_URL (optional override)",
+                },
+                {
+                  name: "Task store (Neon Postgres or local JSON)",
+                  configured: status.store === "ok",
+                  detail: "Watch configs, fingerprints and the alert ledger persist across restarts in production.",
+                  setup: "DATABASE_URL or a local data directory",
                 },
               ].map((s) => (
-                <li key={s.name} className="flex items-start justify-between gap-4 px-4 py-3">
-                  <div>
+                <li key={s.name} className="flex items-start justify-between gap-4 px-4 py-3.5">
+                  <div className="min-w-0">
                     <p className="text-[13px] font-medium text-ink">{s.name}</p>
-                    <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-faint">{s.note}</p>
+                    <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-faint">{s.detail}</p>
+                    <p className="mt-1 tabular text-[10.5px] text-ink-faint">setup key: {s.setup}</p>
                   </div>
-                  <span className={`shrink-0 rounded-sm border px-2 py-0.5 text-[10.5px] font-medium ${s.configured ? "border-teal/40 bg-teal/10 text-teal" : "border-risk/40 bg-risk/10 text-risk"}`}>
+                  <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10.5px] font-medium ${s.configured ? "border-teal/40 bg-teal/10 text-teal" : "border-risk/40 bg-risk/10 text-risk"}`}>
+                    {s.configured ? <CheckCircle2 size={11} aria-hidden /> : <CircleAlert size={11} aria-hidden />}
                     {s.configured ? "Configured" : "Not configured"}
                   </span>
                 </li>
@@ -89,39 +96,43 @@ export default function Settings() {
             </ul>
           </section>
 
-          <section className="rounded-lg border border-edge bg-panel" aria-label="Runtime defaults">
+          <section className="overflow-hidden rounded-lg border border-edge bg-panel" aria-label="Runtime defaults">
             <div className="border-b border-edge px-4 py-3">
-              <h2 className="text-[14px] font-semibold">Runtime defaults</h2>
+              <h2 className="x-label">Runtime defaults</h2>
             </div>
             <ul className="divide-y divide-edge">
-              <li className="flex items-center justify-between gap-4 px-4 py-3">
-                <div>
-                  <p className="text-[13px] font-medium text-ink">Default spending ceiling</p>
-                  <p className="mt-0.5 text-[11.5px] text-ink-faint">Applied when an operation is launched with the field cleared; override with NIGHTSHIFT_DEFAULT_SPEND_LIMIT_CENTS.</p>
+              <li className="flex items-center justify-between gap-4 px-4 py-3.5">
+                <div className="min-w-0">
+                  <p className="inline-flex items-center gap-2 text-[13px] font-medium text-ink">
+                    <Wallet size={13} strokeWidth={1.8} aria-hidden className="text-ink-faint" /> Default spending ceiling
+                  </p>
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-faint">Applied when an operation is launched with the ceiling field cleared.</p>
                 </div>
-                <span className="tabular text-[12.5px] text-ink">{money(status.defaultSpendLimitCents)}</span>
+                <span className="tabular shrink-0 text-[13px] text-amber">{money(status.defaultSpendLimitCents ?? 100)}</span>
               </li>
-              <li className="flex items-center justify-between gap-4 px-4 py-3">
-                <div>
-                  <p className="text-[13px] font-medium text-ink">Task store</p>
-                  <p className="mt-0.5 text-[11.5px] text-ink-faint">Local JSON store behind the task API and the Telegram bot.</p>
+              <li className="flex items-center justify-between gap-4 px-4 py-3.5">
+                <div className="min-w-0">
+                  <p className="inline-flex items-center gap-2 text-[13px] font-medium text-ink">
+                    <Server size={13} strokeWidth={1.8} aria-hidden className="text-ink-faint" /> Task store
+                  </p>
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-faint">The durable store behind the task API, the Telegram bot, and the watch scheduler.</p>
                 </div>
-                <span className={`rounded-sm border px-2 py-0.5 text-[10.5px] font-medium ${status.store === "ok" ? "border-teal/40 bg-teal/10 text-teal" : "border-risk/40 bg-risk/10 text-risk"}`}>
+                <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10.5px] font-medium ${status.store === "ok" ? "border-teal/40 bg-teal/10 text-teal" : "border-risk/40 bg-risk/10 text-risk"}`}>
+                  {status.store === "ok" ? <CheckCircle2 size={11} aria-hidden /> : <CircleAlert size={11} aria-hidden />}
                   {status.store === "ok" ? "Reachable" : "Unreachable"}
                 </span>
               </li>
             </ul>
           </section>
 
-          <section className="rounded-lg border border-edge bg-panel" aria-label="Data policy">
-            <div className="border-b border-edge px-4 py-3">
-              <h2 className="text-[14px] font-semibold">How numbers are counted</h2>
-            </div>
-            <p className="px-4 py-3 text-[12px] leading-relaxed text-ink-soft">
-              Costs come only from recorded spend entries, taken from each payment receipt. Tasks labeled as test
-              runs by the automated audit are excluded from ordinary metrics. A task counts as completed only when
-              every fixed success criterion passed against real evidence; failed and blocked tasks say so, and blocked
-              tasks are never charged.
+          <section className="rounded-lg border border-edge bg-panel px-4 py-3.5" aria-label="Data policy">
+            <h2 className="x-label mb-2">How numbers are counted</h2>
+            <p className="text-[12px] leading-relaxed text-ink-soft">
+              Costs come only from recorded spend entries, taken from each payment receipt. Tasks labeled as test runs
+              by the automated audit are excluded from ordinary metrics. A task counts as completed only when every
+              fixed success criterion passed against real evidence; failed and blocked tasks say so, and blocked tasks
+              are never charged. Protocol Watch alerts are delivered exactly once per detected change, with failed
+              deliveries retried automatically.
             </p>
           </section>
         </div>

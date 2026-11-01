@@ -2,6 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  CircleDot,
+  GitBranch,
+  Rss,
+  Radar,
+  ScrollText,
+  Trash2,
+  X,
+} from "lucide-react";
 import type { TaskRecord } from "@/lib/engine/types";
 import { SOURCE_TYPE_LABELS, type SourceType, type WatchConfig } from "@/lib/watch/types";
 import { StatusChip, isTestRun, money, timeOf } from "@/components/taskParts";
@@ -13,6 +24,14 @@ import { StatusChip, isTestRun, money, timeOf } from "@/components/taskParts";
  * the real watch store and task store. The scheduler note is honest about the
  * monitoring pausing whenever the server process stops.
  */
+
+const SOURCE_ICONS: Record<SourceType, typeof GitBranch> = {
+  github_releases: GitBranch,
+  github_commits: GitBranch,
+  docs_url: ScrollText,
+  discourse_forum: ScrollText,
+  rss_feed: Rss,
+};
 
 const SOURCE_OPTIONS: Array<{ value: SourceType; hint: string; placeholder: string }> = [
   { value: "github_releases", hint: "reports the newest published release", placeholder: "owner/repo" },
@@ -86,23 +105,30 @@ function CreateWatch({ onCreated }: { onCreated: () => void }) {
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="min-h-10 rounded-md border border-teal/40 bg-teal/15 px-4 py-2 text-[13px] font-medium text-teal transition-colors hover:bg-teal/25"
-      >
+      <button type="button" onClick={() => setOpen(true)} className="btn-signal shrink-0">
+        <Radar size={14} aria-hidden />
         New watch
       </button>
     );
   }
 
   return (
-    <div className="rounded-lg border border-edge bg-panel">
-      <div className="border-b border-edge px-4 py-3">
-        <h2 className="text-[14px] font-semibold">Configure a watch</h2>
-        <p className="mt-0.5 text-[11.5px] text-ink-faint">
-          Sources are read for what they actually publish. Nothing is fetched and nothing is spent at save time.
-        </p>
+    <div className="rise-in w-full rounded-lg border border-amber/40 bg-panel">
+      <div className="flex items-center justify-between border-b border-edge px-4 py-3.5">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">Configure a watch</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">
+            Sources are read for what they actually publish. Nothing is fetched and nothing is spent at save time.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="Close the watch form"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-edge text-ink-faint transition-colors hover:text-ink"
+        >
+          <X size={15} strokeWidth={1.8} />
+        </button>
       </div>
       <div className="px-4 py-4">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -113,7 +139,7 @@ function CreateWatch({ onCreated }: { onCreated: () => void }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Uniswap v4 core"
-              className="min-h-10 w-full rounded-md border border-edge bg-panel-2 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-blue/60 focus:outline-none"
+              className="min-h-10 w-full rounded-md border border-edge bg-panel-2 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none"
             />
           </div>
           <div>
@@ -123,48 +149,58 @@ function CreateWatch({ onCreated }: { onCreated: () => void }) {
               value={protocol}
               onChange={(e) => setProtocol(e.target.value)}
               placeholder="e.g. Uniswap"
-              className="min-h-10 w-full rounded-md border border-edge bg-panel-2 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-blue/60 focus:outline-none"
+              className="min-h-10 w-full rounded-md border border-edge bg-panel-2 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none"
             />
           </div>
         </div>
 
-        <p className="x-label mb-2 mt-4">Sources (up to 5)</p>
+        <p className="x-label mb-2 mt-5">Sources (up to 5)</p>
         <div className="space-y-2">
           {sources.map((s, i) => {
             const opt = SOURCE_OPTIONS.find((o) => o.value === s.type)!;
+            const Icon = SOURCE_ICONS[s.type];
             return (
-              <div key={i} className="grid gap-2 rounded-md border border-edge bg-panel-2 p-2.5 sm:grid-cols-[150px_minmax(0,1fr)_110px_auto]">
-                <select
-                  aria-label={`Source ${i + 1} type`}
-                  value={s.type}
-                  onChange={(e) => setSource(i, { type: e.target.value as SourceType })}
-                  className="min-h-10 rounded-sm border border-edge bg-panel px-2 text-[12.5px] text-ink focus:border-blue/60 focus:outline-none"
-                >
-                  {SOURCE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{SOURCE_TYPE_LABELS[o.value]}</option>
-                  ))}
-                </select>
+              <div key={i} className="grid gap-2 rounded-md border border-edge bg-panel-2 p-2.5 sm:grid-cols-[minmax(0,190px)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                <div className="flex">
+                  <span
+                    aria-hidden
+                    className="grid w-9 place-items-center rounded-l-md border border-r-0 border-edge bg-panel text-ink-faint"
+                  >
+                    <Icon size={13} strokeWidth={1.8} />
+                  </span>
+                  <select
+                    aria-label={`Source ${i + 1} type`}
+                    value={s.type}
+                    onChange={(e) => setSource(i, { type: e.target.value as SourceType })}
+                    className="min-h-10 w-full rounded-r-md border border-edge bg-panel pl-1.5 pr-2 text-[12.5px] text-ink focus:border-amber/50 focus:outline-none"
+                  >
+                    {SOURCE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{SOURCE_TYPE_LABELS[o.value]}</option>
+                    ))}
+                  </select>
+                </div>
                 <input
                   aria-label={`Source ${i + 1} target`}
                   value={s.target}
                   onChange={(e) => setSource(i, { target: e.target.value })}
                   placeholder={opt.placeholder}
-                  className="min-h-10 w-full rounded-sm border border-edge bg-panel px-2.5 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-blue/60 focus:outline-none"
+                  className="min-h-10 w-full rounded-md border border-edge bg-panel px-2.5 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none"
                 />
                 <input
                   aria-label={`Source ${i + 1} label (optional)`}
                   value={s.label}
                   onChange={(e) => setSource(i, { label: e.target.value })}
                   placeholder={opt.hint}
-                  className="hidden min-h-10 rounded-sm border border-edge bg-panel px-2.5 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-blue/60 focus:outline-none sm:block"
+                  className="hidden min-h-10 w-full rounded-md border border-edge bg-panel px-2.5 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none sm:block"
                 />
                 <button
                   type="button"
                   onClick={() => setSources((prev) => prev.filter((_, idx) => idx !== i))}
                   disabled={sources.length <= 1}
-                  className="min-h-10 rounded-sm border border-edge px-3 text-[12px] text-ink-faint transition-colors hover:border-risk/50 hover:text-risk disabled:opacity-40"
+                  aria-label={`Remove source ${i + 1}`}
+                  className="grid min-h-10 w-10 place-items-center self-center rounded-md border border-edge text-ink-faint transition-colors hover:border-risk/50 hover:text-risk disabled:opacity-40"
                 >
-                  Remove
+                  <Trash2 size={14} strokeWidth={1.8} />
                 </button>
               </div>
             );
@@ -174,7 +210,7 @@ function CreateWatch({ onCreated }: { onCreated: () => void }) {
           type="button"
           onClick={() => setSources((prev) => (prev.length < 5 ? [...prev, { type: "rss_feed", label: "", target: "" }] : prev))}
           disabled={sources.length >= 5}
-          className="mt-2 min-h-9 rounded-sm border border-edge px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-blue/50 hover:text-ink disabled:opacity-40"
+          className="btn-quiet mt-2 !min-h-9 !text-[12px] disabled:opacity-40"
         >
           + Add source
         </button>
@@ -203,13 +239,13 @@ function CreateWatch({ onCreated }: { onCreated: () => void }) {
               aria-checked={approval}
               onClick={() => setApproval((v) => !v)}
               className={`flex min-h-10 w-full items-center justify-between rounded-md border px-3 py-2 text-left transition-colors ${
-                approval ? "border-gold/60 bg-gold/10" : "border-edge bg-panel-2 hover:border-edge-strong"
+                approval ? "border-amber/50 bg-amber/5" : "border-edge bg-panel-2 hover:border-edge-strong"
               }`}
             >
-              <span className={`text-[12.5px] ${approval ? "text-gold" : "text-ink-soft"}`}>
+              <span className={`text-[12.5px] ${approval ? "text-amber" : "text-ink-soft"}`}>
                 {approval ? "Ask me before paid steps" : "Allow paid steps directly"}
               </span>
-              <span className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${approval ? "bg-gold" : "bg-edge-strong"}`} aria-hidden>
+              <span className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${approval ? "bg-amber" : "bg-edge-strong"}`} aria-hidden>
                 <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-night transition-all ${approval ? "left-3.5" : "left-0.5"}`} />
               </span>
             </button>
@@ -221,9 +257,9 @@ function CreateWatch({ onCreated }: { onCreated: () => void }) {
               value={chat}
               onChange={(e) => setChat(e.target.value.replace(/[^0-9-]/g, ""))}
               placeholder="e.g. 123456789"
-              className="min-h-10 w-full rounded-md border border-edge bg-panel-2 px-3 py-2 tabular text-sm text-ink placeholder:text-ink-faint focus:border-blue/60 focus:outline-none"
+              className="min-h-10 w-full rounded-md border border-edge bg-panel-2 px-3 py-2 tabular text-sm text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none"
             />
-            <p className="mt-1 text-[11px] text-ink-faint">Messages come from @nightshiftagent_bot. Leave empty to keep reports in the Command Center only.</p>
+            <p className="mt-1 text-[11px] text-ink-faint">Messages come from @nightshiftagent_bot. Leave empty to keep reports in the console only.</p>
           </div>
         </div>
 
@@ -234,14 +270,14 @@ function CreateWatch({ onCreated }: { onCreated: () => void }) {
         )}
 
         <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button type="button" onClick={() => setOpen(false)} className="min-h-10 rounded-md border border-edge px-4 py-2 text-[13px] text-ink-soft hover:text-ink">
+          <button type="button" onClick={() => setOpen(false)} className="btn-quiet">
             Cancel
           </button>
           <button
             type="button"
             onClick={() => void create()}
             disabled={submitting || !name.trim() || !protocol.trim()}
-            className="min-h-10 rounded-md border border-teal/40 bg-teal/15 px-5 py-2 text-[13px] font-medium text-teal transition-colors hover:bg-teal/25 disabled:opacity-40"
+            className="btn-primary disabled:opacity-40"
           >
             {submitting ? "Saving…" : "Create watch"}
           </button>
@@ -269,12 +305,17 @@ function WatchRow({
   runError: string | null;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const baselineCount = Object.keys(watch.fingerprints ?? {}).length;
+
   return (
-    <article className="rounded-lg border border-edge bg-panel">
+    <article className="rise-in rounded-lg border border-edge bg-panel transition-colors hover:border-edge-strong">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-edge px-4 py-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="text-[13.5px] font-semibold text-ink">{watch.name}</span>
-          <span className="rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] text-ink-faint">{watch.protocol}</span>
+          <span aria-hidden className="grid h-7 w-7 place-items-center rounded-md border border-edge bg-panel-2 text-amber">
+            <Radar size={13} strokeWidth={1.8} />
+          </span>
+          <span className="truncate text-[13.5px] font-semibold text-ink">{watch.name}</span>
+          <span className="rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] tabular text-ink-faint">{watch.protocol}</span>
           <span className="inline-flex items-center gap-1.5 rounded-sm border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-teal" />
             {watch.sources.length} source{watch.sources.length === 1 ? "" : "s"}
@@ -285,25 +326,32 @@ function WatchRow({
         </span>
       </div>
       <div className="px-4 py-3">
+        {/* Source monitoring state is REAL: a persisted fingerprint means the
+            source has a baseline to diff against. */}
         <div className="flex flex-wrap gap-1.5">
           {watch.sources.map((s) => {
-            // Source monitoring status is REAL state: a persisted fingerprint
-            // means this source has a baseline to diff against; its absence
-            // means the next scan will still be establishing one.
+            const Icon = SOURCE_ICONS[s.type];
             const hasBaseline = Boolean(watch.fingerprints?.[s.id]);
             return (
               <span
                 key={s.id}
                 className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[11px] text-ink-soft"
-                title={hasBaseline ? "Monitored: baseline recorded; changes are detected by diffing against it real-time on every scan." : "Waiting for first scan: the baseline is recorded on the next check."}
+                title={hasBaseline ? "Monitored: baseline recorded; changes are detected by diffing against it on every scan." : "Waiting for first scan: the baseline is recorded on the next check."}
               >
-                <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${hasBaseline ? "bg-teal" : "bg-ink-faint"}`} />
-                {SOURCE_TYPE_LABELS[s.type]}: {s.label.slice(0, 40)}
+                <Icon size={11} strokeWidth={1.8} aria-hidden className="text-ink-faint" />
+                {s.label.slice(0, 40)}
+                {hasBaseline ? (
+                  <Check size={11} strokeWidth={2.4} aria-hidden className="text-teal" />
+                ) : (
+                  <CircleDot size={11} strokeWidth={2.2} aria-hidden className="text-amber" />
+                )}
               </span>
             );
           })}
           <span className="self-center text-[10.5px] text-ink-faint">
-            {Object.keys(watch.fingerprints ?? {}).length === 0 ? "baselines recorded on the first scan" : `baselines kept for ${Object.keys(watch.fingerprints ?? {}).length}/${watch.sources.length} sources`}
+            {baselineCount === 0
+              ? "baselines recorded on the first scan"
+              : `baselines kept for ${baselineCount}/${watch.sources.length} sources`}
           </span>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -311,7 +359,7 @@ function WatchRow({
             type="button"
             onClick={() => onRun(watch.id, false)}
             disabled={busy === watch.id}
-            className="min-h-9 rounded-md border border-edge bg-panel-2 px-3.5 py-1.5 text-[12.5px] text-ink transition-colors hover:border-blue/50 disabled:opacity-50"
+            className="btn-quiet !min-h-9 !text-[12.5px] disabled:opacity-50"
           >
             {busy === watch.id ? "Checking…" : "Check now (free)"}
           </button>
@@ -320,26 +368,31 @@ function WatchRow({
             onClick={() => onRun(watch.id, true)}
             disabled={busy === watch.id}
             title={`Adds a bounded Telegraph insight, at most ${money(watch.spendLimitUsdCents)}${watch.requiresApprovalForPaid ? ", approval required before it runs" : ""}`}
-            className="min-h-9 rounded-md border border-teal/40 bg-teal/10 px-3.5 py-1.5 text-[12.5px] font-medium text-teal transition-colors hover:bg-teal/20 disabled:opacity-50"
+            className="btn-signal !min-h-9 !text-[12.5px] !px-3.5 disabled:opacity-50"
           >
-            Check + investigate (max {money(watch.spendLimitUsdCents)}{watch.requiresApprovalForPaid ? ", approval first" : ""})
+            Check + investigate (max {money(watch.spendLimitUsdCents)})
           </button>
           {confirming ? (
             <>
-              <button type="button" onClick={() => onDelete(watch.id)} className="min-h-9 rounded-md border border-risk/50 px-3 py-1.5 text-[12.5px] text-risk">
+              <button type="button" onClick={() => onDelete(watch.id)} className="btn-quiet !min-h-9 !border-risk/50 !text-[12.5px] !text-risk">
                 Confirm delete
               </button>
-              <button type="button" onClick={() => setConfirming(false)} className="min-h-9 rounded-md px-2 py-1.5 text-[12px] text-ink-faint hover:text-ink">
+              <button type="button" onClick={() => setConfirming(false)} className="min-h-9 px-2 text-[12px] text-ink-faint transition-colors hover:text-ink">
                 Keep
               </button>
             </>
           ) : (
-            <button type="button" onClick={() => setConfirming(true)} className="ml-auto min-h-9 rounded-md px-2.5 py-1.5 text-[12px] text-ink-faint transition-colors hover:text-risk">
-              Delete
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              aria-label={`Delete watch ${watch.name}`}
+              className="ml-auto grid min-h-9 w-9 place-items-center rounded-md text-ink-faint transition-colors hover:text-risk"
+            >
+              <Trash2 size={14} strokeWidth={1.8} />
             </button>
           )}
-          <Link href="/history" className="text-[11.5px] text-ink-faint hover:text-ink">
-            Runs are recorded in history →
+          <Link href="/history" className="inline-flex min-h-8 items-center text-[11.5px] text-ink-faint transition-colors hover:text-ink">
+            Runs are recorded in History →
           </Link>
         </div>
         {runError && (
@@ -427,7 +480,7 @@ export default function Watch() {
       if (!res.ok) {
         setRunErrors((prev) => ({ ...prev, [id]: body.error ?? `status ${res.status}` }));
       } else if (body.task && body.task.state === "awaiting_approval") {
-        setRunErrors((prev) => ({ ...prev, [id]: `Plan built and waiting for your approval before the paid step. Approve it in the ${"Approvals"} view (task ${body.task!.id.slice(0, 8)}).` }));
+        setRunErrors((prev) => ({ ...prev, [id]: `Plan built and waiting for your approval before the paid step. Approve it in the Approvals view (task ${body.task!.id.slice(0, 8)}).` }));
       } else if (body.task && body.task.state === "failed") {
         setRunErrors((prev) => ({ ...prev, [id]: `Check failed: ${body.task!.error ?? "unknown error"}. Open the run for the full timeline.` }));
       }
@@ -454,40 +507,44 @@ export default function Watch() {
   }
 
   const watchRuns = (tasks ?? [])
-    .filter((t) => t.jobType === "protocol_watch" && !isTestRun(t))
-    .slice(0, 8);
+    .filter((t) => t.jobType === "protocol_watch" && !isTestRun(t));
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <h1 className="text-[22px] font-semibold tracking-tight">Protocol Watch</h1>
-          <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
-            Monitor a protocol's public sources, detect real changes, investigate what matters, and get a verified
-            report. Free checks are always safe; investigation costs only what you allow.
+          <p className="x-label">Continuous protocol monitoring</p>
+          <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Protocol Watch</h1>
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
+            Monitor a protocol's legitimate public sources, detect real changes against recorded baselines, and
+            deliver a verified report. Free checks are always safe; investigation costs only what you allow.
           </p>
         </div>
         <CreateWatch onCreated={() => void refresh()} />
       </div>
 
-      <p className="mt-4 rounded-md border border-edge bg-panel-2 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink-faint">
+      {/* Real scheduler state */}
+      <p className="mt-6 rounded-lg border border-edge bg-panel px-4 py-3 text-[11.5px] leading-relaxed text-ink-faint">
         {sched ? (
           sched.degraded ? (
             <>
-              <span className="text-risk">Worker degraded: {sched.degradedReason ?? "unknown reason"}.</span>{" "}
+              <span className="inline-flex items-center gap-1.5 font-medium text-risk">
+                <AlertTriangle size={12} aria-hidden /> Worker degraded: {sched.degradedReason ?? "unknown reason"}.
+              </span>{" "}
               {sched.lastSuccessAt ? `Last successful scan: ${new Date(sched.lastSuccessAt).toLocaleTimeString()}.` : "No successful scan has been recorded yet."}
             </>
           ) : (
             <>
-              <span className="text-ink-soft">Worker healthy.</span>{" "}
+              <span className="inline-flex items-center gap-1.5 font-medium text-teal">
+                <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-teal" /> Worker healthy.
+              </span>{" "}
               {sched.lastSuccessAt ? `Last successful scan ${new Date(sched.lastSuccessAt).toLocaleTimeString()}.` : ""}
               {sched.nextRunAt ? ` Next automatic scan around ${new Date(sched.nextRunAt).toLocaleTimeString()}.` : ""}
             </>
           )
         ) : null}{" "}
         Automatic checks run every {intervalLabel} while the server is running. They are always free and never pay
-        anything. When the server stops, monitoring pauses with it and resumes on restart without repeating old
-        changes.
+        anything. Missed scans are caught up and interrupted runs are recovered on the next tick.
       </p>
 
       {watchesFailed && (
@@ -501,8 +558,8 @@ export default function Watch() {
       )}
 
       {watches !== null && watches.length === 0 && !watchesFailed && (
-        <div className="mt-5 rounded-lg border border-dashed border-edge bg-panel/50 px-5 py-8 text-center">
-          <p className="mx-auto max-w-sm text-[13px] text-ink-soft">
+        <div className="mt-5 rounded-lg border border-dashed border-edge bg-panel/40 px-5 py-10 text-center">
+          <p className="mx-auto max-w-sm text-[13px] leading-relaxed text-ink-soft">
             No watches yet. Create one with a protocol and its sources; the first check records the baseline and later
             checks report real changes only.
           </p>
@@ -525,22 +582,24 @@ export default function Watch() {
       )}
 
       {/* Recorded runs */}
-      <section className="mt-9" aria-label="Recent watch runs">
+      <section className="mt-10" aria-label="Recent watch runs">
         <div className="mb-3 flex items-baseline justify-between gap-2">
-          <h2 className="text-[14px] font-semibold">Recent runs</h2>
+          <h2 className="x-label">Recent runs</h2>
           <span className="tabular text-[11px] text-ink-faint">real checks from the task store</span>
         </div>
         {watchRuns.some((t) => t.state === "failed") && (
-          <p className="mb-3 rounded-md border border-gold/30 bg-gold/5 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink-soft">
-            <span className="font-medium text-gold">Failed or interrupted scans are recovered automatically:</span> the next tick
-            re-checks the watch (idempotent fingerprints prevent duplicate alerts), and pending Telegram deliveries retry with
-            backoff. Open a run for its timeline.
+          <p className="mb-3 rounded-md border border-amber/30 bg-amber/5 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink-soft">
+            <span className="inline-flex items-center gap-1.5 font-medium text-amber">
+              <AlertTriangle size={12} aria-hidden /> Failed or interrupted scans are recovered automatically:
+            </span>{" "}
+            the next tick re-checks the watch (idempotent fingerprints prevent duplicate alerts), and pending Telegram
+            deliveries retry with backoff. Open a run for its timeline.
           </p>
         )}
         {tasks === null ? (
           <p aria-live="polite" className="text-[13px] text-ink-faint">Loading runs…</p>
         ) : watchRuns.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-edge bg-panel/50 px-5 py-8 text-center">
+          <div className="rounded-lg border border-dashed border-edge bg-panel/40 px-5 py-10 text-center">
             <p className="mx-auto max-w-sm text-[13px] text-ink-soft">
               No recorded runs yet. Check now (free) records a real run with its sources, findings, and delivery status.
             </p>
@@ -549,20 +608,18 @@ export default function Watch() {
           <div className="overflow-hidden rounded-lg border border-edge bg-panel">
             <table className="hidden w-full text-left md:table">
               <thead>
-                <tr className="border-b border-edge text-[10.5px] uppercase tracking-wider text-ink-faint">
-                  <th className="px-4 py-2.5 font-medium">Status</th>
-                  <th className="px-4 py-2.5 font-medium">Watch</th>
-                  <th className="px-4 py-2.5 font-medium">Trigger</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Cost</th>
-                  <th className="px-4 py-2.5 font-medium">When</th>
+                <tr className="border-b border-edge">
+                  {["Status", "Watch", "Trigger", "Cost", "When"].map((h) => (
+                    <th key={h} className="x-label px-4 py-2.5 text-left">{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {watchRuns.map((t) => (
-                  <tr key={t.id} className="border-b border-edge/60 last:border-0 hover:bg-panel-2/60">
+                {watchRuns.slice(0, 8).map((t) => (
+                  <tr key={t.id} className="border-b border-edge/60 last:border-0 transition-colors hover:bg-panel-2/60">
                     <td className="px-4 py-2.5"><StatusChip state={t.state} /></td>
                     <td className="max-w-[40ch] truncate px-4 py-2.5 text-[12.5px]">
-                      <Link href={`/tasks/${t.id}`} className="text-ink transition-colors hover:text-teal">{t.goal.replace(/^Protocol Watch check: /, "")}</Link>
+                      <Link href={`/tasks/${t.id}`} className="text-ink transition-colors hover:text-amber">{t.goal.replace(/^Protocol Watch check: /, "")}</Link>
                     </td>
                     <td className="px-4 py-2.5 tabular text-[11.5px] text-ink-faint">{t.watch?.triggeredBy ?? "manual"}</td>
                     <td className="px-4 py-2.5 text-right tabular text-[11.5px] text-ink-soft">{money(t.spend.spentUsdCents)}</td>
@@ -572,7 +629,7 @@ export default function Watch() {
               </tbody>
             </table>
             <ul className="divide-y divide-edge md:hidden">
-              {watchRuns.map((t) => (
+              {watchRuns.slice(0, 8).map((t) => (
                 <li key={t.id} className="px-4 py-2.5">
                   <div className="flex items-center justify-between gap-3">
                     <StatusChip state={t.state} />
