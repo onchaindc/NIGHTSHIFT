@@ -184,8 +184,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         {/* Top bar: context + one primary action (desktop); brand + actions on mobile */}
         <header className="sticky top-0 z-30 border-b border-edge bg-night/85 backdrop-blur">
           <div className="flex min-h-[60px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
-            <div className="flex min-w-0 items-center gap-3">
-              {/* Mobile: brand + burger */}
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              {/* Mobile: burger + wordmark. Desktop: section context. */}
               <button
                 type="button"
                 onClick={() => setDrawerOpen((v) => !v)}
@@ -196,11 +196,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               >
                 {drawerOpen ? <X size={17} strokeWidth={1.8} /> : <Menu size={17} strokeWidth={1.8} />}
               </button>
-              <Link href="/" aria-label="NIGHTSHIFT overview" className="flex items-center gap-2.5 lg:hidden">
-                <span aria-hidden className="grid h-8 w-8 place-items-center rounded-lg border border-amber/40 bg-amber/10">
-                  <Terminal size={14} strokeWidth={2} className="text-amber" />
-                </span>
-                <span className="text-[12px] font-bold tracking-[0.18em]">NIGHTSHIFT</span>
+              <Link
+                href="/"
+                aria-label="NIGHTSHIFT overview"
+                className="shrink-0 text-[12.5px] font-bold tracking-[0.18em] text-ink lg:hidden"
+              >
+                NIGHTSHIFT
               </Link>
               <span aria-hidden className="hidden h-5 w-px bg-edge lg:block" />
               <div className="hidden min-w-0 items-baseline gap-3 lg:flex">
@@ -209,12 +210,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   Autonomous intelligence operations
                 </p>
               </div>
-              {!drawerOpen && (
-                <span className={`flex items-center gap-1.5 text-[11.5px] lg:hidden ${state.tone}`}>
-                  <span aria-hidden className={`inline-block h-1.5 w-1.5 rounded-full ${state.dot}`} />
-                  {state.label}
-                </span>
-              )}
             </div>
 
             <div className="flex items-center gap-3">
@@ -224,15 +219,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   {state.label}
                 </span>
               )}
+              {/* One primary action. Icon-only on small screens, icon + label from sm up.
+                  (Responsive display lives on the inner nodes: the unlayered
+                  .btn-primary display would override Tailwind's hidden/sm:inline-flex.) */}
               <Link
                 href="/operations"
-                className="btn-primary hidden !min-h-9 sm:inline-flex"
+                aria-label="New operation"
+                className="btn-primary max-lg:!min-h-10 max-lg:!px-3 !min-h-9"
               >
-                <Terminal size={13} strokeWidth={2} aria-hidden />
-                New operation
-              </Link>
-              <Link href="/operations" aria-label="New operation" className="btn-primary !min-h-10 sm:hidden !px-3">
-                <Terminal size={15} strokeWidth={2} aria-hidden />
+                <Terminal size={15} strokeWidth={2} aria-hidden className="sm:hidden" />
+                <Terminal size={13} strokeWidth={2} aria-hidden className="hidden sm:block" />
+                <span className="hidden sm:inline">New operation</span>
               </Link>
             </div>
           </div>
