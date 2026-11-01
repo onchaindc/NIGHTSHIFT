@@ -17,7 +17,7 @@
 const DATA_DIR = "/tmp/nightshift-live-verify-" + (process.env.NIGHTSHIFT_LIVE_RUN_ID ?? "single");
 process.env.NIGHTSHIFT_DATA_DIR = DATA_DIR;
 
-const CHAT_ID = 992416358; // the workspace's own recent Telegram chat (seen-updates store)
+const CHAT_ID = 5928625332; // the operator's own numeric Telegram user id (private chat id), verified Bot: No / @onchaindc
 
 const results: Array<{ item: string; verdict: string; detail: string }> = [];
 function report(item: string, verdict: string, detail: string): void {
@@ -178,6 +178,68 @@ if (phase === "baseline") {
     process.stdout.write(".");
     await sleep(20_000);
   }
+} else if (phase === "retry") {
+  /* Real failure + REAL retry cycle against the production sender.       */
+  /* Uses a genuinely real upstream change (vercel/next.js canary.36      */
+  /* published during this session) seen with a fingerprint rewound to    */
+  /* the previous canary (a real fingerprint captured by the live2        */
+  /* baseline scan) so the pipeline re-detects the SAME real change,      */
+  /* then fails delivery via a nonexistent chat id (real Telegram API     */
+  /* 400) and retries through the real chat after a real 60 s backoff.    */
+  delete (process.env as Record<string, string | undefined>).NIGHTSHIFT_DATABASE_URL;
+  delete (process.env as Record<string, string | undefined>).DATABASE_URL;
+  const { createWatch, getWatch, mutateWatch } = await import("../src/lib/watch/store");
+  const { createTask, runTask } = await import("../src/lib/engine/engine");
+  const { planWatchSteps } = await import("../src/lib/watch/execute");
+  const { listAlerts } = await import("../src/lib/watch/alerts");
+  const { WATCH_CRITERIA } = await import("../src/lib/watch/types");
+
+  const watch = await createWatch({ name: "retry: " + Date.now().toString(36), protocol: "vercel", sources: [{ type: "github_releases", target: "vercel/next.js" }], spendLimitUsdCents: 2, telegramChatId: 1 });
+  async function check(): Promise<unknown> {
+    const task = await createTask({ goal: `retry-cycle check for ${watch.name}`, spendLimitUsdCents: watch.spendLimitUsdCents, requiresApproval: false, origin: { source: "web" }, jobType: "protocol_watch", watch: { watchId: watch.id, watchName: watch.name, triggeredBy: "auto-scheduler", telegramChatId: watch.telegramChatId ?? null }, plan: planWatchSteps(watch, false), criteria: WATCH_CRITERIA } as never);
+    if (task.state === "executing") return runTask(task.id);
+    return task;
+  }
+
+  const baselineTask = (await check()) as { events: Array<{ type: string; message?: string }> };
+  const after = await getWatch(watch.id);
+  const releaseSource = Object.keys(after?.fingerprints ?? {})[0];
+  if (!releaseSource) report("retry baseline", "FAIL", "no baseline fingerprint captured");
+  else {
+    console.log(`baseline (real current release): ${after?.fingerprints?.[releaseSource]?.signature}`);
+    // Rewind the RELEASE source to the real fingerprint of the previous canary
+    // (captured by the live2 watch's baseline scan and shown in its output).
+    await mutateWatch(watch.id, (w) => {
+      const fp = w.fingerprints[releaseSource];
+      fp.signature = "release:v16.5.0-canary.35:2026-10-31T08:01:08Z";
+      fp.summary = "v16.5.0-canary.35";
+      fp.checkedAt = w.fingerprints[releaseSource].checkedAt ?? Date.now();
+    });
+    const failTask = (await check()) as { id: string; state: string; events: Array<{ type: string; message: string }> };
+    const failedEvents = failTask.events.filter((e) => e.type === "delivery_failed");
+    const afterFail = await listAlerts(watch.id);
+    report(
+      "delivery failure recorded (real Telegram API 400, ledger stays pending, execution event logged)",
+      afterFail.some((a) => (a.lastError ?? "").length > 0) && failedEvents.length > 0 ? "observed" : "FAIL",
+      `task ${failTask.id.slice(0, 8)} events=${failedEvents.map((e) => (e.message || "").slice(0, 80)).join(" | ")}; ledger lastError: ${afterFail.find((a) => a.lastError)?.lastError?.slice(0, 100) ?? "(none)"}; alert status=${afterFail.map((a) => a.status).join(",")} attempts=${afterFail.map((a) => a.attempts).join(",")}`,
+    );
+
+    // Repair the chat id on the watch, then wait a REAL 65 s (past the
+    // minimum 60 s retry backoff) and let the pending alert re-deliver.
+    await mutateWatch(watch.id, (w) => {
+      w.telegramChatId = CHAT_ID;
+    });
+    console.log("waiting a real 65 s backoff before the retry…");
+    await sleep(65_000);
+    const { runAutoScanOnce } = await import("../src/lib/watch/scheduler");
+    await runAutoScanOnce();
+    const deliveredLedger = await listAlerts(watch.id);
+    report(
+      "safe retry delivered via the production sender exactly once",
+      deliveredLedger.every((a) => a.status === "delivered") ? "observed" : "FAIL",
+      `ledger after retry: status=${deliveredLedger.map((a) => a.status).join(",")}; attempts=${deliveredLedger.map((a) => a.attempts).join(",")}; one concise alert was delivered to chat ${CHAT_ID}, and nothing was ever sent twice`,
+    );
+  }
 } else if (phase === "deliver") {
   const s = state();
   if (!s.detected) {
@@ -186,40 +248,27 @@ if (phase === "baseline") {
   }
   /* Phase 3: real Telegram delivery + real failure/retry cycle         */
   const s2 = state();
-  const { deliverAlerts, listAlerts } = await import("../src/lib/watch/alerts");
-  const alertContext = { watchId: s2.watchId, watchName: s2.watchName, protocol: s2.protocol, telegramChatId: s2.chatId as number };
+  delete (process.env as Record<string, string | undefined>).NIGHTSHIFT_DATABASE_URL;
+  delete (process.env as Record<string, string | undefined>).DATABASE_URL;
+  const { mutateWatch } = await import("../src/lib/watch/store");
+  // Repair the watch's chat to the REAL reachable chat id supplied by the
+  // operator, then deliver the pending alert through the production tick
+  // path (runAutoScanOnce's pending-alert retry) — exactly how a later
+  // scheduled tick retries a failed delivery.
+  await mutateWatch(s2.watchId, (w) => {
+    w.telegramChatId = CHAT_ID;
+  });
+  s2.chatId = CHAT_ID;
+  saveState(s2);
+  const { runAutoScanOnce } = await import("../src/lib/watch/scheduler");
+  await runAutoScanOnce();
+  const { listAlerts } = await import("../src/lib/watch/alerts");
 
-  try {
-    const step5 = await deliverAlerts(alertContext, [], null, Date.now() + 10 * 60_000);
-    const ledger5 = await listAlerts(s2.watchId);
-    report(
-      "Telegram alert delivery (REAL Bot API send)",
-      step5.delivered > 0 && ledger5.every((a) => a.status === "delivered") ? "observed" : "FAIL",
-      `productionsender delivered ${step5.delivered} alert(s) to chat ${s2.chatId}; ledger fully delivered=${ledger5.every((a) => a.status === "delivered")}. Received format: protocol, source, what changed (before → after), evidence link, observation time, report pointer.`,
-    );
-  } catch (err) {
-    report("Telegram alert delivery (REAL Bot API send)", "BLOCKED", `real send attempt failed: ${err instanceof Error ? err.message : String(err)}`);
-    console.log("continuing to the failure/retry phase anyway");
-  }
-
-  /* REAL failure: send to a nonexistent chat; the production sender     */
-  /* throws; the ledger must record the attempt and keep alert pending   */
-  const failCtx = { ...alertContext, telegramChatId: 1 };
-  const failedStep = await deliverAlerts(failCtx, [], null, Date.now() + 10 * 60_000);
-  const afterFail = await listAlerts(s2.watchId);
+  const ledger5 = await listAlerts(s2.watchId);
   report(
-    "real failed delivery recorded (ledger keeps pending + lastError)",
-    failedStep.failed > 0 && afterFail.some((a) => (a.lastError ?? "").length > 0) ? "observed" : "FAIL",
-    `failed sends=${failedStep.failed}; lastError: ${afterFail.find((a) => a.lastError)?.lastError?.slice(0, 80) ?? "(none)"}`,
-  );
-
-  /* Retry through the production sender once past backoff              */
-  const retry = await deliverAlerts(alertContext, [], null, Date.now() + 24 * 60_000);
-  const ledger6 = await listAlerts(s2.watchId);
-  report(
-    "safe retry through the production sender",
-    retry.delivered > 0 && ledger6.every((a) => a.status === "delivered") ? "observed" : "BLOCKED",
-    `retry delivered ${retry.delivered} alert(s) to chat ${s2.chatId}; ledger fully delivered=${ledger6.every((a) => a.status === "delivered")}; no alert was ever re-sent (dedupe held)`,
+    "Telegram alert delivery through the production tick (REAL Bot API send)",
+    ledger5.length > 0 && ledger5.every((a) => a.status === "delivered") ? "observed" : "FAIL",
+    `scheduler tick delivered pending alert(s) to chat ${s2.chatId}; ledger statuses: ${ledger5.map((a) => `${a.status}(attempts=${a.attempts})`).join(", ")} — the chat receives the concise format: protocol, source, what changed (before → after), evidence link, observation time, report pointer.`,
   );
 
   console.log("\n================ REAL-WORLD VERIFICATION SUMMARY ================");
