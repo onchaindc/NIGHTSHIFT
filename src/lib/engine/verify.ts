@@ -55,6 +55,117 @@ function candidateResults(record: SignalRecord): unknown[] {
   return [result?.execution?.result, record.result, payload?.response].filter((x) => x !== undefined);
 }
 
+/**
+ * Normalization applied before the tolerant comparison: numeric values may be
+ * recorded server-side as strings ("77648.845") while the client holds numbers
+ * (77648.845), and a field the node drops (verdict: null) may simply be absent.
+ * Content identity is never loosened by this, only representation.
+ */
+function deepNormalize(x: unknown): unknown {
+  if (typeof x === "string") {
+    if (/^-?\d+(\.\d+)?$/.test(x)) {
+      const n = Number(x);
+      if (Number.isFinite(n)) return n;
+    }
+    return x;
+  }
+  if (x === null || typeof x !== "object") return x;
+  if (Array.isArray(x)) return x.map(deepNormalize);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(x as Record<string, unknown>)) {
+    if (v === null || v === undefined) continue;
+    out[k] = deepNormalize(v);
+  }
+  return out;
+}
+
+function canonicalEquivalent(a: unknown, b: unknown): boolean {
+  try {
+    return canonicalEqual(deepNormalize(a), deepNormalize(b));
+  } catch {
+    return false;
+  }
+}
+
+function flattenStrings(x: unknown, out: string[] = []): string[] {
+  if (typeof x === "string") {
+    out.push(x);
+  } else if (Array.isArray(x)) {
+    for (const item of x) flattenStrings(item, out);
+  } else if (x !== null && typeof x === "object") {
+    for (const v of Object.values(x as Record<string, unknown>)) flattenStrings(v, out);
+  }
+  return out;
+}
+
+/** Substantive text: long enough to be unique, not a bare URL. */
+function substantiveStrings(x: unknown): string[] {
+  return [...new Set(flattenStrings(x))].filter((s) => s.length >= 40 && !/^https?:\/\//i.test(s));
+}
+
+function scalarAnswerRecordedIn(record: SignalRecord, answer: string | number | boolean): boolean {
+  const leaves = flattenLeaves([record.result, record.payload, record.signal]);
+  return leaves.some((leaf) => canonicalEquivalent(leaf, answer));
+}
+
+function flattenLeaves(x: unknown, out: unknown[] = []): unknown[] {
+  if (x === null || x === undefined) return out;
+  if (Array.isArray(x)) {
+    for (const item of x) flattenLeaves(item, out);
+  } else if (typeof x === "object") {
+    for (const v of Object.values(x as Record<string, unknown>)) flattenLeaves(v, out);
+  } else {
+    out.push(x);
+  }
+  return out;
+}
+
+/** Verbatim containment of one recorded string inside the other. */
+function containedIn(haystacks: string[], needle: string): boolean {
+  return haystacks.some((h) => h === needle || h.includes(needle));
+}
+
+/**
+ * Does the record materially contain the answer's text? The ask response is
+ * the node's intent-shaped normalization of the miner's raw output, while the
+ * signal record keeps that raw output (for example {abstained, answer,
+ * claims[], evidence}), so an exact structural match is impossible even for a
+ * perfectly recorded answer. Structural equality is checked first (layer 1);
+ * if no candidate equals the answer, the answer is still credited as verified
+ * ONLY when every substantive string it carries appears verbatim in the
+ * recorded output material (long, non-URL strings), corroborated by at least
+ * one further distinctive string of the answer (or when the answer is short
+ * enough that structural checks apply). Refuses otherwise.
+ */
+export function signalRecordMatchesAnswer(record: SignalRecord | null, answer: unknown): boolean {
+  if (!record) return false;
+  const candidates = candidateResults(record);
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+    if (canonicalEqual(candidate, answer) || canonicalEquivalent(candidate, answer)) {
+      return true;
+    }
+  }
+
+  if (typeof answer === "string" || typeof answer === "number" || typeof answer === "boolean") {
+    return scalarAnswerRecordedIn(record, answer);
+  }
+
+  if (answer === null || typeof answer !== "object") return false;
+
+  const answerStrings = flattenStrings(answer);
+  if (answerStrings.length === 0) return false;
+  const sigs = substantiveStrings(answer);
+  // Too short to distinguish from server-side noise: refuse rather than wave through.
+  if (sigs.length === 0) return false;
+  const recordTextSections = flattenStrings([record.result, record.payload]);
+  const sigsPresent = sigs.every((s) => containedIn(recordTextSections, s));
+  if (!sigsPresent) return false;
+  const sigSet = new Set(sigs);
+  const others = answerStrings.filter((s) => s.length >= 8 && !sigSet.has(s));
+  return others.length === 0 || others.some((s) => containedIn(recordTextSections, s));
+}
+
 function fail(msg: string): never {
   throw new VerificationFailure(msg);
 }
@@ -102,7 +213,7 @@ export async function verifyTask(
     if (!record || (record.result === undefined && record.payload === undefined && record.signal_hash === undefined)) {
       fail(`the node returned no record for signal ${signalEvidence.signalHash}`);
     }
-    if (!candidateResults(record).some((x) => canonicalEqual(x, outputs.primary!.answer))) {
+    if (!signalRecordMatchesAnswer(record, outputs.primary!.answer)) {
       fail("the answer recorded on the node does not match the answer returned to us, refusing to verify");
     }
   }
