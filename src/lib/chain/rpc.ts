@@ -16,7 +16,23 @@ export const PUBLIC_CHAIN_RPCS: Record<string, string> = {
   optimism: "https://optimism-rpc.publicnode.com",
   polygon: "https://polygon-bor-rpc.publicnode.com",
   "base-sepolia": "https://sepolia.base.org",
+  "ethereum-sepolia": "https://ethereum-sepolia-rpc.publicnode.com",
 };
+
+/** eip155:<id> (as x402 receipts and challenges name the chain) -> public RPC. */
+const CHAIN_ID_RPCS: Record<string, string> = {
+  "11155111": PUBLIC_CHAIN_RPCS["ethereum-sepolia"],
+  "84532": DEFAULT_BASE_SEPOLIA_RPC,
+};
+
+/** The public RPC that can actually read a settlement on the chain a receipt
+ * names ("eip155:11155111" -> an Ethereum Sepolia endpoint). Returns null for
+ * unknown chains so callers keep their previous default instead of guessing. */
+export function rpcForChainId(chainId: string | undefined | null): string | null {
+  if (!chainId) return null;
+  const id = chainId.replace(/^eip155:/i, "");
+  return CHAIN_ID_RPCS[id] ?? null;
+}
 
 export interface ChainGasPrice {
   chain: string;
@@ -87,6 +103,6 @@ export async function getTransactionReceipt(
       rpcUrl,
     };
   } catch (err) {
-    throw new ChainReadError(`Base Sepolia read failed for ${txHash.slice(0, 18)}…: ${err instanceof Error ? err.message : err}`);
+    throw new ChainReadError(`chain read failed for ${txHash.slice(0, 18)}…: ${err instanceof Error ? err.message : err}`);
   }
 }

@@ -96,9 +96,9 @@ function makeDeps(hooks: FakeHooks = {}): EngineDeps & {
       },
     },
     chain: {
-      getReceipt: async (h) => {
+      getReceipt: async (h, rpcUrl) => {
         calls.chain++;
-        return hooks.getReceipt ? hooks.getReceipt(h) : { ...SETTLED };
+        return hooks.getReceipt ? hooks.getReceipt(h, rpcUrl) : { ...SETTLED };
       },
       getGasPrice: async (chain) => {
         calls.chain++; // counts independent chain reads (settlement + cross-check)
@@ -277,6 +277,45 @@ describe("real execution loop (paid response feeds the next action)", () => {
     expect(done.state).toBe("completed");
     // must be the tx hash the purchase produced — NOT a hardcoded value
     expect(capturedTx).toBe("0xtx123");
+  });
+
+  it("reads the settlement receipt on the chain the x402 receipt names, not a hardcoded network (regression: op 7188c593 read Base Sepolia for an eip155:11155111 settlement and recorded not_found)", async () => {
+    let capturedRpc: string | null = null;
+    const ethAnswer = { data: { amount: "4000.50", base: "ETH", currency: "USD" } };
+    const receiptWithRealChain = { ...GOOD_ANSWER.receipt!, chain: "eip155:11155111" };
+    const dep = makeDeps({
+      askAuto: async () => ({ ...GOOD_ANSWER, answer: ethAnswer, receipt: receiptWithRealChain }),
+      lookupSignal: async (h) => ({
+        signal_hash: h,
+        result: ethAnswer,
+        signal: { created_at: new Date().toISOString() },
+      }),
+      getReceipt: async (_txHash, rpcUrl) => {
+        capturedRpc = rpcUrl ?? null;
+        return { ...SETTLED };
+      },
+    });
+    const task = await createdTask("What is the ETH price?", true);
+    const done = await approveTask(task.id, dep);
+    expect(done.state).toBe("completed");
+    // Ethereum Sepolia public RPC — where this network's x402 payments settle.
+    expect(capturedRpc).toBe("https://ethereum-sepolia-rpc.publicnode.com");
+  });
+
+  it("keeps the default RPC when the receipt names no chain", async () => {
+    let capturedRpc: string | null = null;
+    const noChainReceipt = { ...GOOD_ANSWER.receipt!, chain: undefined as unknown as string };
+    const dep = makeDeps({
+      askAuto: async () => ({ ...GOOD_ANSWER, receipt: noChainReceipt }),
+      getReceipt: async (_txHash, rpcUrl) => {
+        capturedRpc = rpcUrl ?? null;
+        return { ...SETTLED };
+      },
+    });
+    const task = await createdTask("What is the BTC price?", true);
+    const done = await approveTask(task.id, dep);
+    expect(done.state).toBe("completed");
+    expect(capturedRpc).toBeNull();
   });
 });
 
