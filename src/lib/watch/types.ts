@@ -1,4 +1,5 @@
 import type { VerificationCriteria } from "@/lib/engine/types";
+import type { RepoReport as ImportableRepoReport } from "@/lib/watch/repo-intel";
 
 /**
  * Protocol Watch: configuration and results for monitoring a protocol's
@@ -110,6 +111,11 @@ export interface WatchRunState {
   /** Whether at least one source was read successfully in this run. */
   sourcesReadOk: number;
   sourcesFailed: number;
+  /**
+   * Present ONLY when the Repository Intelligence stage actually ran. A run
+   * without it was a routine change check, never an audit.
+   */
+  repo?: ImportableRepoReport;
   /** Distilled snapshots actually read this run; corroboration compares
    *  a finding against OTHER sources' real reads, never against itself. */
   observed?: Array<{ sourceId: string; label: string; summary: string; detail: string }>;

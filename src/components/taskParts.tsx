@@ -60,6 +60,8 @@ const FEED_TYPE: Partial<Record<ExecutionEvent["type"], { label: string; tone: T
   task_completed: { label: "completion", tone: "good" },
   task_failed: { label: "error", tone: "bad" },
   task_blocked: { label: "blocked", tone: "bad" },
+  repo_intel_scope: { label: "scope", tone: "info" },
+  repo_intel_finding: { label: "finding", tone: "info" },
 };
 
 export function feedType(type: ExecutionEvent["type"]): { label: string; tone: Tone } {
@@ -157,6 +159,7 @@ export function EvidenceList({ evidence }: { evidence: NonNullable<TaskRecord["r
               {ev.kind === "chain_read" && "Live chain read"}
               {ev.kind === "public_source_lookup" && "Public source"}
               {ev.kind === "watch_finding" && `Source read: ${ev.sourceLabel}`}
+              {ev.kind === "repo_intel" && `Repository finding: ${ev.findingTitle}`}
             </td>
             <td className="break-all py-1.5 tabular text-[11px] leading-relaxed text-ink-faint">
               {ev.kind === "public_source_lookup" && (
@@ -187,6 +190,8 @@ export function EvidenceList({ evidence }: { evidence: NonNullable<TaskRecord["r
                 `${ev.answerGasGwei} gwei purchased vs ${ev.chainGasGwei.toFixed(6)} gwei from our own node read on ${ev.chain}, agreed: ${ev.agreed ? "yes" : "no"} (${ev.rpcUrl})`}
               {ev.kind === "watch_finding" &&
                 `${ev.findingKind} from a real source read, confidence ${ev.confidence}${ev.corroboratedBy?.length ? `, corroborated by ${ev.corroboratedBy.join(", ")}` : ""}${ev.url ? `, source: ${ev.url}` : ""}`}
+              {ev.kind === "repo_intel" &&
+                `${ev.severity.toUpperCase()} · ${ev.category} · evidence: ${ev.evidence.slice(0, 3).join("; ")}${ev.url ? `, source: ${ev.url}` : ""}`}
             </td>
           </tr>
         ))}
@@ -230,10 +235,14 @@ export function OutcomeBlock({ task }: { task: TaskRecord }) {
   const done = task.state === "completed" && task.result;
   if (done) {
     // Free answers carry real content on their first line (gas figure, price);
-    // paid answers open with a miner attribution line that is not the answer.
-    const isFreeResult = task.result!.evidence.some(
-      (ev) => ev.kind === "chain_read" || ev.kind === "public_source_lookup",
-    );
+    // paid answers open with a miner attribution line that is not the answer;
+    // watch results open with the honest outcome statement ("INVESTIGATION
+    // COMPLETED…" / "NO CHANGES DETECTED…"), which is the report's verdict.
+    const isFreeResult =
+      task.result!.evidence.some(
+        (ev) => ev.kind === "chain_read" || ev.kind === "public_source_lookup" || ev.kind === "watch_finding" || ev.kind === "repo_intel",
+      );
+    const isWatchResult = task.result!.evidence.some((ev) => ev.kind === "watch_finding" || ev.kind === "repo_intel");
     const summaryLines = task.result!.summary.split("\n");
     return (
       <div className="rounded-md border border-teal/30 bg-teal/5 p-4">
@@ -241,6 +250,26 @@ export function OutcomeBlock({ task }: { task: TaskRecord }) {
         <pre className="whitespace-pre-wrap tabular text-[12.5px] leading-relaxed text-ink">
           {humanize(isFreeResult ? summaryLines.slice(1).join("\n") || "" : compactAnswer(task.result!.summary))}
         </pre>
+        {isWatchResult && task.result!.repoReport && (
+          <div className="mt-3 border-t border-teal/20 pt-3">
+            <p className="x-label mb-2">Top findings</p>
+            <ul className="space-y-2">
+              {task.result!.repoReport.findings.slice(0, 5).map((f) => (
+                <li key={f.id} className="text-[12.5px] leading-snug text-ink-soft">
+                  <span className="font-semibold tabular uppercase">[{f.severity}]</span> {f.title}
+                  {f.evidenceUrl && (
+                    <>
+                      {" "}
+                      <a href={f.evidenceUrl} target="_blank" rel="noopener noreferrer" className="text-blue hover:underline underline-offset-2">
+                        evidence ↗
+                      </a>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     );
   }

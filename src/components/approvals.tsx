@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, ChevronRight, ShieldCheck, Wallet } from "lucide-react";
+import { ChevronRight, ShieldCheck, Wallet } from "lucide-react";
 import type { TaskRecord } from "@/lib/engine/types";
 import { StatusChip, isTestRun, money } from "@/components/taskParts";
 
@@ -13,6 +14,7 @@ import { StatusChip, isTestRun, money } from "@/components/taskParts";
  */
 
 export default function Approvals() {
+  const router = useRouter();
   const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [activating, setActivating] = useState<string | null>(null);
@@ -63,6 +65,11 @@ export default function Approvals() {
           ...prev,
           [id]: `Could not ${action} the task: ${body.error ?? `status ${res.status}`}`,
         }));
+      } else if (action === "approve") {
+        // Approval resumed the SAME task where it was built: go watch it run
+        // on its own page (real state, full timeline), not back into a
+        // now-empty approvals list.
+        router.push(`/tasks/${id}`);
       }
     } catch (err) {
       setActionError((prev) => ({
@@ -86,7 +93,7 @@ export default function Approvals() {
           <h1 className="x-display-1 mt-3 text-ink">Approvals</h1>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
             Operations whose plans are ready but not yet paid for. Approving lets the agent make its planned purchase
-            within the ceiling; rejecting stops the task with nothing spent.
+            within the ceiling and takes you straight to the task as it runs; rejecting stops the task with nothing spent.
           </p>
         </div>
         {pending.length > 0 && (
@@ -121,11 +128,17 @@ export default function Approvals() {
               <ShieldCheck size={18} strokeWidth={1.8} />
             </span>
             <p className="mx-auto mt-4 max-w-sm text-[13.5px] leading-relaxed text-ink-soft">
-              Nothing is waiting for approval. Operations with approval required will appear here before any money moves.
+              Nothing is waiting for approval. Operations with approval required will appear here before any money moves,
+              and every approved operation keeps its own task page — active runs in Operations, finished ones in Work History.
             </p>
-            <Link href="/operations" className="btn-quiet mt-5">
-              Open the launcher <ArrowRight size={13} aria-hidden />
-            </Link>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3.5">
+              <Link href="/operations" className="btn-quiet">
+                Operations — active runs
+              </Link>
+              <Link href="/history" className="btn-quiet">
+                Work History — completed runs
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="mt-6 space-y-3">

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { EngineDeps, ExecutionOutputs } from "@/lib/engine/engine";
 import { canTransition, type ExecutionEvent, type TaskRecord, type PlanStep } from "@/lib/engine/types";
 import { fetchSource } from "./sources";
+import { investigateRepository, SEVERITY_ORDER, setRepoIntelDeps, type RepoReport } from "./repo-intel";
 import { getWatch, mutateWatch } from "./store";
 import { recordAlerts, deliverAlerts, type AlertContext } from "./alerts";
 import { resolveWebhookBaseUrl } from "@/lib/telegram/webhook-register";
@@ -77,6 +78,18 @@ export function planWatchSteps(watch: WatchConfig, investigate: boolean): PlanSt
     },
   ];
   if (investigate) {
+    // A GitHub repository watch gets a full technical investigation stage:
+    // actual structure, commit history, releases, dependency advisories and
+    // CI reads — free — before the optional paid insight. Watches with no
+    // GitHub source keep the previous single-paid-insight plan.
+    if (repoTargetFor(watch)) {
+      steps.push({
+        id: "watch-repo-investigate",
+        kind: "watch_repo_investigate",
+        description: `When something changed, run a real technical investigation of ${repoTargetFor(watch)}: structure, recent commits and authors, releases with breaking-change notes, dependency manifest with exact-version advisories, the repository's own published advisories, and CI workflow risks`,
+        maxCostUsdCents: 0,
+      });
+    }
     steps.push({
       id: "watch-investigate",
       kind: "watch_investigate",
@@ -408,6 +421,90 @@ export async function executeWatchCorroborate(
 }
 
 /* ------------------------------------------------------------------ */
+/* Step 1c (free): full repository technical investigation             */
+/* ------------------------------------------------------------------ */
+
+/** Extracts "owner/repo" from the watch's GitHub sources, if any. */
+export function repoTargetFor(watch: WatchConfig): string | null {
+  for (const s of watch.sources) {
+    if (s.type === "github_releases" || s.type === "github_commits") {
+      const target = s.target.replace(/^https?:\/\/github\.com\//i, "").replace(/\/+$/, "").replace(/\.git$/i, "");
+      if (/^[^/]+\/[^/]+$/.test(target)) return target;
+    }
+  }
+  return null;
+}
+
+/**
+ * Runs the Repository Intelligence stage (free, evidence-grounded) when the
+ * check detected a change. When nothing changed, it records the honest
+ * outcome — a routine fingerprint check — and runs nothing: never spending,
+ * never calling a no-change scan a completed examination.
+ */
+export async function executeWatchRepoInvestigate(
+  task: TaskRecord,
+  deps: WatchEngineDeps,
+  outputs: ExecutionOutputs,
+): Promise<void> {
+  const runState = outputs.watch;
+  if (!runState) throw new Error("watch repository investigation ran before the source check");
+  const tools = makeTools(deps, task);
+  const changed = runState.findings.filter((f) => f.kind !== "source_error");
+  if (changed.length === 0) {
+    runState.repo = undefined;
+    await tools.event(
+      task,
+      "watch_paid_skipped",
+      "No changes detected in the monitored sources, so no repository investigation ran. This stays a routine check: it is explicitly NOT a completed technical examination or audit.",
+    );
+    return;
+  }
+
+  const watch = await getWatch(task.watch?.watchId ?? "");
+  const repo = watch ? repoTargetFor(watch) : null;
+  if (!repo) {
+    await tools.event(task, "watch_paid_skipped", "The changed sources are not a GitHub repository, so no repository investigation applies.");
+    return;
+  }
+  await tools.event(
+    task,
+    "step_started",
+    `Repository Intelligence on ${repo}: reading real structure, recent commits, releases, dependency manifest and advisories, published repository advisories, and CI workflows`,
+    { repository: repo },
+  );
+  let report: RepoReport;
+  try {
+    report = await investigateRepository({ repository: repo });
+  } catch (err) {
+    // Fail the task honestly; the message carries the actual read failure.
+    throw new Error(`repository intelligence could not read ${repo}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  runState.repo = report;
+
+  const okReads = report.scope.filter((s) => s.ok).length;
+  await tools.event(
+    task,
+    "repo_intel_scope",
+    `Investigation scope: ${okReads}/${report.scope.length} planned reads succeeded (${report.scope.map((s) => s.kind).join(", ")}). ${report.unresolvedQuestions.length > 0 ? `${report.unresolvedQuestions.length} source(s) unavailable and recorded as unresolved questions.` : "All planned reads succeeded."}`,
+    { repository: report.repository, ok: okReads, total: report.scope.length, unresolved: report.unresolvedQuestions.length },
+  );
+  for (const f of report.findings.slice(0, 12)) {
+    await tools.event(
+      task,
+      "repo_intel_finding",
+      `[${f.severity.toUpperCase()}] ${f.title} · evidence: ${f.evidence.slice(0, 3).join("; ")}${f.evidenceUrl ? ` · ${f.evidenceUrl}` : ""}`,
+      { severity: f.severity, category: f.category, findingId: f.id, url: f.evidenceUrl ?? null },
+    );
+  }
+  await tools.event(
+    task,
+    "step_succeeded",
+    `Repository investigation completed: ${report.findings.length} finding(s) (critical ${report.findings.filter((f) => f.severity === "critical").length}, high ${report.findings.filter((f) => f.severity === "high").length}), every digest traceable to fetched data.`,
+    { repository: report.repository },
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Step 2 (optional): paid investigation with cross-check               */
 /* ------------------------------------------------------------------ */
 
@@ -438,11 +535,18 @@ export async function executeWatchInvestigate(
   const watchId = task.watch?.watchId;
   const watch = watchId ? await getWatch(watchId) : null;
   const protocolLine = watch ? `Protocol: ${watch.protocol}.` : "";
+  // A completed repository investigation gives the paid insight something
+  // concrete to reason over: its highest-severity finding, with the evidence
+  // verbatim. Without one, the query stays grounded in the observed change.
+  const repoTop = runState.repo?.findings?.[0];
+  const repoLine = repoTop
+    ? ` The repository investigation (real reads) ranked this highest: [${repoTop.severity.toUpperCase()}] ${repoTop.title}. Evidence: ${repoTop.evidence.slice(0, 4).join("; ")}. Recommended remediation from the data: ${repoTop.remediation}.`
+    : "";
   const priority = real[0];
   const query =
     `Protocol Watch report context. ${protocolLine} A monitored source changed. ` +
-    `Observed change: "${priority.title}". Detail from the source itself: ${priority.detail.slice(0, 600)}. ` +
-    `Question: for a protocol team, why does this change matter, and what should they check next? Answer in 3 short bullets, grounded in the observed change, no speculation.`;
+    `Observed change: "${priority.title}". Detail from the source itself: ${priority.detail.slice(0, 600)}.${repoLine} ` +
+    `Question: for a protocol team, why does this change matter, and what should they check next? Answer in 3 short bullets, grounded in the observed change${repoTop ? " and the investigation finding" : ""}, no speculation.`;
 
   await tools.event(task, "step_started", "Purchasing a bounded Telegraph insight into the detected change");
   let paid;
@@ -532,8 +636,9 @@ function reportText(task: TaskRecord, runState: WatchRunState): string {
   lines.push(`Protocol Watch: ${task.watch?.watchName ?? "watch"} report`);
   const changes = runState.findings.filter((f) => f.kind !== "source_error");
   const errors = runState.findings.filter((f) => f.kind === "source_error");
+  const repo = runState.repo;
   if (changes.length === 0 && errors.length === 0) {
-    lines.push("No changes detected in the monitored sources.");
+    lines.push("No changes detected in the monitored sources. This was a routine change check, not a technical examination.");
   } else {
     for (const f of changes) {
       lines.push("");
@@ -550,6 +655,20 @@ function reportText(task: TaskRecord, runState: WatchRunState): string {
       lines.push(`[SOURCE ERROR] ${f.sourceLabel}`);
       lines.push(f.detail.slice(0, 300));
     }
+  }
+  if (repo) {
+    lines.push("");
+    lines.push(`— Repository Intelligence (${repo.repository}, ${repo.scope.filter((s) => s.ok).length}/${repo.scope.length} source reads) —`);
+    lines.push(repo.summary);
+    if (repo.stack.length > 0) lines.push(`Stack observed: ${repo.stack.map((s) => s.name).join("; ")}.`);
+    for (const f of repo.findings.slice(0, 6)) {
+      lines.push("");
+      lines.push(`[${f.severity.toUpperCase()}] ${f.title}`);
+      lines.push(`Evidence: ${f.evidence.slice(0, 4).join("; ")}${f.evidenceUrl ? ` (${f.evidenceUrl})` : ""}`);
+      lines.push(`Why it matters: ${f.whyItMatters}`);
+      lines.push(`Remediation: ${f.remediation}`);
+    }
+    for (const q of repo.unresolvedQuestions.slice(0, 4)) lines.push(`Unresolved: ${q}`);
   }
   lines.push("");
   lines.push(
@@ -646,22 +765,55 @@ export async function executeWatchReport(
   guardedTransition(task, "verifying");
   await tools.event(task, "verification_started", "Verifying report invariants: every finding must restate fetched source data, errors stay errors, nothing invented");
   if (invalid.length > 0) throw new Error("invariant failed before completion");
-  const summary = reportText(task, runState);
+  const changes = runState.findings.filter((f) => f.kind !== "source_error");
+  const repo = runState.repo;
+  // OUTCOME VOCABULARY, stated honestly and never conflated:
+  //  - changes.length === 0 && !repo  → "No changes detected": a routine
+  //    fingerprint check that fed nothing invented. NOT an examination.
+  //  - repo present → "Investigation completed": a technical examination ran
+  //    against real reads; its findings and gaps are the report.
+  const outcomeStatement =
+    repo
+      ? "INVESTIGATION COMPLETED: a technical repository investigation ran against real reads this run."
+      : changes.length === 0
+      ? "NO CHANGES DETECTED: a routine change check ran. No technical investigation was performed, so this is NOT a security or repository audit."
+      : "CHANGES DETECTED: source data changed, but no repository investigation stage applied to these source types."
+  const summary = `${outcomeStatement}\n\n${reportText(task, runState)}`;
   task.result = {
     summary,
+    ...(repo ? { repoReport: repo } : {}),
     // Real report evidence: each finding names the source that produced it and
     // its confidence. NOT a purchase signal; there is no payment in a free run.
-    evidence: runState.findings.map((f) => ({
-      kind: "watch_finding" as const,
-      sourceLabel: f.sourceLabel,
-      findingKind: f.kind,
-      confidence: f.confidence,
-      url: f.url ?? null,
-      corroboratedBy: f.corroboratedBy,
-    })),
+    evidence: [
+      ...runState.findings.map((f) => ({
+        kind: "watch_finding" as const,
+        sourceLabel: f.sourceLabel,
+        findingKind: f.kind,
+        confidence: f.confidence,
+        url: f.url ?? null,
+        corroboratedBy: f.corroboratedBy,
+      })),
+      // Repository findings arrive as their own evidence kind with the exact
+      // evidence atoms (advisory ids, commit hashes, versions) and a link.
+      ...(repo
+        ? repo.findings.map((f) => ({
+            kind: "repo_intel" as const,
+            findingTitle: f.title,
+            severity: f.severity,
+            category: f.category,
+            evidence: f.evidence,
+            url: f.evidenceUrl ?? null,
+          }))
+        : []),
+    ],
     completedAt: deps.now(),
   };
-  await tools.event(task, "verification_passed", `All report invariants verified: ${runState.findings.filter((f) => f.kind !== "source_error").length} finding(s) grounded in fetched sources, ${runState.findings.filter((f) => f.kind === "source_error").length} honest source error(s)`);
+  await tools.event(task, "verification_passed", `All report invariants verified: ${runState.findings.filter((f) => f.kind !== "source_error").length} finding(s) grounded in fetched sources, ${runState.findings.filter((f) => f.kind === "source_error").length} honest source error(s)${repo ? `, repository investigation scope ${repo.scope.filter((s) => s.ok).length}/${repo.scope.length} reads` : ""}`);
   guardedTransition(task, "completed");
-  await tools.event(task, "task_completed", "Protocol Watch check complete.", { findings: runState.findings.length });
+  await tools.event(
+    task,
+    "task_completed",
+    repo ? "Repository Intelligence run complete." : "Protocol Watch check complete.",
+    { findings: runState.findings.length, outcome: repo && changes.length > 0 ? "investigation_completed" : changes.length === 0 ? "no_changes_detected" : "changes_detected" },
+  );
 }
