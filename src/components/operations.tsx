@@ -2,25 +2,26 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronRight, CircleDollarSign, Lock, Radar, ShieldCheck, Sparkles, TerminalSquare } from "lucide-react";
 import type { TaskRecord } from "@/lib/engine/types";
 import {
   ActivityLog,
   EvidenceList,
   OutcomeBlock,
+  STATUS,
   StatusChip,
   clockOf,
   isOpen,
   isTestRun,
   money,
-  phaseState,
 } from "@/components/taskParts";
 import { buildTaskRequest, cleanLimit, FORM_ERROR_COPY, type ModeOption } from "@/lib/ui/taskForm";
 
 /**
- * Operations launcher. Research & Verify and Custom Operation launch through
- * the real task engine (Telegraph purchase, verification, budget, approvals).
- * Monitor & Alert and Investigate & Report are honestly marked Planned until
- * executable capabilities exist; they never pretend to run.
+ * Operations: launch real work through the task engine and watch it run here.
+ * Research & Verify and Custom Operation execute today; Protocol Watch runs
+ * on its own dedicated route; pair-work job types the engine cannot execute
+ * stay marked Planned and never pretend to run.
  */
 
 type JobId = "research" | "monitor" | "investigate" | "custom";
@@ -29,7 +30,8 @@ const JOBS: Array<{
   id: JobId;
   name: string;
   blurb: string;
-  status: "available" | "planned";
+  status: "available" | "planned" | "external";
+  href?: string;
   examples?: string[];
 }> = [
   {
@@ -48,8 +50,9 @@ const JOBS: Array<{
     id: "monitor",
     name: "Monitor & Alert",
     blurb:
-      "Watches a value over time and alerts on thresholds. Requires a scheduler the engine does not have today, so it stays planned instead of pretending.",
-    status: "planned",
+      "Continuous source monitoring with verified change alerts. This capability is live: it runs in Protocol Watch with its own scheduler, fingerprint store and alert ledger.",
+    status: "external",
+    href: "/watch",
   },
   {
     id: "investigate",
@@ -134,7 +137,7 @@ function JobConfig({
     }
   }
 
-  const onKeyDown = (e: ReactKeyboardEvent) => {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void submit();
@@ -145,10 +148,10 @@ function JobConfig({
 
   return (
     <div className="rounded-lg border border-edge bg-panel">
-      <div className="border-b border-edge px-4 py-3 sm:px-5">
+      <div className="border-b border-edge px-4 py-3.5 sm:px-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-[14px] font-semibold">{def.name}</h2>
+            <h2 className="text-[14px] font-semibold text-ink">{def.name}</h2>
             <p className="mt-0.5 max-w-[70ch] text-[12px] leading-relaxed text-ink-faint">{def.blurb}</p>
           </div>
           <span className="shrink-0 rounded-sm border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">
@@ -174,7 +177,7 @@ function JobConfig({
           placeholder="Describe the question to answer, precisely enough that the answer can be checked."
           rows={3}
           disabled={submitting}
-          className="min-h-24 w-full resize-none rounded-md border border-edge bg-panel-2 px-3.5 py-3 text-sm leading-relaxed text-ink placeholder:text-ink-faint focus:border-blue/60 focus:outline-none disabled:opacity-60"
+          className="min-h-24 w-full resize-none rounded-md border border-edge bg-panel-2 px-3.5 py-3 text-sm leading-relaxed text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none disabled:opacity-60"
         />
         <p className="mt-1.5 text-[11px] text-ink-faint">Enter submits, Shift+Enter makes a new line.</p>
 
@@ -187,7 +190,7 @@ function JobConfig({
                   key={ex}
                   type="button"
                   onClick={() => setGoal(ex)}
-                  className="min-h-10 rounded-sm border border-edge bg-panel-2 px-3 py-1.5 text-left text-[12px] text-ink-soft transition-colors hover:border-blue/50 hover:text-ink active:opacity-80"
+                  className="min-h-9 rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-left text-[12px] text-ink-soft transition-colors hover:border-amber/40 hover:text-ink active:opacity-80"
                 >
                   {ex.length > 44 ? ex.slice(0, 44) + "…" : ex}
                 </button>
@@ -231,17 +234,17 @@ function JobConfig({
                 aria-checked={mode === opt.id}
                 onClick={() => setMode(opt.id)}
                 className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
-                  mode === opt.id ? "border-blue/60 bg-panel" : "border-edge bg-panel-2 hover:border-edge-strong"
+                  mode === opt.id ? "border-amber/50 bg-amber/5" : "border-edge bg-panel-2 hover:border-edge-strong"
                 }`}
               >
                 <p className="text-[12.5px] font-medium text-ink">{opt.title}</p>
-                <p className="mt-0.5 tabular text-[11px] font-medium text-gold">{opt.price}</p>
+                <p className="mt-0.5 tabular text-[11px] font-medium text-amber">{opt.price}</p>
                 <p className="mt-1 text-[11px] leading-snug text-ink-faint">{opt.blurb}</p>
               </button>
             ))}
           </div>
           {mode === "free" && (
-            <p className="mt-1.5 text-[11px] leading-snug text-gold">
+            <p className="mt-1.5 text-[11px] leading-snug text-amber">
               Free mode never switches to a paid operation: if no free capability covers this question, the launch is refused and nothing is spent.
             </p>
           )}
@@ -253,14 +256,14 @@ function JobConfig({
               Spending ceiling
             </label>
             <div className={`flex min-h-10 items-baseline rounded-md border bg-panel-2 px-3 py-2 ${limitValid ? "border-edge" : "border-risk"}`}>
-              <span className="tabular text-[13px] text-ink-faint">$</span>
+              <CircleDollarSign size={14} strokeWidth={1.8} aria-hidden className="text-ink-faint" />
               <input
                 id="limit"
                 value={limit}
                 onChange={(e) => setLimit(e.target.value.replace(/[^0-9.]/g, ""))}
                 inputMode="decimal"
                 aria-invalid={!limitValid}
-                className="w-24 bg-transparent pl-1 tabular text-sm text-ink focus:outline-none"
+                className="w-24 bg-transparent pl-1.5 tabular text-sm text-ink focus:outline-none"
               />
             </div>
             <p className={`mt-1.5 text-[11px] leading-snug ${limitValid ? "text-ink-faint" : "text-risk"}`}>
@@ -278,13 +281,13 @@ function JobConfig({
               aria-checked={requiresApproval}
               onClick={() => setRequiresApproval((v) => !v)}
               className={`flex min-h-10 w-full items-center justify-between rounded-md border px-3 py-2 text-left transition-colors ${
-                requiresApproval ? "border-gold/60 bg-gold/10" : "border-edge bg-panel-2 hover:border-edge-strong"
+                requiresApproval ? "border-amber/50 bg-amber/5" : "border-edge bg-panel-2 hover:border-edge-strong"
               }`}
             >
-              <span className={`text-[12.5px] ${requiresApproval ? "text-gold" : "text-ink-soft"}`}>
+              <span className={`text-[12.5px] ${requiresApproval ? "text-amber" : "text-ink-soft"}`}>
                 {requiresApproval ? "Ask me before spending" : "Run without asking"}
               </span>
-              <span className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${requiresApproval ? "bg-gold" : "bg-edge-strong"}`} aria-hidden>
+              <span className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${requiresApproval ? "bg-amber" : "bg-edge-strong"}`} aria-hidden>
                 <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-night transition-all ${requiresApproval ? "left-3.5" : "left-0.5"}`} />
               </span>
             </button>
@@ -303,23 +306,22 @@ function JobConfig({
         )}
 
         <div className="mt-5 flex flex-col-reverse items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="tabular text-[11px] text-ink-faint">
+          <p className="tabular hidden text-[11px] text-ink-faint sm:block">
             {requiresApproval ? "Plan only. You approve, then it spends." : "Runs straight away, within the ceiling."}
           </p>
           <button
             type="submit"
             disabled={submitting || !goal.trim() || !limitValid}
-            className="min-h-10 w-full rounded-md border border-teal/40 bg-teal/15 px-6 py-2.5 text-[13px] font-medium text-teal transition-colors hover:bg-teal/25 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+            className="btn-primary w-full sm:w-auto"
           >
-            {submitting ? "Starting operation…" : "Launch Operation"}
+            <Sparkles size={13} aria-hidden />
+            {submitting ? "Starting operation…" : "Launch operation"}
           </button>
         </div>
       </form>
     </div>
   );
 }
-
-type ReactKeyboardEvent = React.KeyboardEvent<HTMLTextAreaElement>;
 
 /* ------------------------------------------------------------------ */
 /* Launched-operation monitor: stay on this page until the result      */
@@ -392,28 +394,28 @@ function OperationMonitor({
   return (
     <section
       aria-label="Launched operation"
-      className={`rounded-lg border bg-panel ${done ? "border-teal/40" : awaiting ? "border-gold/50" : "border-edge"}`}
+      className={`rise-in rounded-lg border bg-panel ${done ? "border-teal/40" : awaiting ? "border-amber/50" : "border-edge"}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-edge px-4 py-3 sm:px-5">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           {task ? <StatusChip state={task.state} /> : (
             <span className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[11px] font-medium text-ink-faint">
               Starting…
             </span>
           )}
-          <span className="tabular text-[11px] text-ink-faint">{task ? task.goal : "your operation"}</span>
+          <span className="truncate text-[12px] text-ink-faint">{task ? task.goal : "your operation"}</span>
         </div>
         <div className="flex items-center gap-3">
           {task && (
-            <Link href={`/tasks/${task.id}`} className="text-[11.5px] font-medium text-blue hover:underline underline-offset-2">
-              Open full history →
+            <Link href={`/tasks/${task.id}`} className="inline-flex min-h-8 items-center gap-1 text-[11.5px] font-medium text-amber hover:text-amber-soft">
+              Full record <ChevronRight size={12} aria-hidden />
             </Link>
           )}
           {finishedRef.current && (
             <button
               type="button"
               onClick={onDismiss}
-              className="min-h-8 rounded-md border border-edge px-2.5 py-1 text-[11.5px] text-ink-soft transition-colors hover:border-edge-strong hover:text-ink"
+              className="btn-quiet !min-h-8 !text-[11.5px]"
             >
               Close
             </button>
@@ -444,14 +446,14 @@ function OperationMonitor({
               <button
                 type="button"
                 onClick={() => void decide("approve")}
-                className="min-h-9 rounded-md border border-teal/40 bg-teal/15 px-3.5 py-1.5 text-[12.5px] font-medium text-teal transition-colors hover:bg-teal/25"
+                className="btn-signal !min-h-9 !text-[12.5px] disabled:opacity-50"
               >
                 Approve and run
               </button>
               <button
                 type="button"
                 onClick={() => void decide("reject")}
-                className="min-h-9 rounded-md border border-edge px-3.5 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:border-edge-strong hover:text-ink"
+                className="btn-quiet !min-h-9 !text-[12.5px] hover:border-risk/50 hover:text-risk"
               >
                 Reject
               </button>
@@ -534,46 +536,76 @@ export default function Operations() {
   const active = real.filter((t) => isOpen(t.state));
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="max-w-2xl">
-        <h1 className="text-[22px] font-semibold tracking-tight">Operations</h1>
-        <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
+        <p className="x-label">Command the shift</p>
+        <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Operations</h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
           Pick a job, configure it once, launch. Every operation runs through the same engine with your ceiling,
           your approval rule, and verifiable outcomes.
         </p>
       </div>
 
       {/* Job selector */}
-      <div role="group" aria-label="Job type" className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {JOBS.map((j) => (
-          <button
-            key={j.id}
-            type="button"
-            aria-pressed={job === j.id}
-            onClick={() => (j.status === "available" ? setJob(j.id) : undefined)}
-            disabled={j.status === "planned"}
-            className={`rounded-lg border p-4 text-left transition-colors ${
-              job === j.id
-                ? "border-blue/60 bg-panel"
-                : j.status === "planned"
-                  ? "cursor-not-allowed border-edge bg-panel/50 opacity-70"
-                  : "border-edge bg-panel hover:border-edge-strong"
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-[13.5px] font-semibold text-ink">{j.name}</h3>
-              {j.status === "available" ? (
-                <span className="rounded-sm border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">Available</span>
-              ) : (
-                <span className="rounded-sm border border-gold/40 bg-gold/10 px-2 py-0.5 text-[10.5px] font-medium text-gold">Planned</span>
+      <div role="group" aria-label="Job type" className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {JOBS.map((j) => {
+          const external = j.status === "external";
+          const planned = j.status === "planned";
+          const selected = job === j.id;
+          return external ? (
+            <Link
+              key={j.id}
+              href={j.href ?? "/watch"}
+              className="group rounded-lg border border-amber/35 bg-amber/5 p-4 transition-colors hover:border-amber/60"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
+                  <Radar size={14} strokeWidth={1.8} aria-hidden className="text-amber" />
+                  {j.name}
+                </h3>
+                <span className="rounded-sm border border-amber/40 bg-amber/10 px-2 py-0.5 text-[10.5px] font-medium text-amber">Runs in Protocol Watch</span>
+              </div>
+              <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">{j.blurb}</p>
+              <p className="mt-2 inline-flex items-center gap-1 text-[11.5px] font-medium text-amber">
+                Open Protocol Watch <ChevronRight size={12} aria-hidden />
+              </p>
+            </Link>
+          ) : (
+            <button
+              key={j.id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => (planned ? undefined : setJob(j.id))}
+              disabled={planned}
+              className={`rounded-lg border p-4 text-left transition-colors ${
+                selected
+                  ? "border-amber/50 bg-amber/5"
+                  : planned
+                    ? "cursor-not-allowed border-edge bg-panel/40 opacity-60"
+                    : "border-edge bg-panel hover:border-edge-strong"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
+                  {planned ? <Lock size={13} strokeWidth={1.8} aria-hidden className="text-ink-faint" /> : <TerminalSquare size={13} strokeWidth={1.8} aria-hidden className={selected ? "text-amber" : "text-ink-faint"} />}
+                  {j.name}
+                </h3>
+                {planned ? (
+                  <span className="inline-flex items-center gap-1 rounded-sm border border-amber/30 bg-amber/5 px-2 py-0.5 text-[10.5px] font-medium text-ink-faint">
+                    <Lock size={10} aria-hidden />
+                    Planned
+                  </span>
+                ) : (
+                  <span className="rounded-sm border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">Available</span>
+                )}
+              </div>
+              <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">{j.blurb}</p>
+              {planned && (
+                <p className="mt-2 text-[11px] text-ink-faint">Marked planned. Requires capabilities the engine does not have yet.</p>
               )}
-            </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">{j.blurb}</p>
-            {j.status === "planned" && (
-              <p className="mt-2 text-[11px] text-ink-faint">Marked planned. Requires capabilities the engine does not have yet.</p>
-            )}
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
 
       {/* Config panel */}
@@ -606,9 +638,9 @@ export default function Operations() {
       )}
 
       {/* Current operations */}
-      <section className="mt-8" aria-label="Current operations">
+      <section className="mt-10" aria-label="Current operations">
         <div className="mb-3 flex items-baseline justify-between gap-2">
-          <h2 className="text-[14px] font-semibold">Current operations</h2>
+          <h2 className="x-label">Current operations</h2>
           <span className="tabular text-[11px] text-ink-faint">{active.length} active</span>
         </div>
         {tasks === null && !loadFailed ? (
@@ -618,7 +650,7 @@ export default function Operations() {
             ))}
           </div>
         ) : active.length === 0 && !loadFailed ? (
-          <div className="rounded-lg border border-dashed border-edge bg-panel/50 px-5 py-8 text-center">
+          <div className="rounded-lg border border-dashed border-edge bg-panel/40 px-5 py-10 text-center">
             <p className="mx-auto max-w-sm text-[13px] text-ink-soft">
               No active operation. Launch one above.
             </p>
@@ -630,12 +662,11 @@ export default function Operations() {
               const limit = t.spend.limitUsdCents;
               const pct = Math.min(100, Math.round((spent / Math.max(limit, 1)) * 100));
               const last = t.events[t.events.length - 1];
-              const p = phaseState(t);
               return (
                 <Link
                   key={t.id}
                   href={`/tasks/${t.id}`}
-                  className="block rounded-lg border border-edge bg-panel p-4 transition-colors hover:border-edge-strong"
+                  className="rise-in block rounded-lg border border-edge bg-panel p-4 transition-colors hover:border-edge-strong"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                     <StatusChip state={t.state} />
@@ -645,10 +676,15 @@ export default function Operations() {
                   </div>
                   <p className="mt-2 text-[13.5px] font-medium text-ink">{t.goal}</p>
                   <p className="mt-1.5 text-[12px] text-ink-soft">
-                    <span className="tabular">{[p.plan && "planned", p.paid ? `${money(spent)} spent` : null, `${money(limit)} ceiling`].filter(Boolean).join(" · ")}</span>
+                    <span className="tabular">{[`${money(limit)} ceiling`, spent > 0 ? `${money(spent)} spent` : null].filter(Boolean).join(" · ")}</span>
                     {isTestRun(t) ? " · test run" : ""}
                   </p>
                   {last && <p className="mt-1 line-clamp-1 text-[12px] text-ink-faint">{last.message}</p>}
+                  {spent > 0 && (
+                    <span className="mt-2 inline-block h-1 w-40 rounded-sm bg-edge">
+                      <span className="block h-full rounded-sm bg-amber" style={{ width: `${pct}%` }} />
+                    </span>
+                  )}
                 </Link>
               );
             })}

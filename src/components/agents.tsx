@@ -2,24 +2,22 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Bot, ChevronLeft, Network, Wrench } from "lucide-react";
 import type { TaskRecord } from "@/lib/engine/types";
 import { isOpen, isTestRun } from "@/components/taskParts";
+import type { StatusBody } from "@/components/shell-types";
 
 /**
  * Agents view: an honest capability matrix. Research & Verify is the one agent
  * with executable capabilities (Telegraph paid intelligence, settlement checks,
- * ledger reconciliation, independent chain reads). The others are labeled
- * Planned and never shown as active.
+ * ledger reconciliation, independent chain reads), and Protocol Watch delivers
+ * continuous monitoring. The others are labeled Planned and never shown as
+ * active.
  */
-
-interface StatusBody {
-  ok: boolean;
-  store: "ok" | "unavailable";
-  services: { telegraph: boolean; telegram: boolean; chainRpc: boolean };
-}
 
 const CAPS = {
   research: {
+    name: "Research & Verify",
     status: "available" as const,
     summary: "Answers questions worth paying for, then proves every answer before showing it. Runs today on the web and on Telegram.",
     capabilities: [
@@ -31,21 +29,9 @@ const CAPS = {
       { name: "Telegram presence", detail: "The same engine answers @nightshiftagent_bot with the same limits and evidence." },
     ],
   },
-  code: {
-    status: "planned" as const,
-    summary: "Repository read/write work. Not implemented: there is no execution capability for code repositories in the service yet.",
-    capabilities: [],
-  },
-  ops: {
-    status: "planned" as const,
-    summary: "Deployments and infrastructure actions. Not implemented: no deployment target or credentials are wired up, so nothing can run.",
-    capabilities: [],
-  },
-  data: {
-    status: "planned" as const,
-    summary: "Analytics pipelines over collected data. Not implemented: no export or pipeline runner exists in the service yet.",
-    capabilities: [],
-  },
+  code: { name: "Code Agent", status: "planned" as const, summary: "Repository read/write work. Not implemented: there is no execution capability for code repositories in the service yet." },
+  ops: { name: "Ops Agent", status: "planned" as const, summary: "Deployments and infrastructure actions. Not implemented: no deployment target or credentials are wired up, so nothing can run." },
+  data: { name: "Data Agent", status: "planned" as const, summary: "Analytics pipelines over collected data. Not implemented: no export or pipeline runner exists in the service yet." },
 };
 
 export default function Agents() {
@@ -78,10 +64,14 @@ export default function Agents() {
   const researchActive = real.filter((t) => isOpen(t.state)).length;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-      <div className="max-w-2xl">
-        <h1 className="text-[22px] font-semibold tracking-tight">Agents</h1>
-        <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+      <Link href="/" className="inline-flex min-h-10 items-center gap-1 text-[12.5px] font-medium text-amber transition-colors hover:text-amber-soft">
+        <ChevronLeft size={13} aria-hidden /> Overview
+      </Link>
+      <div className="mt-3 max-w-2xl">
+        <p className="x-label">Capability matrix</p>
+        <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">Agents</h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
           What each agent can do, stated plainly. Capabilities marked Planned do not exist in the service yet and
           those agents are never shown as active.
         </p>
@@ -93,12 +83,15 @@ export default function Agents() {
         </p>
       )}
 
-      <div className="mt-5 space-y-4">
-        <article className="rounded-lg border border-edge bg-panel">
-          <div className="border-b border-edge px-4 py-3 sm:px-5">
+      <div className="mt-6 space-y-4">
+        <article className="overflow-hidden rounded-lg border border-edge bg-panel">
+          <div className="border-b border-edge px-4 py-3.5 sm:px-5">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <div className="flex items-center gap-2.5">
-                <h2 className="text-[14px] font-semibold">Research &amp; Verify</h2>
+                <span aria-hidden className="grid h-7 w-7 place-items-center rounded-md border border-teal/40 bg-teal/10 text-teal">
+                  <Wrench size={13} strokeWidth={1.8} />
+                </span>
+                <h2 className="text-[14px] font-semibold text-ink">{CAPS.research.name}</h2>
                 <span className="inline-flex items-center gap-1.5 rounded-sm border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">
                   <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-teal" />
                   Available
@@ -110,9 +103,9 @@ export default function Agents() {
             </div>
             <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">{CAPS.research.summary}</p>
           </div>
-          <div className="grid gap-px overflow-hidden rounded-b-lg bg-edge sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-px overflow-hidden bg-edge sm:grid-cols-2 lg:grid-cols-3">
             {CAPS.research.capabilities.map((c) => (
-              <div key={c.name} className="bg-panel px-4 py-3">
+              <div key={c.name} className="bg-panel px-4 py-3.5">
                 <p className="text-[12.5px] font-medium text-ink">{c.name}</p>
                 <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">{c.detail}</p>
               </div>
@@ -120,34 +113,58 @@ export default function Agents() {
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-edge px-4 py-3 sm:px-5">
             <span className="text-[11px] text-ink-faint">Connection status:</span>
-            <span className={`inline-flex items-center gap-1.5 text-[11.5px] ${status?.services.telegraph ? "text-teal" : "text-risk"}`}>
-              <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${status?.services.telegraph ? "bg-teal" : "bg-risk"}`} />
-              Telegraph {status?.services.telegraph ? "configured" : "not configured"}
+            <span className={`inline-flex items-center gap-1.5 text-[11.5px] ${status ? (status.services.telegraph ? "text-teal" : "text-risk") : "text-ink-faint"}`}>
+              <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${status ? (status.services.telegraph ? "bg-teal" : "bg-risk") : "bg-ink-faint"}`} />
+              Telegraph {status ? (status.services.telegraph ? "configured" : "not configured") : "checking"}
             </span>
-            <span className={`inline-flex items-center gap-1.5 text-[11.5px] ${status?.services.telegram ? "text-teal" : "text-gold"}`}>
-              <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${status?.services.telegram ? "bg-teal" : "bg-gold"}`} />
-              Telegram bot {status?.services.telegram ? "configured" : "not configured"}
+            <span className={`inline-flex items-center gap-1.5 text-[11.5px] ${status ? (status.services.telegram ? "text-teal" : "text-amber") : "text-ink-faint"}`}>
+              <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${status ? (status.services.telegram ? "bg-teal" : "bg-amber") : "bg-ink-faint"}`} />
+              Telegram bot {status ? (status.services.telegram ? "configured" : "not configured") : "checking"}
             </span>
             <span className="inline-flex items-center gap-1.5 text-[11.5px] text-teal">
               <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-teal" />
               Chain RPC ready (public read-only default)
             </span>
-            <Link href="/operations" className="ml-auto text-[12px] font-medium text-blue hover:underline underline-offset-2">
+            <Link href="/operations" className="ml-auto text-[12px] font-medium text-amber transition-colors hover:text-amber-soft">
               Launch an operation →
             </Link>
           </div>
         </article>
 
+        {/* Live monitor agent: full detail claim lives on its own route. */}
+        <article className="rounded-lg border border-amber/35 bg-panel">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-5">
+            <h2 className="inline-flex items-center gap-2.5 text-[14px] font-semibold text-ink">
+              <span aria-hidden className="grid h-7 w-7 place-items-center rounded-md border border-amber/40 bg-amber/10 text-amber">
+                <Network size={13} strokeWidth={1.8} />
+              </span>
+              Protocol Watch
+            </h2>
+            <Link href="/watch" className="text-[12px] font-medium text-amber transition-colors hover:text-amber-soft">
+              Open Protocol Watch →
+            </Link>
+          </div>
+          <p className="px-4 pb-3.5 text-[12px] leading-relaxed text-ink-soft sm:px-5">
+            Continuous monitoring of real protocol sources with baselined change detection, an idempotent alert
+            ledger, and verified delivery — scheduled, recovered, and free to run.
+          </p>
+        </article>
+
         {(["code", "ops", "data"] as const).map((id) => (
-          <article key={id} className="rounded-lg border border-edge bg-panel">
+          <article key={id} className="rounded-lg border border-edge bg-panel/50">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-5">
-              <h2 className="text-[14px] font-semibold">{CAPS[id].status && id === "code" ? "Code Agent" : id === "ops" ? "Ops Agent" : "Data Agent"}</h2>
+              <h2 className="inline-flex items-center gap-2.5 text-[14px] font-semibold text-ink-faint">
+                <span aria-hidden className="grid h-7 w-7 place-items-center rounded-md border border-edge bg-panel-2 text-ink-faint">
+                  <Bot size={13} strokeWidth={1.8} />
+                </span>
+                {CAPS[id].name}
+              </h2>
               <span className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] font-medium text-ink-faint">
                 <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-ink-faint" />
                 Planned
               </span>
             </div>
-            <p className="px-4 pb-3.5 text-[12px] leading-relaxed text-ink-soft sm:px-5">{CAPS[id].summary}</p>
+            <p className="px-4 pb-3.5 text-[12px] leading-relaxed text-ink-faint sm:px-5">{CAPS[id].summary}</p>
           </article>
         ))}
       </div>

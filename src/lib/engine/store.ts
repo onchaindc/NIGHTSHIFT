@@ -15,23 +15,25 @@ export { dataDir, isVercelRuntime, persistenceMode } from "@/lib/storage";
 
 /** Old records may still carry an em dash in user-facing text. Normalize
  * them on read so nothing the user sees reintroduces the character. New
- * events are written em-dash-free by construction. */
+ * events are written em-dash-free by construction. Legacy or shape-drifted
+ * records must never break reads: missing strings normalize to ""-safe forms
+ * and missing events/entries list to empty. */
 function normalizeTaskForDisplay(task: TaskRecord): TaskRecord {
   return {
     ...task,
-    goal: cleanText(task.goal),
-    error: task.error === null ? null : cleanText(task.error),
-    events: task.events.map((e) => ({ ...e, message: cleanText(e.message) })),
+    goal: cleanText(task.goal) ?? task.goal,
+    error: task.error === null || task.error === undefined ? null : cleanText(task.error) ?? task.error,
+    events: (task.events ?? []).map((e) => ({ ...e, message: cleanText(e.message) ?? e.message ?? "" })),
     spend: {
       ...task.spend,
-      entries: task.spend.entries.map((e) => ({ ...e, description: cleanText(e.description) })),
+      entries: (task.spend?.entries ?? []).map((e) => ({ ...e, description: cleanText(e.description) ?? e.description ?? "" })),
     },
-    result: task.result ? { ...task.result, summary: cleanText(task.result.summary) } : task.result,
+    result: task.result ? { ...task.result, summary: cleanText(task.result.summary) ?? task.result.summary ?? "" } : task.result,
   };
 }
 
-function cleanText(s: string): string {
-  return s.replace(/—/g, ",");
+function cleanText(s: unknown): string | undefined {
+  return typeof s === "string" ? s.replace(/—/g, ",") : undefined;
 }
 
 const store = () => persistence();

@@ -2,10 +2,12 @@
 
 import type { ExecutionEvent, TaskRecord } from "@/lib/engine/types";
 import { humanize } from "@/lib/ui/humanize";
+import { Check, CircleAlert, CircleHelp, CirclePause, CircleSlash, LoaderCircle, Circle } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 /**
  * Shared task UI: status vocabulary, evidence, activity log, outcome blocks.
- * Used by the Dashboard, Operations, Approvals, Work History, and Task Details
+ * Used by the Overview, Operations, Approvals, Work History, and Task Details
  * views so every screen presents the same state in the same words. All data
  * comes from the task engine; nothing is invented here.
  */
@@ -14,16 +16,16 @@ export const AUDIT_LABEL = "audit-rehearsal"; // keep in sync with scripts/tag-a
 
 export type Tone = "neutral" | "info" | "good" | "bad";
 
-export const STATUS: Record<TaskRecord["state"], { label: string; icon: string; tone: Tone }> = {
-  created: { label: "Queued", icon: "○", tone: "neutral" },
-  planning: { label: "Planning", icon: "◐", tone: "info" },
-  awaiting_approval: { label: "Needs approval", icon: "?", tone: "info" },
-  executing: { label: "Working", icon: "◐", tone: "info" },
-  verifying: { label: "Verifying", icon: "◐", tone: "info" },
-  completed: { label: "Completed", icon: "✓", tone: "good" },
-  failed: { label: "Failed", icon: "✕", tone: "bad" },
-  rejected: { label: "Rejected", icon: "○", tone: "neutral" },
-  blocked: { label: "Blocked", icon: "!", tone: "bad" },
+export const STATUS: Record<TaskRecord["state"], { label: string; icon: LucideIcon; tone: Tone }> = {
+  created: { label: "Queued", icon: Circle, tone: "neutral" },
+  planning: { label: "Planning", icon: LoaderCircle, tone: "info" },
+  awaiting_approval: { label: "Needs approval", icon: CircleHelp, tone: "info" },
+  executing: { label: "Working", icon: LoaderCircle, tone: "info" },
+  verifying: { label: "Verifying", icon: LoaderCircle, tone: "info" },
+  completed: { label: "Completed", icon: Check, tone: "good" },
+  failed: { label: "Failed", icon: CircleAlert, tone: "bad" },
+  rejected: { label: "Rejected", icon: CircleSlash, tone: "neutral" },
+  blocked: { label: "Blocked", icon: CirclePause, tone: "bad" },
 };
 
 export const TONE_CHIP: Record<Tone, string> = {
@@ -99,17 +101,23 @@ export function compactAnswer(summary: string) {
 }
 
 export function StatusChip({ state }: { state: TaskRecord["state"] }) {
-  const st = STATUS[state];
+  const st = STATUS[state] ?? STATUS.created;
+  const Icon = st.icon;
+  const spins = isLive(state);
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[11px] font-medium ${TONE_CHIP[st.tone]}`}>
-      <span aria-hidden className="tabular text-[10px]">{st.icon}</span>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 py-0.5 text-[11px] font-medium ${TONE_CHIP[st.tone]}`}>
+      <Icon aria-hidden size={11} strokeWidth={2.2} className={spins ? "motion-safe:animate-spin" : ""} />
       {st.label}
-      {isLive(state) && (
-        <span className="relative ml-0.5 inline-flex h-1.5 w-1.5">
-          <span className="absolute inline-flex h-full w-full rounded-full bg-current opacity-50 motion-safe:animate-ping" />
-          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
-        </span>
-      )}
+      {spins && <DotPing />}
+    </span>
+  );
+}
+
+function DotPing() {
+  return (
+    <span className="relative ml-0.5 inline-flex h-1.5 w-1.5">
+      <span className="absolute inline-flex h-full w-full rounded-full bg-current opacity-50 motion-safe:animate-ping" />
+      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
     </span>
   );
 }
