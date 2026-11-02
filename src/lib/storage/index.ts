@@ -44,6 +44,8 @@ export interface Persistence {
   getTask(id: string): Promise<TaskRecord | null>;
   listTasks(): Promise<TaskRow[]>;
   saveTask(task: TaskRecord): Promise<void>;
+  /** Bulk delete by id; returns how many rows were actually removed. */
+  deleteTasks(ids: string[]): Promise<number>;
   clearTasks(): Promise<void>;
 
   // watches
@@ -192,6 +194,17 @@ class FilePersistence implements Persistence {
     if (idx >= 0) rows[idx] = record;
     else rows.push(record);
     await atomicWrite(this.taskFile(), JSON.stringify(rows, null, 2));
+  }
+  async deleteTasks(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const drop = new Set(ids);
+    const rows = await this.ensureTasksLoaded();
+    const next = rows.filter((r) => !drop.has(r.id));
+    const removed = rows.length - next.length;
+    if (removed === 0) return 0;
+    this.tasksCache = next;
+    await atomicWrite(this.taskFile(), JSON.stringify(next, null, 2));
+    return removed;
   }
   async clearTasks(): Promise<void> {
     this.tasksCache = [];
@@ -436,6 +449,12 @@ class PostgresPersistence implements Persistence {
       values (${task.id}, ${task.createdAt}, ${task.state}, ${client.json(task as never)})
       on conflict (id) do update
         set state = excluded.state, data = excluded.data`;
+  }
+  async deleteTasks(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const client = dbSql();
+    const rows = await client<Record<string, unknown>[]>`delete from ns_tasks where id = any(${ids}) returning id`;
+    return rows.length;
   }
   async clearTasks(): Promise<void> {
     await dbSql()`delete from ns_tasks`;
