@@ -48,6 +48,10 @@ export async function getTask(id: string): Promise<TaskRecord | null> {
   return task ? normalizeTaskForDisplay(task) : null;
 }
 
+export async function deleteTasks(ids: string[]): Promise<number> {
+  return persistence().deleteTasks(ids);
+}
+
 export async function saveTask(record: TaskRecord): Promise<void> {
   await store().saveTask(record);
 }

@@ -178,6 +178,10 @@ async function autoScan(): Promise<void> {
     state.lastSuccessAt = Date.now();
     state.lastError = null;
     state.consecutiveFailures = 0;
+    // Free-tier storage ceiling: routine check rows are pruned on this tick
+    // (hourly), never deleting live tasks, paid records or reports. A
+    // housekeeping failure is contained inside and must never fail the scan.
+    await (await import("./housekeeping")).runTaskHousekeeping();
   } catch (err) {
     // A failed scan tick is logged, persisted, and retried next interval; it
     // must never crash the server or fake a "checked" state it did not do.
