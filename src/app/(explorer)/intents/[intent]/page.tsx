@@ -103,11 +103,13 @@ export default async function IntentDetailPage({ params }: { params: Promise<{ i
 
       {/* Terminal hook */}
       <section className="mt-12 rounded-lg border border-amber/40 bg-amber-soft/40 p-6">
-        <p className="x-tag">COMING IN THE INTERACTIVE TERMINAL</p>
+        <p className="x-tag">OPEN IN THE INTERACTIVE TERMINAL</p>
         <p className="mt-3 max-w-[68ch] text-[13.5px] leading-relaxed text-ink-soft">
-          The terminal will accept a real question of this kind, classify it against the intent catalog, route it to the
-          strongest supporting miner, and confirm the x402 price with you before anything is signed. Phase 2 ships that
-          action layer.
+          The terminal accepts a real question of this kind: choose a supporting miner, see the node&apos;s live x402
+          price, approve it, and get an answer with a receipt and a signal you can verify. Ask in the terminal:{" "}
+          <Link href={`/terminal?intent=${encodeURIComponent(name)}`} className="text-amber underline decoration-amber/40 underline-offset-4 hover:text-amber-soft">
+            /terminal?intent={name}
+          </Link>
         </p>
       </section>
     </article>
