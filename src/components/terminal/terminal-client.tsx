@@ -267,7 +267,7 @@ export default function TerminalClient({
       return { body: { intent: selectedIntent, params } };
     }
     if (queryText.trim().length === 0) {
-      return { body: null, error: "This intent has no input params — write the question for it instead." };
+      return { body: null, error: "This intent takes no input params. Write the question instead." };
     }
     return { body: { query: queryText.trim() } };
   }, [mode, rawJson, selectedIntent, intentDetail, paramValues, queryText]);
@@ -295,7 +295,7 @@ export default function TerminalClient({
       const payload: Record<string, unknown> =
         mode === "advanced" ? { rawBody: spec.body } : { ...(spec.body as Record<string, unknown>) };
       if (minerId) payload.miner = minerId;
-      pushLog(`Pre-flight (no payment) — same body execution would sign.`, "info");
+      pushLog(`Pre-flight, no payment: the same body execution would send.`, "info");
       const res = await fetch("/api/terminal/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -357,7 +357,7 @@ export default function TerminalClient({
         });
         setChallenge(null);
         setStage("result");
-        pushLog("Answer delivered with a receipt and a signal hash. Run verification before trusting it.", "good");
+        pushLog("Answer delivered with a receipt. Run verification before trusting it.", "good");
       } else if (body.status === "refused") {
         const freshOffer = (body.fresh as { offer?: Offer } | undefined)?.offer ?? null;
         const detail = String(body.detail ?? "The live offer drifted from the approved one.");
@@ -432,9 +432,8 @@ export default function TerminalClient({
           <p className="x-tag">EXPLORER · PAY PER REQUEST · x402 v2</p>
           <h1 className="x-display-1 mt-3 text-ink">The interactive terminal</h1>
           <p className="mt-3 max-w-[70ch] text-[13.5px] leading-relaxed text-ink-soft">
-            Compose a real request against <span className="tabular text-[12.5px]">{nodeUrl}</span>, read the node&apos;s
-            verdict and the live x402 price before anything is signed, approve that exact offer, then receive the answer
-            with its receipt and a signal you can reconcile against the network.
+            Compose an ask, read the node&apos;s verdict and the x402 price before anything is signed, approve that
+            exact offer, and receive the answer with its receipt and signal.
           </p>
         </div>
         <div className="rounded-lg border border-edge bg-panel px-4 py-3">
@@ -442,7 +441,7 @@ export default function TerminalClient({
           <p className="tabular mt-1 text-[11.5px] text-ink">
             {wallet.configured && wallet.address
               ? `${wallet.address}`
-              : "Not configured — previews still run; nothing can be signed."}
+              : "Not configured. Previews still run; execution cannot sign."}
           </p>
         </div>
       </div>
@@ -570,7 +569,7 @@ export default function TerminalClient({
                       <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-edge bg-panel-2 px-3 py-2 text-[12px] text-ink-soft transition-colors hover:border-edge-strong">
                         <input type="radio" name="miner" checked={minerId === null} onChange={() => setMinerId(null)} className="mt-0.5 accent-[var(--color-amber)]" />
                         <span>
-                          Auto-route — the router picks the miner for this intent and falls back if its pick is down.
+                          Auto-route: the router picks the miner and falls back if its pick is down.
                           <span className="tabular mt-0.5 block text-[10.5px] text-ink-faint">POST /engine/v1/ask</span>
                         </span>
                       </label>
@@ -582,7 +581,7 @@ export default function TerminalClient({
                             checked={minerId === m.minerId || minerId === m.slug}
                             onChange={() => {
                               setMinerId(m.minerId);
-                              pushLog(`Miner pinned: ${m.name} (${m.minerId}). The ask goes direct — no fallback.`, "info");
+                              pushLog(`Miner pinned: ${m.name} (${m.minerId}). The ask goes direct; no fallback.`, "info");
                             }}
                             className="mt-0.5 accent-[var(--color-amber)]"
                           />
@@ -627,7 +626,7 @@ export default function TerminalClient({
           )}
 
           <button onClick={runPreview} disabled={!canPreview} className="btn-primary mt-5 w-full !justify-center">
-            Preview the request — no payment <ArrowRight size={14} aria-hidden />
+            Preview the request (no payment) <ArrowRight size={14} aria-hidden />
           </button>
           {!wallet.configured && (
             <p className="mt-3 text-[11.5px] text-amber">Without a payer wallet configured on this deployment, previews still validate, but execution cannot sign.</p>
@@ -640,9 +639,8 @@ export default function TerminalClient({
 
           {previewStatus === null && !failure && (
             <div className="mt-4 rounded-lg border border-dashed border-edge bg-panel-2 p-6 text-[12.5px] text-ink-faint">
-              Compose the request, then run the preview. The pre-flight posts the exact body with no payment: the node
-              validates intent, params and miner before charging, so a broken ask is refused here for free and a valid
-              ask returns the current x402 price. Nothing is signed at this step.
+              Compose the request, then run the preview. The pre-flight posts the body with no payment: the node
+              validates intent, params and miner before charging, and a valid ask returns the current x402 price
             </div>
           )}
 
@@ -726,9 +724,8 @@ export default function TerminalClient({
             <div className="max-w-[62ch]">
               <p className="x-label">Approve this exact payment</p>
               <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-                Approving means: sign exactly {challenge.payment.amount} atomic units of {challenge.payment.assetName ?? challenge.payment.asset}
-                {" "}on {challenge.payment.network} to {challenge.payment.payTo}, once. Before signing anything, the server re-reads the live
-                challenge; if the price or recipient has changed, it refuses with the fresh offer and pays nothing.
+                Approving means signing exactly this amount to this recipient, once. Before signing, the server re-reads
+                the live challenge; if the price or recipient has changed, it refuses with the fresh offer and pays nothing.
               </p>
             </div>
             <label className="flex cursor-pointer items-start gap-2.5 text-[12.5px] text-ink">
@@ -789,7 +786,7 @@ export default function TerminalClient({
             )}
             {answer.answer.shapeError && <p className="mt-2 text-[11px] text-amber-deep">The intended shape was not applied (raw result): {answer.answer.shapeError}</p>}
             {answer.answer.warnings != null && <p className="mt-2 text-[11px] text-amber-deep">Warnings: {JSON.stringify(answer.answer.warnings)}</p>}
-            <p className="mt-3 text-[11px] text-ink-faint">Delivered is not the same as verified — check the signal in the receipt panel.</p>
+            <p className="mt-3 text-[11px] text-ink-faint">Delivery is not verification. Check the signal in the receipt panel.</p>
           </section>
 
           <section className="rounded-lg border border-edge bg-panel p-5">
@@ -807,7 +804,7 @@ export default function TerminalClient({
               <div className="flex justify-between items-center gap-3">
                 <dt className="shrink-0 text-ink-faint">Transaction</dt>
                 <dd className="tabular max-w-[70%] truncate text-right text-ink" title={answer.receipt.tx_hash ?? "batched by the facilitator"}>
-                  {answer.receipt.tx_hash ?? "batched — the facilitator groups wallet payments; key on the receipt hash"}
+                  {answer.receipt.tx_hash ?? "batched by the facilitator; key settlements on the receipt hash"}
                 </dd>
               </div>
               <div className="flex justify-between items-center gap-3">

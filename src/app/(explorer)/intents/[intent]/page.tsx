@@ -58,8 +58,8 @@ export default async function IntentDetailPage({ params }: { params: Promise<{ i
           <p className="tabular mt-1.5 text-[22px] font-semibold text-ink">{entry.miner_count}</p>
         </div>
         <div className="rounded-lg border border-edge bg-panel p-5">
-          <p className="x-label">Tracked in catalog</p>
-          <p className="mt-1.5 text-[13.5px] text-ink">{fetchedMiners.status === "ok" ? `${miners.length} records with this intent` : "Miner list unavailable"}</p>
+          <p className="x-label">Miner records</p>
+          <p className="mt-1.5 text-[13.5px] text-ink">{fetchedMiners.status === "ok" ? `${miners.length} cataloged` : "Not available yet"}</p>
         </div>
         <div className="rounded-lg border border-edge bg-panel p-5">
           <p className="x-label">Canonical registration</p>
@@ -73,7 +73,7 @@ export default async function IntentDetailPage({ params }: { params: Promise<{ i
         {fetchedMiners.status === "ok" ? (
           sorted.length === 0 ? (
             <div className="mt-4 rounded-lg border border-edge bg-panel p-6 text-[13px] text-ink-soft">
-              The catalog&apos;s miner records could not be cross-referenced with this intent right now.
+              Not available right now. Retry in a moment.
             </div>
           ) : (
             <>
@@ -96,7 +96,7 @@ export default async function IntentDetailPage({ params }: { params: Promise<{ i
           )
         ) : (
           <p className="mt-4 rounded-lg border border-edge bg-panel p-6 text-[13px] text-ink-soft">
-            Miner catalog unavailable: <span className="tabular text-[11px]">{fetchedMiners.detail}</span>
+            The miner catalog could not be read: <span className="tabular text-[11px]">{fetchedMiners.detail}</span>
           </p>
         )}
       </section>
@@ -105,8 +105,8 @@ export default async function IntentDetailPage({ params }: { params: Promise<{ i
       <section className="mt-12 rounded-lg border border-amber/40 bg-amber-soft/40 p-6">
         <p className="x-tag">OPEN IN THE INTERACTIVE TERMINAL</p>
         <p className="mt-3 max-w-[68ch] text-[13.5px] leading-relaxed text-ink-soft">
-          The terminal accepts a real question of this kind: choose a supporting miner, see the node&apos;s live x402
-          price, approve it, and get an answer with a receipt and a signal you can verify. Ask in the terminal:{" "}
+          The terminal accepts a question of this kind: choose a supporting miner, review the x402 price, approve it,
+          and get the answer with its receipt. Open it prefilled:{" "}
           <Link href={`/terminal?intent=${encodeURIComponent(name)}`} className="text-amber underline decoration-amber/40 underline-offset-4 hover:text-amber-soft">
             /terminal?intent={name}
           </Link>

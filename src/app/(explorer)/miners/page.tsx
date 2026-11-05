@@ -96,9 +96,8 @@ export default async function MinersPage({
           <p className="x-tag">EXPLORER · MINERS · {fetched.payload.length.toLocaleString()} REGISTERED</p>
           <h1 className="x-display-1 mt-3 text-ink">{total.toLocaleString()} miners on the network</h1>
           <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-ink-soft">
-            Every entry below is a live registry record: an independent service with declared endpoints, schemas,
-            supported intents and price. Sort is by reported requests served; the field is only present for miners that
-            report it.
+            Every entry is a registry record: an independent service with declared endpoints, schemas, supported
+            intents and price. Ordered by reported requests served, where a miner reports it.
           </p>
         </div>
         <form action="/miners" method="GET" className="flex items-center gap-2">
@@ -109,7 +108,7 @@ export default async function MinersPage({
             defaultValue={qTrim}
             placeholder="Search the miner catalog…"
             aria-label="Search miners"
-            className="min-h-10 w-64 rounded-lg border border-edge bg-panel px-3.5 text-[13.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-teal"
+            className="min-h-10 w-full max-w-xs rounded-lg border border-edge bg-panel px-3.5 text-[13.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-teal sm:w-64"
           />
           <button type="submit" aria-label="Search" className="btn-primary !min-h-10 !px-3">
             <Search size={14} aria-hidden />
@@ -137,7 +136,6 @@ export default async function MinersPage({
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <span className="rounded-full border border-teal bg-teal/5 px-3 py-1.5 text-[12px] font-medium text-teal">
             Intent: {intentSlug}
-            <span className="x-tag ml-2 !text-teal/70">clears on ×</span>
           </span>
           <Link href="/miners" className="text-[12px] text-amber underline decoration-amber/40 underline-offset-4 hover:text-amber-soft">
             Clear intent filter
@@ -158,8 +156,7 @@ export default async function MinersPage({
         <div className="mt-12 rounded-lg border border-edge bg-panel p-8">
           <p className="x-tag">NO MATCHES</p>
           <p className="mt-3 text-[14px] text-ink-soft">
-            No miner in the live registry matches this search. Nothing is padded with look-alike suggestions — try a
-            broader query or clear the filters.
+            No miner in the registry matches this search. Try a broader query or clear the filters.
           </p>
         </div>
       ) : (

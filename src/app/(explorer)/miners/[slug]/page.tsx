@@ -193,8 +193,8 @@ export default async function MinerDetailPage({ params }: { params: Promise<{ sl
       <section className="mt-12 rounded-lg border border-amber/40 bg-amber-soft/40 p-6">
         <p className="x-tag">OPEN IN THE INTERACTIVE TERMINAL</p>
         <p className="mt-3 max-w-[68ch] text-[13.5px] leading-relaxed text-ink-soft">
-          Ask this miner in the terminal: it pins the request to {miner.name}, shows the live x402 price before anything
-          is signed, and the answer arrives with a receipt and a verifiable signal. Start here:{" "}
+          Ask this miner in the terminal: it pins the request to {miner.name}, shows the x402 price before anything
+          is signed, and returns the answer with its receipt. Open it prefilled:{" "}
           <Link href={`/terminal?miner=${encodeURIComponent(miner.slug ?? miner.id)}`} className="text-amber underline decoration-amber/40 underline-offset-4 hover:text-amber-soft">
             /terminal?miner={miner.slug ?? miner.id}
           </Link>
