@@ -43,8 +43,8 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
           <p className="x-tag">EXPLORER · INTENTS · {canonicalCount} CANONICAL</p>
           <h1 className="x-display-1 mt-3 text-ink">{pool.length.toLocaleString()} named kinds of question</h1>
           <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-ink-soft">
-            Intents are the network&apos;s shared vocabulary. Miners declare which intents they serve, and evaluation
-            scores them per intent every epoch — so the catalog is exactly the right lens for browsing capability.
+            Intents are the network&apos;s shared vocabulary. Miners declare the intents they serve, and evaluation
+            scores them per intent each epoch, so the catalog is the right lens for browsing capability.
           </p>
         </div>
         <form action="/intents" method="GET" className="flex items-center gap-2">
@@ -54,7 +54,7 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
             defaultValue={q.trim()}
             placeholder="Search intents…"
             aria-label="Search intents"
-            className="min-h-10 w-64 rounded-lg border border-edge bg-panel px-3.5 text-[13.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-teal"
+            className="min-h-10 w-full max-w-xs rounded-lg border border-edge bg-panel px-3.5 text-[13.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-teal sm:w-64"
           />
           <button type="submit" aria-label="Search" className="btn-primary !min-h-10 !px-3">
             <Search size={14} aria-hidden />
@@ -65,7 +65,7 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
       {pool.length === 0 ? (
         <div className="mt-12 rounded-lg border border-edge bg-panel p-8">
           <p className="x-tag">NO MATCHES</p>
-          <p className="mt-3 text-[14px] text-ink-soft">Nothing in the live catalog matches this search. Nothing invented; clear the filters and try again.</p>
+          <p className="mt-3 text-[14px] text-ink-soft">No intent in the registry matches this search. Clear the filters and try again.</p>
         </div>
       ) : (
         <ul className="mt-10 divide-y divide-edge border-y border-edge">
@@ -75,7 +75,7 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
                 href={`/intents/${encodeURIComponent(i.intent_name ?? i.intent_id)}`}
                 className="group flex flex-wrap items-baseline gap-x-4 gap-y-1 px-2 py-4 transition-colors hover:bg-panel"
               >
-                <span className="tabular w-44 shrink-0 text-[12px] font-medium text-ink group-hover:text-teal">
+                <span className="tabular w-full shrink-0 text-[12px] font-medium text-ink group-hover:text-teal sm:w-44">
                   {(i.intent_name ?? i.intent_id).toLowerCase().replaceAll("_", " ")}
                 </span>
                 <span className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-ink-soft line-clamp-2">{i.description ?? "No description published."}</span>

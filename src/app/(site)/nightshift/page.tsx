@@ -12,11 +12,9 @@ export const metadata: Metadata = {
   title: "NIGHTSHIFT",
 };
 
-/**
- * Product landing. Renders the product story around the only marketing
- * assets this system has: real operations from the task store and the
- * actual monitoring capability. If the store cannot be reached the intel
- * band and outcome sections are omitted instead of faked.
+/**  * Product story rendered from the task store and the monitoring
+  * capability. If the store cannot be reached the intel
+  * band and outcome sections are omitted instead of faked.
  */
 
 interface Intel {

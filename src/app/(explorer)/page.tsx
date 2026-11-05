@@ -17,8 +17,7 @@ function ChallengeContract({ offer }: { offer: LiveChallengeOffer | null }) {
       <div className="rounded-lg border border-edge bg-panel p-6">
         <p className="x-tag">LIVE PAYMENT CONTRACT</p>
         <p className="mt-3 text-[13px] leading-relaxed text-ink-soft">
-          Not available this moment: the node did not return a payment challenge for a test ask, so no contract is shown
-          rather than a stale or invented one. Retry in a moment.
+          Not available right now. The node returned no payment challenge for the test ask. Retry in a moment.
         </p>
       </div>
     );
@@ -52,8 +51,7 @@ function ChallengeContract({ offer }: { offer: LiveChallengeOffer | null }) {
         </div>
       </dl>
       <p className="mt-5 max-w-[64ch] text-[12.5px] leading-relaxed text-ink-faint">
-        Read from a real, unpaid ask the node challenged right now — this is exactly what a caller is asked to sign
-        before any miner runs. Nothing in the explorer ever spends on its own.
+        Read from the node's current challenge for a test ask. This is what a caller signs before a miner runs.
       </p>
     </div>
   );
@@ -72,7 +70,7 @@ export default async function OverviewPage() {
     { label: "Canonical intents", value: intents.status === "ok" ? intents.payload.filter((i) => i.canonical).length : null, href: "/intents" },
     { label: "Registered validators", value: validators.status === "ok" ? validators.payload.length : null, href: "/validators" },
     {
-      label: "Mined tokens (validators)",
+      label: "Validator tokens mined",
       value:
         validators.status === "ok"
           ? validators.payload.reduce((n, v) => n + Number(v.tokensMined ?? "0"), 0)
@@ -85,22 +83,22 @@ export default async function OverviewPage() {
     {
       href: "/miners",
       title: "Miners",
-      body: "Independent services that answer intents — a specific kind of question with a defined input and output. Each miner declares its endpoints, schemas, supported intents and price up front, and earns per answered request.",
+      body: "Independent services that answer intents, specific kinds of question with a defined input and output. Each miner declares its endpoints, schemas, supported intents and price, and earns per answered request.",
     },
     {
       href: "/evaluators",
       title: "Evaluators",
-      body: "The quality layer of the network. Evaluators compare how different miners answered the same intent and score each epoch, so ranking reflects real answer quality rather than declarations. There is no public registration endpoint yet: the explorer reports that honestly instead of inventing a list.",
+      body: "The quality layer. Evaluators compare how different miners answered the same intent and score each epoch, so ranking reflects answer quality rather than declarations. No public roster is available yet.",
     },
     {
       href: "/validators",
       title: "Validators",
-      body: "The settlement and integrity layer. A validator publishes its address and peer identity, tracks tokens mined and relay activity, and countersigns the lifecycle of paid requests on the challenge network.",
+      body: "The settlement and integrity layer. A validator publishes its address and peer identity, tracks tokens mined and relay activity, and countersigns paid-request settlement.",
     },
     {
       href: "/intents",
       title: "Intents",
-      body: "The shared vocabulary of the network: a cataloged intent names a kind of question. Each carries a canonical registration (on chain), a plain-language description, and a count of miners that currently serve it.",
+      body: "The network's shared vocabulary: each intent names a kind of question, with its canonical registration, a plain-language description, and the miners currently serving it.",
     },
   ];
 
@@ -118,9 +116,9 @@ export default async function OverviewPage() {
           </h1>
           <p className="mt-6 max-w-[62ch] text-[15px] leading-relaxed text-ink-soft">
             Telegraph is an open, intent-based intelligence network. Miners register to answer specific kinds of
-            questions — intents — for a per-request price settled with x402. Quality is scored epoch by epoch so
-            results align to what actually works, not to what merely claims to. This explorer reads the public
-            registries and shows you who is on the network, what they do, and what an ask honestly costs today.
+            questions, called intents, for a per-request price settled with x402. Scoring each epoch keeps ranking
+            aligned with answer quality. This explorer reads the public registries and shows who is on the network,
+            what they do, and what an ask costs today.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link href="/miners" className="btn-primary !min-h-11">
@@ -193,12 +191,10 @@ export default async function OverviewPage() {
           <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
             <div>
               <p className="x-tag">NS/02 · THE INTERACTIVE TERMINAL</p>
-              <h2 className="x-display-2 mt-4 max-w-[36ch] text-ink">Beyond reading: an action layer is coming.</h2>
+              <h2 className="x-display-2 mt-4 max-w-[36ch] text-ink">Beyond reading: the interactive terminal.</h2>
               <p className="mt-3 max-w-[64ch] text-[13.5px] leading-relaxed text-ink-soft">
-                Phase 2 of this explorer replaces the static views with a conversational terminal directly over the same
-                registries: ask an intent a real question, route it to the highest-ranked supporting miner, and see the
-                exact x402 contract before anything is signed. The explorer you are reading keeps that same shape —
-                every intent here lists the command it will map to.
+                Compose an ask against the live node, see the x402 price, approve it, and take delivery of the
+                answer with its receipt. Miner and intent pages open the terminal prefilled.
               </p>
             </div>
             <Link href="/terminal" className="btn-quiet !min-h-11">
