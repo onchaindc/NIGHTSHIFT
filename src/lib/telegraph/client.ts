@@ -147,7 +147,8 @@ export interface TelegraphChallenge {
   accepts: TelegraphChallengeAccept[];
 }
 
-function decodeChallenge(headerValue: string | null): TelegraphChallenge | null {
+/** Decode the base64 PAYMENT-REQUIRED header. Returns null when unreadable. */
+export function decodeChallenge(headerValue: string | null): TelegraphChallenge | null {
   if (!headerValue) return null;
   try {
     return JSON.parse(Buffer.from(headerValue, "base64").toString("utf8")) as TelegraphChallenge;
@@ -187,7 +188,8 @@ interface AskResultBody {
   error?: string;
 }
 
-function extractReceipt(headers: Headers): TelegraphReceipt | null {
+/** Decode the X-TELEGRAPH-RECEIPT header (base64 JSON). */
+export function extractReceipt(headers: Headers): TelegraphReceipt | null {
   const raw = headers.get("x-telegraph-receipt");
   if (!raw) return null;
   try {
@@ -218,8 +220,10 @@ export interface AskOptions {
  * be the exact scheme's EIP-155 entry that we ourselves priced, and its amount
  * MUST still fit this task's remaining budget. Unrecognized options (the
  * node's scheme "escrow" offer) are refused here, never signed.
+ * (Exported for the Terminal's execute path, which pins the signed
+ * requirement to the exact offer the user approved; behavior unchanged.)
  */
-function selectTelegraphRequirement(
+export function selectTelegraphRequirement(
   accepts: Array<{ scheme?: string; network?: string; asset?: string; payTo?: string; amount?: string; price?: string; extra?: Record<string, unknown> }>,
   offer: { network: string; asset?: string; payTo?: string; amountCents: number },
   remainingBudgetUsdCents: number,
@@ -273,7 +277,7 @@ export function setTelegraphBalanceProbeForTests(fn: ((payer: string, asset: str
   balanceProbeForTests = fn;
 }
 
-async function diagnosePaymentRejection(payer: string, challenge: TelegraphChallenge | null): Promise<string> {
+export async function diagnosePaymentRejection(payer: string, challenge: TelegraphChallenge | null): Promise<string> {
   const exact = challenge?.accepts?.find((a) => a.scheme === "exact" && a.network?.startsWith("eip155:") && a.asset);
   if (!exact?.asset || !exact.network) {
     return "The fresh challenge carries no exact EVM entry to diagnose against.";

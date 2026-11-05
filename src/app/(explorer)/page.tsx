@@ -202,7 +202,7 @@ export default async function OverviewPage() {
               </p>
             </div>
             <Link href="/terminal" className="btn-quiet !min-h-11">
-              See what is planned
+              Open the terminal
               <ArrowRight size={13} aria-hidden />
             </Link>
           </div>
