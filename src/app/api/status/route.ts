@@ -5,7 +5,7 @@ import {
   dataDir,
   persistenceMode,
 } from "@/lib/storage";
-import { isDatabaseConfigured } from "@/lib/db/client";
+import { isDatabaseConfigured, resolveDatabase } from "@/lib/db/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -74,6 +74,7 @@ export async function GET() {
     durable: boolean;
     connection: "ok" | "unreachable" | "unconfigured";
     reason: string | null;
+    hosts: string[];
   };
   try {
     const decision = choosePersistence();
@@ -88,6 +89,24 @@ export async function GET() {
         : "unreachable"
       : "unconfigured";
     if (isPostgres && !isDatabaseConfigured()) connection = "unconfigured";
+
+    // Which endpoint this deployment is actually talking to. Hostnames only,
+    // never credentials: this is the one fact needed to tell "wrong database
+    // configured" apart from "database is down" without opening a dashboard.
+    let hosts: string[] = [];
+    if (isPostgres && isDatabaseConfigured()) {
+      try {
+        const resolved = await resolveDatabase();
+        hosts = resolved.ok
+          ? resolved.host
+            ? [resolved.host]
+            : []
+          : resolved.tried.map((t) => `${t.host ?? "unknown host"} (${t.error ?? "unreachable"})`);
+      } catch {
+        hosts = [];
+      }
+    }
+
     persistenceReport = {
       mode: persistenceMode(),
       provider: chosen.provider,
@@ -95,6 +114,7 @@ export async function GET() {
       durable: isPostgres,
       connection,
       reason: decision.reason,
+      hosts,
     };
   } catch (err) {
     persistenceReport = {
@@ -104,6 +124,7 @@ export async function GET() {
       durable: false,
       connection: "unreachable",
       reason: err instanceof Error ? err.message : String(err),
+      hosts: [],
     };
   }
 
