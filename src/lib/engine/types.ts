@@ -242,8 +242,31 @@ export interface WatchRef {
   telegramChatId?: string | number | null;
 }
 
-/** A task is either an ordinary goal or a protocol-watch check run. */
-export type JobType = "goal" | "protocol_watch";
+/** Facts of one durably recorded interactive Terminal ask (Phase 5b). */
+export interface TerminalRunInfo {
+  /** Intent the router/miner knowledge provides, when present (e.g. WEATHER_FORECAST). */
+  intent?: string | null;
+  /** Miner that served the request (id/slug), when the response names one. */
+  miner?: string | null;
+  /** The engine path the request was paid to (e.g. /engine/v1/ask). */
+  endpointPath?: string;
+  /** The exact request body the node was paid to answer. */
+  request?: unknown;
+  /** The user-approved, drift-checked offer (network, asset, payTo, atomic amount). */
+  offer?: { scheme: string; network: string; asset: string; payTo: string; amount: string };
+  /** Payer's PUBLIC account address; never any key material. */
+  payerAddress?: string;
+  /** Node-reported timing, when present. */
+  durationMs?: number;
+  timestamp?: string;
+  /** x402 PAYMENT-RESPONSE settlement proof header, verbatim when present. */
+  settlementHeader?: string;
+}
+
+/** A task is either an ordinary goal, a protocol-watch check run, or a
+ * durably recorded interactive Terminal ask (jobTypes share one store so the
+ * Activity centre reads a single history). */
+export type JobType = "goal" | "protocol_watch" | "terminal_request";
 
 export interface TaskRecord {
   id: string;
@@ -267,10 +290,16 @@ export interface TaskRecord {
     source: "web" | "telegram";
     actor?: string; // telegram chat id, etc.
   };
-  /** Task variant: "goal" (default) or software "protocol_watch". */
+  /** Task variant: "goal" (default), "protocol_watch", or "terminal_request". */
   jobType?: JobType;
   /** Set when jobType is protocol_watch; carries the watch run context. */
   watch?: WatchRef;
+  /**
+   * Set when jobType is terminal_request: the facts of the interactive paid
+   * ask, exactly as the execute route saw them (request body, user-approved
+   * offer, payer public address). No private key material is ever stored.
+   */
+  terminal?: TerminalRunInfo;
   /**
    * Optional provenance labels set outside the engine (e.g. "audit-rehearsal"
    * marking tasks created by the automated interaction audit). Labels never

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { executeAsk, payerAddress, type ApprovedOffer } from "@/lib/terminal/ask";
+import { recordTerminalOutcome, type RecordedActivity } from "@/lib/terminal/store";
 import { paidCredentialsConfigured } from "@/lib/telegraph/client";
 import { specFromBody, type PreviewBody } from "@/app/api/terminal/preview/route";
 
@@ -68,11 +69,20 @@ export async function POST(req: Request) {
     );
   }
 
+  const spec = specFromBody(body);
   const outcome = await executeAsk({
-    spec: specFromBody(body),
+    spec,
     approved: true,
     approvedOffer: body.offer,
   });
+
+  /**
+   * Phase 5b: durably record the attempt into the SAME store the Activity
+   * centre reads, AFTER the existing approval-pinned execution. Recording is
+   * best-effort: a persistence failure never changes the paid outcome, but
+   * the \'saved\' flag is reported truthfully either way.
+   */
+  const activity: RecordedActivity = await recordTerminalOutcome(outcome, spec, payerAddress() ?? undefined);
 
   switch (outcome.kind) {
     case "answered":
@@ -99,6 +109,7 @@ export async function POST(req: Request) {
         receipt: outcome.receipt,
         settlement: outcome.settlementHeader ?? null,
         payerAddress: payerAddress(),
+        activity: activity.saved ? { id: activity.id, saved: true } : { saved: false, detail: activity.detail },
       });
     case "refused":
       return NextResponse.json(
@@ -106,6 +117,7 @@ export async function POST(req: Request) {
           status: "refused",
           detail: outcome.reason,
           fresh: outcome.fresh && outcome.fresh.kind === "challenge" ? { offer: outcome.fresh.approvedOffer } : undefined,
+          activity: activity.saved ? { id: activity.id, saved: true } : { saved: false, detail: activity.detail },
         },
         { status: 409 },
       );
@@ -115,14 +127,15 @@ export async function POST(req: Request) {
           status: "refused",
           detail: `The node refused this request before any payment: HTTP ${outcome.status}.`,
           node: outcome.body ?? null,
+          activity: activity.saved ? { id: activity.id, saved: true } : { saved: false, detail: activity.detail },
         },
         { status: 200 },
       );
     case "payment_rejected":
-      return NextResponse.json({ status: "payment_rejected", detail: outcome.detail }, { status: 402 });
+      return NextResponse.json({ status: "payment_rejected", detail: outcome.detail, activity: activity.saved ? { id: activity.id, saved: true } : { saved: false, detail: activity.detail } }, { status: 402 });
     case "failed":
-      return NextResponse.json({ status: "failed", httpStatus: outcome.status ?? null, detail: outcome.detail }, { status: 502 });
+      return NextResponse.json({ status: "failed", httpStatus: outcome.status ?? null, detail: outcome.detail, activity: activity.saved ? { id: activity.id, saved: true } : { saved: false, detail: activity.detail } }, { status: 502 });
     case "integrity":
-      return NextResponse.json({ status: "integrity", detail: outcome.detail }, { status: 422 });
+      return NextResponse.json({ status: "integrity", detail: outcome.detail, activity: activity.saved ? { id: activity.id, saved: true } : { saved: false, detail: activity.detail } }, { status: 422 });
   }
 }

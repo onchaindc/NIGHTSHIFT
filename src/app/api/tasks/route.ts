@@ -14,7 +14,16 @@ export const maxDuration = 60;
  * request; purchases are bounded by the task's spending limit.
  */
 export async function GET() {
-  const tasks = await listTasks();
+  let tasks;
+  try {
+    tasks = await listTasks();
+  } catch (err) {
+    // Storage unreachable (e.g. the configured database is down): report the
+    // unavailable state explicitly instead of an opaque server error, so the
+    // UI can say "could not be read" rather than presenting anything as history.
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: "storage unavailable", detail: detail.slice(0, 200) }, { status: 503 });
+  }
   return NextResponse.json({ tasks });
 }
 
