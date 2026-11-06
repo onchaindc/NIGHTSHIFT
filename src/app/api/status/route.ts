@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { apiAuthMode } from "@/lib/api/auth";
 import {
@@ -75,6 +76,11 @@ export async function GET() {
     connection: "ok" | "unreachable" | "unconfigured";
     reason: string | null;
     hosts: string[];
+    /** Env variable NAMES that supplied candidates (never values). */
+    sources: string[];
+    /** Short digest of the connect target, so two deployments can be compared
+     *  without publishing a project id or a password. */
+    target: string | null;
   };
   try {
     const decision = choosePersistence();
@@ -107,6 +113,24 @@ export async function GET() {
       }
     }
 
+    const sources = ["NIGHTSHIFT_DATABASE_URL", "DATABASE_URL", "DATABASE_URL_UNPOOLED"].filter((k) =>
+      Boolean(process.env[k]?.trim()),
+    );
+    let target: string | null = null;
+    if (isPostgres && isDatabaseConfigured()) {
+      try {
+        const { databaseUrl } = await import("@/lib/db/client");
+        const url = databaseUrl();
+        if (url) {
+          // username + host identify the tenant; the digest keeps it private.
+          const parsed = new URL(url);
+          target = createHash("sha256").update(`${parsed.username}@${parsed.host}${parsed.pathname}`).digest("hex").slice(0, 10);
+        }
+      } catch {
+        target = null;
+      }
+    }
+
     persistenceReport = {
       mode: persistenceMode(),
       provider: chosen.provider,
@@ -115,6 +139,8 @@ export async function GET() {
       connection,
       reason: decision.reason,
       hosts,
+      sources,
+      target,
     };
   } catch (err) {
     persistenceReport = {
@@ -125,6 +151,8 @@ export async function GET() {
       connection: "unreachable",
       reason: err instanceof Error ? err.message : String(err),
       hosts: [],
+      sources: [],
+      target: null,
     };
   }
 
