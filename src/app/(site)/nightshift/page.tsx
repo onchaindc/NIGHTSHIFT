@@ -233,7 +233,7 @@ export default async function LandingPage() {
             <p className="x-tag">NS-OPS/00 · PRODUCT BRIEF</p>
             <h1 className="x-display-hero mt-5 text-ink">
               Give it the outcome.
-              <span className="block italic text-amber-soft">It handles the work.</span>
+              <span className="block italic text-amber-deep">It handles the work.</span>
             </h1>
             <p className="mt-6 max-w-[52ch] text-[15px] leading-relaxed text-ink-soft">
               NIGHTSHIFT is an autonomous intelligence agent. Hand it a sentence, give it a budget, and it buys the
@@ -421,7 +421,7 @@ export default async function LandingPage() {
       <section>
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-28">
           <h2 className="x-display-1 max-w-[30ch] text-ink">
-            Do not babysit the work. <span className="italic text-amber-soft">Verify it.</span>
+            Do not babysit the work. <span className="italic text-amber-deep">Verify it.</span>
           </h2>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link href="/console" className="btn-primary !min-h-11">

@@ -62,7 +62,7 @@ function ApproveReject({ task, onAction, busy, actionError }: {
   if (!awaiting) return null;
   return (
     <div className="rise-in mt-4 rounded-lg border border-amber/40 bg-amber/5 p-3.5">
-      <p className="text-[13px] leading-relaxed text-amber-soft">
+      <p className="text-[13px] leading-relaxed text-amber-deep">
         The plan is ready and nothing has been spent yet. Approving lets the agent make its purchase and run the checks.
       </p>
       <div className="mt-3 flex gap-2.5">

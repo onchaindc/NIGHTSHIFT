@@ -238,7 +238,7 @@ function ActiveOperation({
 
         {task.state === "awaiting_approval" && (
           <div className="mt-3 rounded-lg border border-amber/40 bg-amber/5 p-3.5">
-            <p className="text-[12.5px] leading-relaxed text-amber-soft">
+            <p className="text-[12.5px] leading-relaxed text-amber-deep">
               The plan is ready and nothing has been spent. Approving lets it purchase within the ceiling and run the checks.
             </p>
             <div className="mt-2.5 flex gap-2">
