@@ -71,6 +71,7 @@ boundaries.
   (signal pushes require an escrowed wallet subscription, deliberately not used),
   and per-signal detail pages (`/signals/<signal_hash>`) reading the engine's
   stored recording, including the node's payload-commitment verification.
+- **Activity** (`/activity`, Phase 5): the workspace's recorded activity centre — request counts and outcomes, one history built on the SAME task records every other surface reads (`GET /api/tasks`, unchanged contract), with payments (amount, token, network, settlement tx), receipt hashes, ledger reconciliation (missing hashes and priced-but-undelivered attempts are flagged, never hidden), and `/activity/<task_id>` detail pages that trace each record to its request and payment. Note stated in the UI (and honestly here): interactive Terminal requests execute in-session and are not saved to the task store, so only recorded task activity appears here.
 - 235 tests: task state transitions and goal-intent classification, permission checks
   (including the read-only `chain.read` boundary), budget refusals, recovery retries,
   verification failures (unmined settlement, implausible answers, stale evidence,
@@ -251,6 +252,8 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 - `GET /signals`: Telegraph Daemon signal feed (search, filters, live refresh)
 - `GET /signals/<signal_hash>`: one stored signal recording, as the node records it
 - `GET /api/daemon/signals`: lean JSON relay of the Daemon feed for polling
+- `GET /activity`: the activity centre (recorded requests, payments, receipts)
+- `GET /activity/<task_id>`: one activity record — request, outcome, payments, receipts
 - `GET /history`: filtered work history (status groups, test records separated and labeled)
 - `GET /tasks/:id`: single task with timeline, spending, outcome, and evidence
 - `POST /api/tasks/:id/action` `{ action: "approve" | "reject" }`: approval gate
