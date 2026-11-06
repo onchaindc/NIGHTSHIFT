@@ -56,69 +56,39 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
             <NavLinks items={NAV} />
           </nav>
           <div className="ml-auto order-2 sm:order-3">
-            <Link href="/terminal" className="btn-quiet !min-h-8 !px-3 !text-[12px] !text-amber">
-              Terminal
+            <Link href="/terminal" className="btn-primary !min-h-9 !px-4 !text-[12.5px]">
+              Ask the network
             </Link>
           </div>
         </div>
       </header>
       <main className="x-page flex-1">{children}</main>
-      {/* Footer is a colophon, not a second navigation bar: brand and what this
-          deployment is, the protocol's real published surfaces, and the
-          machine-readable endpoints this app actually exposes. */}
-      <footer className="border-t border-edge bg-panel/50">
-        <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
-          <div className="grid gap-8 sm:grid-cols-[1.5fr_1fr_1fr] sm:gap-10">
-            <div>
-              <p className="text-[13px] font-bold tracking-[0.22em] text-ink">NIGHTSHIFT</p>
-              <p className="mt-3 max-w-[46ch] text-[12.5px] leading-relaxed text-ink-soft">
-                A clear view of the Telegraph network — who is on it, what they answer, and what an ask costs today.
-                Every figure is read from the public registries; nothing is cached into a claim.
-              </p>
-              <p className="mt-4 inline-flex items-center gap-2">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-teal" />
-                <span className="x-label">Registries read live</span>
-              </p>
-            </div>
-
-            <div>
-              <p className="x-label">Protocol</p>
-              <ul className="mt-3 space-y-2.5 text-[12.5px]">
-                <li>
-                  <Ext href="https://docs.telegraphprotocol.com">Official documentation</Ext>
-                </li>
-                <li>
-                  <Ext href="https://devnode.telegraphprotocol.com/engine/v1/intents">Node API · testnet</Ext>
-                </li>
-                <li>
-                  <Ext href="https://devnode.telegraphprotocol.com/daemon/health">Daemon health</Ext>
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <p className="x-label">Machine-readable</p>
-              <ul className="mt-3 space-y-2.5 text-[12.5px]">
-                <li>
-                  <Ext href="/api/status">Integration & store status</Ext>
-                </li>
-                <li>
-                  <Ext href="/api/network">Registry aggregates</Ext>
-                </li>
-                <li>
-                  <Link href="/terminal" className="text-ink-soft underline-offset-4 transition-colors hover:text-amber hover:underline">
-                    Run an ask in the Terminal
-                  </Link>
-                </li>
-              </ul>
-            </div>
+      {/* One slim band, the same on every page: brand, the few links worth
+          repeating, and a live-data note. Anything longer competes with the
+          page it sits under. */}
+      <footer className="border-t border-edge bg-panel/60">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-8 gap-y-4 px-4 py-7 sm:px-6">
+          <div className="flex items-center gap-3">
+            <p className="text-[12.5px] font-bold tracking-[0.2em] text-ink">NIGHTSHIFT</p>
+            <span aria-hidden className="h-3 w-px bg-edge-strong" />
+            <p className="inline-flex items-center gap-1.5 text-[12px] text-ink-faint">
+              <span aria-hidden className="x-live-dot h-1.5 w-1.5 rounded-full bg-teal" />
+              Data read live
+            </p>
           </div>
 
-          <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-edge pt-5">
-            <p className="x-tag">© 2026 NIGHTSHIFT</p>
-            <p className="x-tag">PUBLIC TELEGRAPH REGISTRIES · NO OPERATOR DATA</p>
-            <p className="x-tag sm:ml-auto">x402 SETTLEMENT · TESTNET</p>
-          </div>
+          <nav aria-label="Footer" className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px]">
+            <Ext href="https://docs.telegraphprotocol.com">Documentation</Ext>
+            <Link href="/developers" className="text-ink-soft underline-offset-4 transition-colors hover:text-amber hover:underline">
+              Developers
+            </Link>
+            <Ext href="/api/status">Status API</Ext>
+            <Link href="/terminal" className="text-ink-soft underline-offset-4 transition-colors hover:text-amber hover:underline">
+              Terminal
+            </Link>
+          </nav>
+
+          <p className="ml-auto text-[12px] text-ink-faint">© 2026 NIGHTSHIFT</p>
         </div>
       </footer>
     </div>

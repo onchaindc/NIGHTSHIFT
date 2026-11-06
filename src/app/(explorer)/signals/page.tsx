@@ -23,7 +23,7 @@ export default async function SignalsPage({
   if (fetched.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-tag">EXPLORER · SIGNALS</p>
+        <p className="x-eyebrow">Signals</p>
         <h1 className="x-display-1 mt-4 text-ink">Daemon feed unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The Daemon&apos;s public feed could not be read, so no signals are listed rather than a cached or invented
@@ -45,7 +45,7 @@ export default async function SignalsPage({
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="x-tag">EXPLORER · SIGNALS · {payload.total.toLocaleString()} ON RECORD</p>
+          <p className="x-eyebrow">{payload.total.toLocaleString()} signals on record</p>
           <h1 className="x-display-1 mt-3 text-ink">Daemon signals</h1>
           <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-ink-soft">
             Signals the Daemon produced on its own schedule: collectors gather data, the Daemon formulates questions,

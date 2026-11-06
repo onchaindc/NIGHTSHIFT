@@ -11,7 +11,7 @@ export default async function ValidatorsPage() {
   if (fetched.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-tag">EXPLORER · VALIDATORS</p>
+        <p className="x-eyebrow">Validators</p>
         <h1 className="x-display-1 mt-4 text-ink">Validator registry unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The validator registry could not be read: <span className="tabular text-[12px]">{fetched.detail}</span>
@@ -26,7 +26,7 @@ export default async function ValidatorsPage() {
   if (fetched.payload.length === 0) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-tag">EXPLORER · VALIDATORS</p>
+        <p className="x-eyebrow">Validators</p>
         <h1 className="x-display-1 mt-4 text-ink">No validators registered</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The registry is reachable and reports no validators yet.
@@ -37,7 +37,7 @@ export default async function ValidatorsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-      <p className="x-tag">EXPLORER · VALIDATORS · {fetched.payload.length} REGISTERED</p>
+      <p className="x-eyebrow">{fetched.payload.length} validators registered</p>
       <h1 className="x-display-1 mt-3 text-ink">Settlement and integrity</h1>
       <p className="mt-3 max-w-[68ch] text-[14px] leading-relaxed text-ink-soft">
         Validators countersign paid-request outcomes. Each one publishes its chain address, peer identity and activity
@@ -70,7 +70,7 @@ export default async function ValidatorsPage() {
           </tbody>
         </table>
       </div>
-      <p className="x-tag mt-4">COUNTERS AS REPORTED BY EACH VALIDATOR</p>
+      <p className="mt-4 text-[12px] text-ink-faint">Counters as reported by each validator</p>
     </div>
   );
 }

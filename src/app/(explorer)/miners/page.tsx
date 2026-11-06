@@ -30,7 +30,7 @@ export default async function MinersPage({
   if (fetched.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-tag">EXPLORER · MINERS</p>
+        <p className="x-eyebrow">Miners</p>
         <h1 className="x-display-1 mt-4 text-ink">Miner catalog unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The public node at devnode.telegraphprotocol.com could not be reached, so no miners are listed rather than a
@@ -46,7 +46,7 @@ export default async function MinersPage({
   if (intents.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-tag">EXPLORER · MINERS</p>
+        <p className="x-eyebrow">Miners</p>
         <h1 className="x-display-1 mt-4 text-ink">Intents registry unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The intent list could not be fetched, so miners cannot be grouped by intent right now. Retry shortly.
@@ -93,7 +93,7 @@ export default async function MinersPage({
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="x-tag">EXPLORER · MINERS · {fetched.payload.length.toLocaleString()} REGISTERED</p>
+          <p className="x-eyebrow">{fetched.payload.length.toLocaleString()} miners registered</p>
           <h1 className="x-display-1 mt-3 text-ink">{total.toLocaleString()} miners on the network</h1>
           <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-ink-soft">
             Every entry is a registry record: an independent service with declared endpoints, schemas, supported

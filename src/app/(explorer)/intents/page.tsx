@@ -13,7 +13,7 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
   if (fetched.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-tag">EXPLORER · INTENTS</p>
+        <p className="x-eyebrow">Intents</p>
         <h1 className="x-display-1 mt-4 text-ink">Intent registry unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The canonical intent list could not be fetched: <span className="tabular text-[12px]">{fetched.detail}</span>{" "}
@@ -40,7 +40,7 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="x-tag">EXPLORER · INTENTS · {canonicalCount} CANONICAL</p>
+          <p className="x-eyebrow">{canonicalCount} canonical intents</p>
           <h1 className="x-display-1 mt-3 text-ink">{pool.length.toLocaleString()} named kinds of question</h1>
           <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-ink-soft">
             Intents are the network&apos;s shared vocabulary. Miners declare the intents they serve, and evaluation
@@ -64,7 +64,7 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
 
       {pool.length === 0 ? (
         <div className="mt-12 rounded-lg border border-edge bg-panel p-8">
-          <p className="x-tag">NO MATCHES</p>
+          <p className="text-[13px] font-semibold text-ink">No matches</p>
           <p className="mt-3 text-[14px] text-ink-soft">No intent in the registry matches this search. Clear the filters and try again.</p>
         </div>
       ) : (

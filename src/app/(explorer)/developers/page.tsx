@@ -218,7 +218,7 @@ function Callout({ children }: { children: React.ReactNode }) {
 export default function DevelopersPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
-      <p className="x-tag">NIGHTSHIFT · DEVELOPER CENTRE</p>
+      <p className="x-eyebrow">Developer centre</p>
       <h1 className="x-display-1 mt-3 text-balance text-ink">Build on the Telegraph network</h1>
       <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-pretty text-ink-soft">
         The node API, the x402 payment flow, the official SDKs and MCP server, and a starting point for every network
