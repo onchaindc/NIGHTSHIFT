@@ -11,10 +11,66 @@ function microcents(usdc?: number) {
   return usdc === undefined ? null : `$${(usdc / 1_000_000).toFixed(2)}`;
 }
 
+/**
+ * The ask lifecycle, as an animated schematic rather than a paragraph: four
+ * steps, the live price pinned to the card. The packet travelling the rail is
+ * decorative (CSS only); every number on the card is read, never invented.
+ */
+function AskLifecycle({ offer }: { offer: LiveChallengeOffer | null }) {
+  const price = offer ? microcents(Number(offer.amount)) : null;
+  const steps = [
+    { n: "01", label: "Discover", detail: "free · miner catalog" },
+    { n: "02", label: "Probe", detail: "402 · priced offer" },
+    { n: "03", label: "Pay", detail: "x402 · signed transfer" },
+    { n: "04", label: "Answer", detail: "200 · receipt + signal" },
+  ];
+
+  return (
+    <figure className="x-sheen relative overflow-hidden rounded-2xl border border-edge bg-panel p-5 shadow-[0_18px_40px_-32px_rgba(22,24,29,0.45)] sm:p-6">
+      <figcaption className="flex items-center justify-between gap-3">
+        <p className="x-label">One ask, end to end</p>
+        <p className="x-tag inline-flex items-center gap-1.5">
+          <span aria-hidden className="x-live-dot h-1.5 w-1.5 rounded-full bg-teal" />
+          LIVE
+        </p>
+      </figcaption>
+
+      <ol className="relative mt-5 space-y-3.5 pl-7">
+        {/* rail + travelling packet */}
+        <span aria-hidden className="absolute bottom-1.5 left-[5px] top-1.5 w-px bg-edge" />
+        <span aria-hidden className="x-packet absolute left-[2px] h-1.5 w-1.5 rounded-full bg-amber shadow-[0_0_0_3px_rgba(180,83,9,0.14)]" />
+        {steps.map((s) => (
+          <li key={s.n} className="relative">
+            <span aria-hidden className="absolute -left-[26px] top-[7px] h-1.5 w-1.5 rounded-full border border-edge-strong bg-panel" />
+            <div className="flex flex-wrap items-baseline gap-x-2.5">
+              <span className="tabular text-[10.5px] text-ink-faint">{s.n}</span>
+              <span className="text-[13.5px] font-semibold text-ink">{s.label}</span>
+              <span className="tabular ml-auto text-[10.5px] text-ink-faint">{s.detail}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <div className="mt-5 flex items-end justify-between gap-3 border-t border-edge pt-4">
+        <div>
+          <p className="x-label">Price right now</p>
+          <p className="tabular mt-1 text-[22px] font-semibold leading-none text-ink">
+            {price ?? "—"}
+            <span className="ml-1.5 text-[11px] font-normal text-ink-faint">per ask</span>
+          </p>
+        </div>
+        <p className="tabular max-w-[45%] break-all text-right text-[10px] leading-relaxed text-ink-faint">
+          {offer ? offer.network : "no live challenge"}
+        </p>
+      </div>
+    </figure>
+  );
+}
+
 function ChallengeContract({ offer }: { offer: LiveChallengeOffer | null }) {
   if (!offer) {
     return (
-      <div className="rounded-lg border border-edge bg-panel p-6">
+      <div className="rounded-xl border border-edge bg-panel p-6">
         <p className="x-tag">LIVE PAYMENT CONTRACT</p>
         <p className="mt-3 text-[13px] leading-relaxed text-ink-soft">
           Not available right now. The node returned no payment challenge for the test ask. Retry in a moment.
@@ -24,9 +80,8 @@ function ChallengeContract({ offer }: { offer: LiveChallengeOffer | null }) {
   }
   const price = microcents(Number(offer.amount));
   return (
-    <div className="rounded-lg border border-edge bg-panel p-6">
-      <p className="x-tag">LIVE PAYMENT CONTRACT · x402 EXACT</p>
-      <dl className="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2">
+    <div className="rounded-xl border border-edge bg-panel p-5 sm:p-6">
+      <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
         <div>
           <dt className="x-label">Price per ask</dt>
           <dd className="tabular mt-1 text-[15px] font-medium text-ink">{price ?? offer.amount}</dd>
@@ -35,7 +90,7 @@ function ChallengeContract({ offer }: { offer: LiveChallengeOffer | null }) {
           <dt className="x-label">Asset on chain</dt>
           <dd className="mt-1 text-[14px] font-medium text-ink">
             {offer.assetName ?? "Unknown token"}
-            <span className="tabular ml-2 text-[11px] text-ink-faint">{offer.asset}</span>
+            <span className="tabular ml-2 break-all text-[11px] text-ink-faint">{offer.asset}</span>
           </dd>
         </div>
         <div>
@@ -46,12 +101,12 @@ function ChallengeContract({ offer }: { offer: LiveChallengeOffer | null }) {
           <dt className="x-label">Scheme · recipient</dt>
           <dd className="mt-1 text-[14px] font-medium text-ink">
             <span className="tabular">{offer.scheme}</span>
-            <span className="tabular ml-2 text-[11px] text-ink-faint">{offer.payTo}</span>
+            <span className="tabular ml-2 break-all text-[11px] text-ink-faint">{offer.payTo}</span>
           </dd>
         </div>
       </dl>
-      <p className="mt-5 max-w-[64ch] text-[12.5px] leading-relaxed text-ink-faint">
-        Read from the node's current challenge for a test ask. This is what a caller signs before a miner runs.
+      <p className="mt-5 text-[12px] leading-relaxed text-ink-faint">
+        Read from the node&apos;s current challenge. This is exactly what a caller signs before a miner runs.
       </p>
     </div>
   );
@@ -66,9 +121,9 @@ export default async function OverviewPage() {
   ]);
 
   const counts = [
-    { label: "Registered miners", value: miners.status === "ok" ? miners.payload.length : null, href: "/miners" },
-    { label: "Canonical intents", value: intents.status === "ok" ? intents.payload.filter((i) => i.canonical).length : null, href: "/intents" },
-    { label: "Registered validators", value: validators.status === "ok" ? validators.payload.length : null, href: "/validators" },
+    { label: "Miners answering", value: miners.status === "ok" ? miners.payload.length : null, href: "/miners" },
+    { label: "Kinds of question", value: intents.status === "ok" ? intents.payload.filter((i) => i.canonical).length : null, href: "/intents" },
+    { label: "Validators signing", value: validators.status === "ok" ? validators.payload.length : null, href: "/validators" },
     {
       label: "Validator tokens mined",
       value:
@@ -79,127 +134,173 @@ export default async function OverviewPage() {
     },
   ];
 
+  /* One line each: the four roles are a map, not an essay. */
   const roles = [
     {
       href: "/miners",
       title: "Miners",
-      body: "Independent services that answer intents, specific kinds of question with a defined input and output. Each miner declares its endpoints, schemas, supported intents and price, and earns per answered request.",
+      body: "Independent services that answer intents, each declaring its endpoints and price.",
     },
     {
       href: "/evaluators",
       title: "Evaluators",
-      body: "The quality layer. Evaluators compare how different miners answered the same intent and score each epoch, so ranking reflects answer quality rather than declarations. No public roster is available yet.",
+      body: "Score answers per intent each epoch, so ranking reflects quality.",
     },
     {
       href: "/validators",
       title: "Validators",
-      body: "The settlement and integrity layer. A validator publishes its address and peer identity, tracks tokens mined and relay activity, and countersigns paid-request settlement.",
+      body: "Countersign settlement and finalize signals; the integrity layer.",
     },
     {
       href: "/intents",
       title: "Intents",
-      body: "The network's shared vocabulary: each intent names a kind of question, with its canonical registration, a plain-language description, and the miners currently serving it.",
+      body: "The shared vocabulary of question types miners compete to answer.",
     },
   ];
 
+  const liveOffer = offer.status === "ok" ? offer.payload : null;
+
   return (
     <div>
-      {/* Hero */}
-      <section className="border-b border-edge">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:py-24">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <p className="x-tag">NIGHTSHIFT · TELEGRAPH PROTOCOL REGISTRY</p>
-            <NetworkBadge live={miners.status === "ok" && validators.status === "ok" && intents.status === "ok"} />
+      {/* Hero: one statement, one sentence, the life of a request. */}
+      <section className="relative overflow-hidden border-b border-edge">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage:
+              "radial-gradient(900px 320px at 88% -8%, rgba(180,83,9,0.10), transparent 70%), radial-gradient(700px 300px at 0% 0%, rgba(15,118,110,0.07), transparent 70%)",
+          }}
+        />
+        <div className="relative mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-6 sm:py-16 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-14 lg:py-20">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="x-tag">NIGHTSHIFT · TELEGRAPH NETWORK</p>
+              <NetworkBadge live={miners.status === "ok" && validators.status === "ok" && intents.status === "ok"} />
+            </div>
+            <h1 className="x-display-hero mt-5 max-w-[24ch] text-balance text-ink">
+              A network that <span className="italic text-amber-deep">answers on demand</span>.
+            </h1>
+            <p className="mt-5 max-w-[46ch] text-[15px] leading-relaxed text-pretty text-ink-soft">
+              Miners answer questions for a micropayment. NIGHTSHIFT shows who is answering, what they cover, and what
+              one ask costs right now — read live from the public registries, never mocked.
+            </p>
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <Link href="/miners" className="btn-primary !min-h-11">
+                Browse miners
+                <ArrowRight size={14} aria-hidden />
+              </Link>
+              <Link href="/terminal" className="btn-quiet !min-h-11">
+                Try one ask
+              </Link>
+            </div>
+            <p className="x-tag mt-6">
+              NO ACCOUNT · NO API KEY · THE x402 PAYMENT IS THE AUTHENTICATION
+            </p>
           </div>
-          <h1 className="x-display-hero mt-5 max-w-[26ch] text-balance text-ink sm:mt-6">
-            A network that <span className="italic text-amber-deep">answers on demand</span>.
-          </h1>
-          <p className="mt-5 max-w-[62ch] text-[15px] leading-relaxed text-pretty text-ink-soft sm:mt-6">
-            Telegraph is an open, intent-based intelligence network. Miners register to answer specific kinds of
-            questions, called intents, for a per-request price settled with x402. Scoring each epoch keeps ranking
-            aligned with answer quality. This explorer reads the public registries and shows who is on the network,
-            what they do, and what an ask costs today.
-          </p>
-          <div className="mt-7 flex flex-wrap items-center gap-3 sm:mt-8">
-            <Link href="/miners" className="btn-primary !min-h-11">
-              Browse miners
-              <ArrowRight size={14} aria-hidden />
-            </Link>
-            <Link href="/intents" className="btn-quiet !min-h-11">
-              Explore intents
-            </Link>
-          </div>
+
+          <AskLifecycle offer={liveOffer} />
         </div>
       </section>
 
-      {/* Live band */}
+      {/* Numbers: labelled cards, each a door into its section. */}
       {counts.some((c) => c.value !== null) && (
         <section className="border-b border-edge bg-panel/40">
           <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-7 sm:grid-cols-4 sm:divide-x sm:divide-edge sm:gap-y-8">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="x-tag">ON THE NETWORK RIGHT NOW</p>
+              <p className="x-tag">READ FROM devnode.telegraphprotocol.com</p>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
               {counts.map((c) => (
-                <Link key={c.label} href={c.href} className="group">
-                  <p className="tabular text-[30px] font-semibold leading-none text-ink">
+                <Link
+                  key={c.label}
+                  href={c.href}
+                  className="group rounded-xl border border-edge bg-panel p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-edge-strong hover:shadow-[0_6px_18px_-12px_rgba(22,24,29,0.35)]"
+                >
+                  <p className="tabular text-[32px] font-semibold leading-none text-ink">
                     {c.value !== null ? c.value.toLocaleString() : "—"}
                   </p>
-                  <p className="x-label mt-2 transition-colors group-hover:text-amber">{c.label}</p>
+                  <p className="mt-2 flex items-center justify-between gap-2 text-[12px] text-ink-soft">
+                    {c.label}
+                    <ArrowRight
+                      size={13}
+                      aria-hidden
+                      className="shrink-0 text-ink-faint transition-transform group-hover:translate-x-0.5 group-hover:text-amber"
+                    />
+                  </p>
                 </Link>
               ))}
             </div>
-            <p className="x-tag mt-8">READ FROM THE PUBLIC REGISTRIES AT devnode.telegraphprotocol.com · REFRESHED ROUTINELY</p>
           </div>
         </section>
       )}
 
-      {/* Roles */}
+      {/* Roles: the map, four lines. */}
       <section className="border-b border-edge">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:py-24">
-          <p className="x-tag">THE PARTICIPANTS</p>
-          <h2 className="x-display-1 mt-4 max-w-2xl text-ink">Four roles, one contract</h2>
-          <div className="mt-8 grid gap-3 sm:mt-10 sm:gap-4 lg:grid-cols-2">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="x-tag">THE PARTICIPANTS</p>
+              <h2 className="x-display-1 mt-3 max-w-2xl text-ink">Four roles, one contract</h2>
+            </div>
+            <Link href="/developers" className="btn-quiet !min-h-9">
+              How to integrate
+              <ArrowRight size={13} aria-hidden />
+            </Link>
+          </div>
+          <div className="mt-7 grid gap-3 sm:grid-cols-2 sm:gap-4">
             {roles.map((r) => (
               <Link
                 key={r.title}
                 href={r.href}
-                className="group rounded-xl border border-edge bg-panel p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-edge-strong hover:shadow-[0_6px_18px_-10px_rgba(22,24,29,0.35)] sm:p-6"
+                className="group rounded-xl border border-edge bg-panel p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-edge-strong hover:shadow-[0_6px_18px_-10px_rgba(22,24,29,0.35)]"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-[15.5px] font-semibold text-ink">{r.title}</h3>
-                  <ArrowRight size={14} aria-hidden className="text-ink-faint transition-colors group-hover:text-amber" />
+                  <h3 className="text-[15px] font-semibold text-ink transition-colors group-hover:text-teal">{r.title}</h3>
+                  <ArrowRight size={14} aria-hidden className="shrink-0 text-ink-faint transition-all group-hover:translate-x-0.5 group-hover:text-amber" />
                 </div>
-                <p className="mt-2.5 text-[13px] leading-relaxed text-ink-soft">{r.body}</p>
+                <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">{r.body}</p>
               </Link>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Live challenge */}
+      {/* Live price contract. */}
       <section className="border-b border-edge bg-panel/40">
         <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
-          <p className="x-tag">NS/01 · WHAT AN ASK COSTS · RIGHT NOW</p>
-          <h2 className="x-display-1 mt-4 max-w-2xl text-ink">One challenge, at market</h2>
-          <div className="mt-8">
-            <ChallengeContract offer={offer.status === "ok" ? offer.payload : null} />
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="x-tag">LIVE MARKET</p>
+              <h2 className="x-display-1 mt-3 max-w-2xl text-ink">What one ask costs right now</h2>
+            </div>
+            <p className="max-w-[34ch] text-[12.5px] leading-relaxed text-ink-faint">
+              The node&apos;s own challenge for a test ask — price, asset, chain and recipient.
+            </p>
+          </div>
+          <div className="mt-7">
+            <ChallengeContract offer={liveOffer} />
           </div>
         </div>
       </section>
 
-      {/* Terminal teaser */}
+      {/* Terminal: one action, no paragraph. */}
       <section className="border-b border-edge">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:py-24">
-          <div className="grid gap-6 sm:gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
-            <div>
-              <p className="x-tag">NS/02 · THE INTERACTIVE TERMINAL</p>
-              <h2 className="x-display-2 mt-4 max-w-[36ch] text-ink">Beyond reading: the interactive terminal.</h2>
-              <p className="mt-3 max-w-[64ch] text-[13.5px] leading-relaxed text-ink-soft">
-                Compose an ask against the live node, see the x402 price, approve it, and take delivery of the
-                answer with its receipt. Miner and intent pages open the terminal prefilled.
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:py-20">
+          <div className="flex flex-wrap items-center justify-between gap-6">
+            <div className="min-w-0">
+              <p className="x-tag">ASK IT YOURSELF</p>
+              <h2 className="x-display-2 mt-3 max-w-[34ch] text-balance text-ink">Compose an ask. See the price. Approve it.</h2>
+              <p className="tabular mt-3 text-[12px] text-ink-faint">
+                probe <span className="text-amber">→</span> 402 price <span className="text-amber">→</span> approve{" "}
+                <span className="text-amber">→</span> answer + receipt
+                <span aria-hidden className="x-caret ml-1 inline-block h-3 w-1.5 translate-y-0.5 bg-amber" />
               </p>
             </div>
-            <Link href="/terminal" className="btn-quiet !min-h-11">
-              Open the terminal
-              <ArrowRight size={13} aria-hidden />
+            <Link href="/terminal" className="btn-primary !min-h-11">
+              Open the Terminal
+              <ArrowRight size={14} aria-hidden />
             </Link>
           </div>
         </div>
