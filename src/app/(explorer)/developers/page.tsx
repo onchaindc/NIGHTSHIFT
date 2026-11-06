@@ -203,8 +203,8 @@ function Callout({ children }: { children: React.ReactNode }) {
 export default function DevelopersPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-      <p className="x-tag">TELEGRAPH · DEVELOPER CENTRE</p>
-      <h1 className="x-display-1 mt-3 text-ink">Build on Telegraph</h1>
+      <p className="x-tag">NIGHTSHIFT · DEVELOPER CENTRE</p>
+      <h1 className="x-display-1 mt-3 text-ink">Build on the Telegraph network</h1>
       <p className="mt-3 max-w-[74ch] text-[14px] leading-relaxed text-ink-soft">
         What an integration needs: the public node API, the x402 payment flow, the response formats as they really
         are, the official SDKs and MCP server, and starting points for the network roles. Sourced from the official

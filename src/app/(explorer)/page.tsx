@@ -108,7 +108,7 @@ export default async function OverviewPage() {
       <section className="border-b border-edge">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-24">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <p className="x-tag">TELEGRAPH PROTOCOL · OPEN NETWORK</p>
+            <p className="x-tag">NIGHTSHIFT · TELEGRAPH PROTOCOL REGISTRY</p>
             <NetworkBadge live={miners.status === "ok" && validators.status === "ok" && intents.status === "ok"} />
           </div>
           <h1 className="x-display-hero mt-6 max-w-[26ch] text-ink">
