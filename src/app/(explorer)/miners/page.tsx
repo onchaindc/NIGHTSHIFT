@@ -167,7 +167,10 @@ export default async function MinersPage({
       ) : (
         <ul className="mt-8 grid gap-4 lg:grid-cols-2">
           {slice.map((m) => (
-            <li key={m.slug ?? m.id} className="rise-in-item">
+            /* min-w-0: a truncating title inside a grid item keeps min-width:auto
+               otherwise, and one long miner name widens the whole column past
+               the viewport (the mobile overflow). */
+            <li key={m.slug ?? m.id} className="rise-in-item min-w-0">
               <ParticipantCard participant={m} />
             </li>
           ))}

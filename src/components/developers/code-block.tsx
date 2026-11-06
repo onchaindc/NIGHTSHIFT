@@ -23,7 +23,7 @@ export function CodeBlock({ code, title, lang }: { code: string; title?: string;
   return (
     <figure className="min-w-0 overflow-hidden rounded-lg border border-edge bg-night">
       <figcaption className="flex items-center justify-between gap-3 border-b border-edge bg-panel px-3.5 py-2">
-        <span className="x-label !mt-0 truncate">
+        <span className="x-label !mt-0 min-w-0 truncate">
           {title ?? (lang ? lang.toUpperCase() : "SHELL")}
         </span>
         <button
