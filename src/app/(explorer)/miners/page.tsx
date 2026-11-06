@@ -118,18 +118,23 @@ export default async function MinersPage({
 
       {/* Quick intent filters when no explicit filter is chosen */}
       {!intentSlug && (
-        <div className="mt-7 flex flex-wrap gap-2">
-          <span className="x-label self-center">Filter by intent</span>
-          {topIntents.map((i) => (
-            <Link
-              key={i.intent_name ?? i.intent_id}
-              href={{ pathname: "/miners", query: { intent: i.intent_name ?? i.intent_id } }}
-              className="rounded-full border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-teal hover:text-teal"
-            >
-              {friendly(i.intent_name ?? i.intent_id)}
-              <span className="tabular ml-1.5 text-ink-faint">{i.miner_count}</span>
-            </Link>
-          ))}
+        <div className="mt-7">
+          <span className="x-label block sm:hidden">Filter by intent</span>
+          {/* Phone: one swipeable row keeps the twelve filters from eating the
+              screen. From sm up they wrap as before. */}
+          <div className="-mx-4 mt-2 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:mt-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+            <span className="x-label hidden self-center sm:block">Filter by intent</span>
+            {topIntents.map((i) => (
+              <Link
+                key={i.intent_name ?? i.intent_id}
+                href={{ pathname: "/miners", query: { intent: i.intent_name ?? i.intent_id } }}
+                className="shrink-0 snap-start rounded-full border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-teal hover:text-teal"
+              >
+                {friendly(i.intent_name ?? i.intent_id)}
+                <span className="tabular ml-1.5 text-ink-faint">{i.miner_count}</span>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
       {intentSlug && (
