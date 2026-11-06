@@ -66,8 +66,8 @@ body {
   background-color: var(--color-night);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  font-size: 14.5px;
-  line-height: 1.55;
+  font-size: 15px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: clip;
@@ -122,23 +122,42 @@ body {
   line-height: 1.12;
 }
 
-/* Micro mono metadata marks (document-control style). */
+/* Micro metadata marks. Quieter than they used to be: these should read as a
+   caption, not as a second headline shouting in capitals. */
 .x-tag {
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  letter-spacing: 0.1em;
   color: var(--color-ink-faint);
 }
 
 /* Editorial section labels */
 .x-label {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.1em;
   color: var(--color-ink-faint);
+}
+
+/* Section eyebrow: a small amber dot plus a plain label. Used instead of the
+   old all-caps strings so a section announces itself in normal language. */
+.x-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-ink-soft);
+}
+
+.x-eyebrow::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--color-amber);
 }
 
 .x-rule {
@@ -371,6 +390,22 @@ textarea {
 
 /* Section reveal driven by scroll position, where the browser supports it.
    Without support the block simply renders in place — nothing is hidden. */
+/* Content settles into place on first paint for cards and rows. */
+@keyframes settle-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.x-settle {
+  animation: settle-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @keyframes reveal-up {
   from {
     opacity: 0;
@@ -392,10 +427,19 @@ textarea {
 
 @media (prefers-reduced-motion: reduce) {
   .x-page > *,
-  .x-reveal {
+  .x-reveal,
+  .x-settle {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
+  }
+}
+
+/* Links and cards get a consistent, short response to the pointer. */
+@media (hover: hover) {
+  .x-reveal a,
+  .x-reveal button {
+    transition-duration: 0.18s;
   }
 }
 
