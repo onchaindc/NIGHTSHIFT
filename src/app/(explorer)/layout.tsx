@@ -3,8 +3,8 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: {
-    default: "Telegraph Explorer",
-    template: "%s · Telegraph",
+    default: "NIGHTSHIFT Explorer",
+    template: "%s · NIGHTSHIFT",
   },
   description:
     "A clear, real-time view of the Telegraph network: who the participants are, what they do, and how to engage with them.",
@@ -27,7 +27,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
       <header className="sticky top-0 z-40 border-b border-edge bg-night/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 sm:px-6">
           <Link href="/" className="text-[13px] font-bold tracking-[0.22em] text-ink">
-            TELEGRAPH
+            NIGHTSHIFT
           </Link>
           <span aria-hidden className="hidden h-3.5 w-px bg-edge-strong sm:block" />
           <nav aria-label="Primary" className="order-3 -mx-1.5 flex w-full gap-1 overflow-x-auto sm:order-2 sm:mx-0 sm:w-auto">
@@ -51,7 +51,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
       <main className="flex-1">{children}</main>
       <footer className="border-t border-edge">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-3 px-4 py-6 sm:px-6">
-          <p className="x-tag">TELEGRAPH · PUBLIC EXPLORER</p>
+          <p className="x-tag">NIGHTSHIFT · TELEGRAPH NETWORK EXPLORER</p>
           <div className="ml-auto flex items-center gap-5">
             {NAV.slice(1).map((l) => (
               <Link key={l.href} href={l.href} className="text-[12px] text-ink-soft transition-colors hover:text-amber">

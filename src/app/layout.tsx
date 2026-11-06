@@ -25,11 +25,11 @@ const instrumentSerif = Instrument_Serif({
 
 export const metadata: Metadata = {
   title: {
-    default: "Telegraph",
-    template: "%s · Telegraph",
+    default: "NIGHTSHIFT",
+    template: "%s · NIGHTSHIFT",
   },
   description:
-    "Explore the Telegraph network: who the participants are, what they do, and how to engage with them — read from the public registries.",
+    "NIGHTSHIFT: a clear view of the Telegraph network - who the participants are, what they do, and how to engage with them, read from the public registries.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
