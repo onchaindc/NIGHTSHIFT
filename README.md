@@ -64,7 +64,14 @@ boundaries.
   * API: `GET/POST /api/watches`, `GET/PUT/DELETE /api/watches/:id`,
     `POST /api/watches/:id/check` (body `{"investigate": true}` for the paid step).
   * Config, budget per run and fingerprints persist in `.data/watches.json`.
-- 91 tests: task state transitions and goal-intent classification, permission checks
+- **Signals** (`/signals`, Phase 4; `src/lib/daemon/client.ts`): browse the Telegraph
+  Daemon's autonomously produced signals from its free public feed — newest-first
+  list with search, source/category/time filters and pagination, live refresh of
+  the feed with an official WebSocket connection used for liveness status only
+  (signal pushes require an escrowed wallet subscription, deliberately not used),
+  and per-signal detail pages (`/signals/<signal_hash>`) reading the engine's
+  stored recording, including the node's payload-commitment verification.
+- 235 tests: task state transitions and goal-intent classification, permission checks
   (including the read-only `chain.read` boundary), budget refusals, recovery retries,
   verification failures (unmined settlement, implausible answers, stale evidence,
   wrong-asset answers), the spending ceiling and approval values the composer sends,
@@ -113,7 +120,9 @@ Verified against the official docs (docs.telegraphprotocol.com, "Paying with x40
 "Intents", "Addresses & Parameters") and against the live testnet node:
 
 1. **Discovery is free and keyless.** `GET /api/miners` / `GET /engine/v1/intents` on the
-   node return the live miner catalog and the 134 canonical intents.
+   node return the live miner catalog and the 136 canonical intents. The Daemon's feed is
+   free too: `GET /daemon/api/questions`, `GET /daemon/api/categories` and
+   `GET /engine/v1/signal/<hash>` (stored recordings) — the signals views read these.
 2. **Inference is paid via x402 (HTTP-native, no API key).** `POST /engine/v1/ask` returns
    **HTTP 402** with a `PAYMENT-REQUIRED` header (base64 JSON challenge). The challenge's
    `accepts` list is authoritative for network, asset, `amount` (6-decimal USDC units
@@ -239,6 +248,9 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 - `GET /api/tasks` / `GET /api/tasks/:id`: task records with full execution timelines
 - `GET /` **Command Center**: dashboard, agents, operations, approvals, history, settings
 - `GET /watch` **Protocol Watch**: configure watches, run checks, review recorded runs
+- `GET /signals`: Telegraph Daemon signal feed (search, filters, live refresh)
+- `GET /signals/<signal_hash>`: one stored signal recording, as the node records it
+- `GET /api/daemon/signals`: lean JSON relay of the Daemon feed for polling
 - `GET /history`: filtered work history (status groups, test records separated and labeled)
 - `GET /tasks/:id`: single task with timeline, spending, outcome, and evidence
 - `POST /api/tasks/:id/action` `{ action: "approve" | "reject" }`: approval gate
@@ -248,7 +260,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 ## Checks
 
 ```bash
-npm run test        # 65 tests (engine, watch, UI form rules, Telegram adapter)
+npm run test        # 235 tests (6 fail without a database: guarded persistence suite)
 npm run typecheck   # tsc -b --noEmit
 npm run build       # production build
 ```
