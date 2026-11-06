@@ -62,7 +62,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
           </div>
         </div>
       </header>
-      <main className="flex-1">{children}</main>
+      <main className="x-page flex-1">{children}</main>
       {/* Footer is a colophon, not a second navigation bar: brand and what this
           deployment is, the protocol's real published surfaces, and the
           machine-readable endpoints this app actually exposes. */}

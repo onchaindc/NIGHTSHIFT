@@ -132,10 +132,16 @@ const REPO_TERMINAL = `curl https://<this-deployment>/api/terminal/verify \\
 
 function Section({ id, n, title, children }: { id: string; n: string; title: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="scroll-mt-40 border-t border-edge pt-10 lg:scroll-mt-28">
-      <p className="x-label">SECTION {n}</p>
+    <section
+      id={id}
+      className="x-reveal min-w-0 scroll-mt-36 rounded-2xl border border-edge bg-panel p-4 sm:p-6 lg:scroll-mt-28"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="x-label">SECTION {n}</p>
+        <span aria-hidden className="h-px flex-1 bg-edge" />
+      </div>
       <h2 className="x-display-2 mt-2 text-ink">{title}</h2>
-      <div className="mt-4 max-w-[76ch] space-y-5 text-[13.5px] leading-relaxed text-ink-soft">{children}</div>
+      <div className="mt-4 min-w-0 max-w-[76ch] space-y-5 text-[13.5px] leading-relaxed text-ink-soft">{children}</div>
     </section>
   );
 }
@@ -146,18 +152,22 @@ function P({ children }: { children: React.ReactNode }) {
 
 function Api({ method, path, access, children }: { method: string; path: string; access: string; children: React.ReactNode }) {
   return (
-    <div className="border-b border-edge/60 py-3.5 first:pt-2 last:border-0">
-      <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
+    <div className="min-w-0 border-b border-edge/60 py-3.5 first:pt-2 last:border-0">
+      {/* Method, path and gate each get room to breathe; the path wraps rather
+          than pushing the whole page sideways on a phone. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
         <span
-          className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
+          className={`shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
             method === "POST" ? "bg-blue/10 text-blue" : method === "MIX" ? "bg-panel-3 text-ink-soft" : "bg-teal/10 text-teal"
           }`}
         >
           {method}
         </span>
-        <code className="tabular min-w-0 break-all text-[12.5px] text-ink">{path}</code>
-        <span className="rounded-full border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-ink-faint">{access}</span>
-      </p>
+        <code className="tabular min-w-0 break-all text-[12.5px] leading-snug text-ink">{path}</code>
+        <span className="shrink-0 rounded-full border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-ink-faint">
+          {access}
+        </span>
+      </div>
       <p className="mt-1.5 text-[12.5px] leading-relaxed">{children}</p>
     </div>
   );
@@ -165,11 +175,16 @@ function Api({ method, path, access, children }: { method: string; path: string;
 
 function FieldList({ rows }: { rows: [string, string][] }) {
   return (
-    <dl className="rounded-lg border border-edge bg-panel px-4 py-3">
+    <dl className="min-w-0 rounded-xl border border-edge bg-panel-2 px-4 py-3">
       {rows.map(([k, v]) => (
-        <div key={k} className="flex flex-wrap items-baseline gap-x-3 border-b border-edge/50 py-2.5 last:border-0">
-          <dt className="shrink-0 font-mono text-[11.5px] text-ink">{k}</dt>
-          <dd className="min-w-0 flex-1 break-words text-[12.5px] leading-relaxed text-ink-soft">{v}</dd>
+        <div
+          key={k}
+          className="min-w-0 border-b border-edge/50 py-2.5 last:border-0 sm:flex sm:flex-wrap sm:items-baseline sm:gap-x-3"
+        >
+          <dt className="font-mono text-[11.5px] text-ink sm:shrink-0">{k}</dt>
+          <dd className="mt-1 min-w-0 break-words text-[12.5px] leading-relaxed text-ink-soft sm:mt-0 sm:flex-1">
+            {v}
+          </dd>
         </div>
       ))}
     </dl>
@@ -202,27 +217,32 @@ function Callout({ children }: { children: React.ReactNode }) {
 
 export default function DevelopersPage() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
       <p className="x-tag">NIGHTSHIFT · DEVELOPER CENTRE</p>
-      <h1 className="x-display-1 mt-3 text-ink">Build on the Telegraph network</h1>
-      <p className="mt-3 max-w-[74ch] text-[14px] leading-relaxed text-ink-soft">
-        What an integration needs: the public node API, the x402 payment flow, the response formats as they really
-        are, the official SDKs and MCP server, and starting points for the network roles. Sourced from the official
-        documentation and from the contracts actually implemented here — never invented — and kept as a primer, not a
-        mirror of the full docs. Copy actions on every code block; no fake playground.
+      <h1 className="x-display-1 mt-3 text-balance text-ink">Build on the Telegraph network</h1>
+      <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-pretty text-ink-soft">
+        The node API, the x402 payment flow, the official SDKs and MCP server, and a starting point for every network
+        role — sourced from the official docs and the contracts implemented here, never invented.
       </p>
-      <div className="mt-5 flex flex-wrap gap-x-2 gap-y-1 text-[12.5px]">
-        <InLink href="/terminal">Try the interactive Terminal</InLink>
-        <span className="text-ink-faint">·</span>
-        <InLink href="/signals">Browse live signals</InLink>
-        <span className="text-ink-faint">·</span>
-        <InLink href="/miners">Study live miners</InLink>
-        <span className="text-ink-faint">·</span>
-        <InLink href="/activity">Inspect paid activity records</InLink>
+      <div className="mt-5 flex flex-wrap gap-2">
+        {[
+          { href: "/terminal", label: "Try the Terminal" },
+          { href: "/signals", label: "Live signals" },
+          { href: "/miners", label: "Live miners" },
+          { href: "/activity", label: "Paid activity" },
+        ].map((l) => (
+          <Link
+            key={l.href}
+            href={l.href}
+            className="rounded-full border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-edge-strong hover:text-ink"
+          >
+            {l.label}
+          </Link>
+        ))}
       </div>
 
-      <div className="mt-10 grid gap-10 lg:grid-cols-[210px_minmax(0,1fr)]">
-        <nav aria-label="Developer sections" className="lg:sticky lg:top-24 lg:self-start">
+      <div className="mt-8 grid min-w-0 grid-cols-1 gap-4 lg:mt-10 lg:grid-cols-[210px_minmax(0,1fr)] lg:gap-10">
+        <nav aria-label="Developer sections" className="min-w-0 lg:sticky lg:top-24 lg:self-start">
           <ul className="hidden lg:block">
             {SECTIONS.map((s, i) => (
               <li key={s.id}>
@@ -236,25 +256,32 @@ export default function DevelopersPage() {
               </li>
             ))}
           </ul>
-          {/* Phone: a swipeable section strip instead of four stacked rows of chips. */}
-          <ul
-            className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:hidden"
-            aria-label="Developer sections, compact"
-          >
-            {SECTIONS.map((s) => (
-              <li key={s.id} className="shrink-0 snap-start">
-                <a
-                  href={`#${s.id}`}
-                  className="inline-block whitespace-nowrap rounded-full border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-edge-strong hover:text-ink"
-                >
-                  {s.label}
-                </a>
-              </li>
-            ))}
-          </ul>
+          {/* Phone: every section listed at once, nothing hidden off-screen. */}
+          <details className="group rounded-xl border border-edge bg-panel px-3.5 py-3 lg:hidden">
+            <summary className="flex list-none items-center justify-between gap-3 text-[13px] font-medium text-ink [&::-webkit-details-marker]:hidden">
+              <span className="flex items-center gap-2">
+                <span className="x-chev" aria-hidden />
+                Jump to section
+              </span>
+              <span className="tabular text-[11px] font-normal text-ink-faint">{SECTIONS.length} sections</span>
+            </summary>
+            <ul className="mt-3 grid grid-cols-2 gap-2">
+              {SECTIONS.map((s, i) => (
+                <li key={s.id}>
+                  <a
+                    href={`#${s.id}`}
+                    className="block rounded-lg border border-edge bg-panel-2 px-2.5 py-2 text-[12px] leading-snug text-ink-soft transition-colors hover:border-edge-strong hover:text-ink"
+                  >
+                    <span className="tabular mr-1.5 text-[10px] text-ink-faint">{String(i + 1).padStart(2, "0")}</span>
+                    {s.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </details>
         </nav>
 
-        <div className="min-w-0 space-y-12">
+        <div className="min-w-0 space-y-4">
           {/* ------------------------------------------------ 1 */}
           <Section id="getting-started" n="01" title="Getting started">
             <P>
@@ -587,9 +614,8 @@ PAYMENT-REQUIRED: eyJ4NDAyVmVyc2lvbiI6Mi...
             </P>
           </Section>
 
-          <p className="x-label pt-6">
-            SOURCES · OFFICIAL TELEGRAPH DOCS (DOCS.TELEGRAPHPROTOCOL.COM, NOV 2026) · THE IMPLEMENTED CONTRACTS IN
-            THIS REPO · LIVE TESTNET NODE
+          <p className="x-label rounded-xl border border-dashed border-edge px-4 py-3 leading-relaxed">
+            SOURCES · OFFICIAL TELEGRAPH DOCS · THE CONTRACTS IN THIS REPO · LIVE TESTNET NODE
           </p>
         </div>
       </div>

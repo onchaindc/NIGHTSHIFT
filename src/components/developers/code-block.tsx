@@ -36,7 +36,9 @@ export function CodeBlock({ code, title, lang }: { code: string; title?: string;
           {copied ? "Copied" : "Copy"}
         </button>
       </figcaption>
-      <pre className="max-h-[26rem] overflow-auto px-4 py-3.5 text-[12.5px] leading-relaxed text-ink-soft">
+      {/* Phones: code wraps, so no line is hidden behind a horizontal scroll.
+          From sm up the original formatting and overflow are preserved. */}
+      <pre className="max-h-[26rem] overflow-x-auto whitespace-pre-wrap break-words px-4 py-3.5 text-[12px] leading-relaxed text-ink-soft sm:text-[12.5px] [&_code]:[overflow-wrap:anywhere] sm:[&_code]:[overflow-wrap:normal]">
         <code>{code}</code>
       </pre>
     </figure>
