@@ -112,7 +112,7 @@ export default async function OverviewPage() {
             <NetworkBadge live={miners.status === "ok" && validators.status === "ok" && intents.status === "ok"} />
           </div>
           <h1 className="x-display-hero mt-6 max-w-[26ch] text-ink">
-            A network that <span className="italic text-amber-soft">answers on demand</span>.
+            A network that <span className="italic text-amber-deep">answers on demand</span>.
           </h1>
           <p className="mt-6 max-w-[62ch] text-[15px] leading-relaxed text-ink-soft">
             Telegraph is an open, intent-based intelligence network. Miners register to answer specific kinds of

@@ -400,7 +400,7 @@ function WatchRow({
         </div>
         {awaitingApprovalTaskId && (
           <div className="mt-2.5 rounded-md border border-amber/40 bg-amber/5 px-3 py-2.5">
-            <p className="text-[12.5px] leading-relaxed text-amber-soft">
+            <p className="text-[12.5px] leading-relaxed text-amber-deep">
               The check + investigation plan is built and waiting for your approval before anything is paid. The
               operation keeps its own task page the whole way through.
             </p>
