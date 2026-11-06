@@ -479,7 +479,7 @@ export default function TerminalClient({
                     setChallenge(null);
                     setMinerId(null);
                   }}
-                  className={`rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors ${mode === m ? "bg-panel-3 text-ink" : "text-ink-faint hover:text-ink-soft"}`}
+                  className={`rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-all ${mode === m ? "bg-panel text-ink shadow-[0_1px_2px_rgba(22,24,29,0.10)] ring-1 ring-edge" : "text-ink-faint hover:text-ink-soft"}`}
                 >
                   {m === "guided" ? "Guided" : "Advanced JSON"}
                 </button>

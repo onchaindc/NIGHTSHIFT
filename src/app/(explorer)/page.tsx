@@ -106,21 +106,21 @@ export default async function OverviewPage() {
     <div>
       {/* Hero */}
       <section className="border-b border-edge">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-24">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:py-24">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <p className="x-tag">NIGHTSHIFT · TELEGRAPH PROTOCOL REGISTRY</p>
             <NetworkBadge live={miners.status === "ok" && validators.status === "ok" && intents.status === "ok"} />
           </div>
-          <h1 className="x-display-hero mt-6 max-w-[26ch] text-ink">
+          <h1 className="x-display-hero mt-5 max-w-[26ch] text-balance text-ink sm:mt-6">
             A network that <span className="italic text-amber-deep">answers on demand</span>.
           </h1>
-          <p className="mt-6 max-w-[62ch] text-[15px] leading-relaxed text-ink-soft">
+          <p className="mt-5 max-w-[62ch] text-[15px] leading-relaxed text-pretty text-ink-soft sm:mt-6">
             Telegraph is an open, intent-based intelligence network. Miners register to answer specific kinds of
             questions, called intents, for a per-request price settled with x402. Scoring each epoch keeps ranking
             aligned with answer quality. This explorer reads the public registries and shows who is on the network,
             what they do, and what an ask costs today.
           </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
+          <div className="mt-7 flex flex-wrap items-center gap-3 sm:mt-8">
             <Link href="/miners" className="btn-primary !min-h-11">
               Browse miners
               <ArrowRight size={14} aria-hidden />
@@ -135,8 +135,8 @@ export default async function OverviewPage() {
       {/* Live band */}
       {counts.some((c) => c.value !== null) && (
         <section className="border-b border-edge bg-panel/40">
-          <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-4 sm:divide-x sm:divide-edge">
+          <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-7 sm:grid-cols-4 sm:divide-x sm:divide-edge sm:gap-y-8">
               {counts.map((c) => (
                 <Link key={c.label} href={c.href} className="group">
                   <p className="tabular text-[30px] font-semibold leading-none text-ink">
@@ -153,15 +153,15 @@ export default async function OverviewPage() {
 
       {/* Roles */}
       <section className="border-b border-edge">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-24">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:py-24">
           <p className="x-tag">THE PARTICIPANTS</p>
           <h2 className="x-display-1 mt-4 max-w-2xl text-ink">Four roles, one contract</h2>
-          <div className="mt-10 grid gap-4 lg:grid-cols-2">
+          <div className="mt-8 grid gap-3 sm:mt-10 sm:gap-4 lg:grid-cols-2">
             {roles.map((r) => (
               <Link
                 key={r.title}
                 href={r.href}
-                className="group rounded-lg border border-edge bg-panel p-6 transition-colors hover:border-edge-strong"
+                className="group rounded-xl border border-edge bg-panel p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-edge-strong hover:shadow-[0_6px_18px_-10px_rgba(22,24,29,0.35)] sm:p-6"
               >
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-[15.5px] font-semibold text-ink">{r.title}</h3>
@@ -176,7 +176,7 @@ export default async function OverviewPage() {
 
       {/* Live challenge */}
       <section className="border-b border-edge bg-panel/40">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
           <p className="x-tag">NS/01 · WHAT AN ASK COSTS · RIGHT NOW</p>
           <h2 className="x-display-1 mt-4 max-w-2xl text-ink">One challenge, at market</h2>
           <div className="mt-8">
@@ -187,8 +187,8 @@ export default async function OverviewPage() {
 
       {/* Terminal teaser */}
       <section className="border-b border-edge">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-24">
-          <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16 lg:py-24">
+          <div className="grid gap-6 sm:gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
             <div>
               <p className="x-tag">NS/02 · THE INTERACTIVE TERMINAL</p>
               <h2 className="x-display-2 mt-4 max-w-[36ch] text-ink">Beyond reading: the interactive terminal.</h2>

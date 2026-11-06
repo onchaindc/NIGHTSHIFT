@@ -57,6 +57,9 @@
 
 html {
   color-scheme: light;
+  /* A single stray wide child must never shift the whole page sideways on a
+     phone. clip (not hidden) keeps sticky headers and anchor scrolling intact. */
+  overflow-x: clip;
 }
 
 body {
@@ -67,6 +70,10 @@ body {
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overflow-x: clip;
+  /* Long registry tokens (hashes, URLs, intent names) wrap instead of pushing
+     their container wider than the screen. */
+  overflow-wrap: break-word;
 }
 
 ::selection {
@@ -171,24 +178,34 @@ textarea {
 .btn-primary {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
   min-height: 2.5rem;
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   background: var(--color-ink);
   color: var(--color-night);
   padding: 0 1.25rem;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  box-shadow:
+    0 1px 2px rgba(22, 24, 29, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
   transition:
     background-color 0.15s ease,
+    box-shadow 0.15s ease,
     transform 0.15s ease;
 }
 .btn-primary:hover {
   background: #2b2f36;
+  box-shadow:
+    0 3px 10px rgba(22, 24, 29, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transform: translateY(-1px);
 }
 .btn-primary:active {
-  transform: translateY(1px);
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(22, 24, 29, 0.16);
 }
 .btn-primary:disabled {
   opacity: 0.45;
@@ -199,9 +216,10 @@ textarea {
 .btn-signal {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.45rem;
   min-height: 2.5rem;
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   border: 1px solid rgba(15, 118, 110, 0.5);
   background: rgba(15, 118, 110, 0.08);
   color: var(--color-teal);
@@ -226,21 +244,27 @@ textarea {
 .btn-quiet {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem;
   min-height: 2.5rem;
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   border: 1px solid var(--color-edge);
   background: var(--color-panel);
   color: var(--color-ink-soft);
   padding: 0 0.9rem;
   font-size: 13px;
+  box-shadow: 0 1px 1px rgba(22, 24, 29, 0.04);
   transition:
     color 0.15s ease,
-    border-color 0.15s ease;
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 .btn-quiet:hover {
   border-color: var(--color-edge-strong);
   color: var(--color-ink);
+  box-shadow: 0 2px 6px rgba(22, 24, 29, 0.07);
+  transform: translateY(-1px);
 }
 .btn-quiet:disabled {
   opacity: 0.5;

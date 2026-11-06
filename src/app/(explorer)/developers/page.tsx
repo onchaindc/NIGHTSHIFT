@@ -155,7 +155,7 @@ function Api({ method, path, access, children }: { method: string; path: string;
         >
           {method}
         </span>
-        <code className="tabular text-[12.5px] text-ink">{path}</code>
+        <code className="tabular min-w-0 break-all text-[12.5px] text-ink">{path}</code>
         <span className="rounded-full border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-ink-faint">{access}</span>
       </p>
       <p className="mt-1.5 text-[12.5px] leading-relaxed">{children}</p>
@@ -236,12 +236,16 @@ export default function DevelopersPage() {
               </li>
             ))}
           </ul>
-          <ul className="flex flex-wrap gap-2 lg:hidden" aria-label="Developer sections, compact">
+          {/* Phone: a swipeable section strip instead of four stacked rows of chips. */}
+          <ul
+            className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:hidden"
+            aria-label="Developer sections, compact"
+          >
             {SECTIONS.map((s) => (
-              <li key={s.id} className="shrink-0">
+              <li key={s.id} className="shrink-0 snap-start">
                 <a
                   href={`#${s.id}`}
-                  className="inline-block whitespace-nowrap rounded-full border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:text-ink"
+                  className="inline-block whitespace-nowrap rounded-full border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-edge-strong hover:text-ink"
                 >
                   {s.label}
                 </a>

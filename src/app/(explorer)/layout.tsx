@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { NavLinks } from "@/components/explorer/nav-links";
+
 export const metadata: Metadata = {
   title: {
     default: "NIGHTSHIFT Explorer",
@@ -30,17 +32,11 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
             NIGHTSHIFT
           </Link>
           <span aria-hidden className="hidden h-3.5 w-px bg-edge-strong sm:block" />
-          {/* Mobile: the items WRAP into clean rows instead of scrolling sideways. */}
-          <nav aria-label="Primary" className="order-3 -mx-1 flex w-full flex-wrap gap-1 sm:order-2 sm:mx-0 sm:w-auto">
-            {NAV.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className="whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] leading-5 text-ink-soft transition-colors hover:bg-panel-3 hover:text-ink"
-              >
-                {l.label}
-              </Link>
-            ))}
+          {/* Mobile: the items WRAP into clean rows instead of scrolling sideways.
+              No negative margins here: w-full plus -mx made every page 8px wider
+              than the viewport, which is what pulled the layout left on phones. */}
+          <nav aria-label="Primary" className="order-3 flex w-full min-w-0 flex-wrap gap-1 sm:order-2 sm:w-auto">
+            <NavLinks items={NAV} />
           </nav>
           <div className="ml-auto order-2 sm:order-3">
             <Link href="/terminal" className="btn-quiet !min-h-8 !px-3 !text-[12px] !text-amber">
@@ -53,12 +49,9 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
       <footer className="border-t border-edge">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-3 px-4 py-6 sm:px-6">
           <p className="x-tag">NIGHTSHIFT · TELEGRAPH NETWORK EXPLORER</p>
-          <div className="ml-auto flex items-center gap-5">
-            {NAV.slice(1).map((l) => (
-              <Link key={l.href} href={l.href} className="text-[12px] text-ink-soft transition-colors hover:text-amber">
-                {l.label}
-              </Link>
-            ))}
+          {/* Seven links cannot sit on one phone row: they wrap instead of widening the page. */}
+          <div className="flex w-full flex-wrap items-center gap-x-5 gap-y-2 sm:ml-auto sm:w-auto">
+            <NavLinks items={NAV.slice(1)} variant="footer" />
           </div>
         </div>
       </footer>
