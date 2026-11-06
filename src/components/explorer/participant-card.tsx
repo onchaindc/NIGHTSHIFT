@@ -12,16 +12,24 @@ export function ParticipantCard({ participant }: { participant: NetworkMiner }) 
   return (
     <Link
       href={`/miners/${participant.slug}`}
-      className="group block rounded-lg border border-edge bg-panel p-5 transition-colors hover:border-edge-strong"
+      className="group block min-w-0 rounded-xl border border-edge bg-panel p-5 transition-all duration-200 hover:border-edge-strong hover:shadow-[0_6px_18px_-12px_rgba(22,24,29,0.35)]"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate text-[14.5px] font-semibold text-ink">{participant.name}</h3>
+          {/* Two lines instead of a hard ellipsis: long registry names stay readable
+              without reinstating the nowrap that widened the column. */}
+          <h3 className="line-clamp-2 text-[14.5px] font-semibold leading-snug text-ink transition-colors group-hover:text-teal">
+            {participant.name}
+          </h3>
           <p className="tabular mt-0.5 text-[11px] text-ink-faint">
             {participant.protocol} · {participant.slug}
           </p>
         </div>
-        {price && <span className="tabular shrink-0 rounded bg-panel-3 px-2 py-1 text-[11.5px] font-medium text-teal">{price} min</span>}
+        {price && (
+          <span className="tabular shrink-0 rounded-md border border-teal/20 bg-teal/5 px-2 py-1 text-[11.5px] font-medium text-teal">
+            {price} min
+          </span>
+        )}
       </div>
       {participant.description && (
         <p className="mt-2.5 line-clamp-2 text-[12.5px] leading-relaxed text-ink-soft">{participant.description}</p>

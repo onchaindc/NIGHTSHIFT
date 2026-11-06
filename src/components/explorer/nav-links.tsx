@@ -4,39 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /**
- * Explorer navigation. Client-side only for the active state: the current
- * route is marked with a real aria-current and a filled pill, so the primary
- * tabs read as tabs instead of repeating eight identical links.
+ * Explorer tabs. Client-side only for the active state: the current route is
+ * marked with a real aria-current and a filled pill, so the primary navigation
+ * reads as tabs instead of eight identical links.
  */
-export function NavLinks({
-  items,
-  variant = "header",
-}: {
-  items: { href: string; label: string }[];
-  variant?: "header" | "footer";
-}) {
+export function NavLinks({ items }: { items: { href: string; label: string }[] }) {
   const pathname = usePathname();
 
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
-
-  if (variant === "footer") {
-    return (
-      <>
-        {items.map((l) => (
-          <Link
-            key={l.href}
-            href={l.href}
-            aria-current={isActive(l.href) ? "page" : undefined}
-            className={`text-[12px] transition-colors hover:text-amber ${
-              isActive(l.href) ? "text-ink" : "text-ink-soft"
-            }`}
-          >
-            {l.label}
-          </Link>
-        ))}
-      </>
-    );
-  }
 
   return (
     <>

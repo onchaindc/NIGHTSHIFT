@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
 
 import { NavLinks } from "@/components/explorer/nav-links";
 
@@ -22,6 +23,22 @@ const NAV = [
   { href: "/activity", label: "Activity" },
   { href: "/developers", label: "Developers" },
 ];
+
+/** Footer link: a plain reference, marked as leaving the app only when it does. */
+function Ext({ href, children }: { href: string; children: React.ReactNode }) {
+  const external = href.startsWith("http");
+  return (
+    <a
+      href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noopener noreferrer" : undefined}
+      className="inline-flex items-center gap-1 text-ink-soft underline-offset-4 transition-colors hover:text-amber hover:underline"
+    >
+      {children}
+      {external && <ArrowUpRight size={11} aria-hidden className="shrink-0 text-ink-faint" />}
+    </a>
+  );
+}
 
 export default function ExplorerLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -46,12 +63,61 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
         </div>
       </header>
       <main className="flex-1">{children}</main>
-      <footer className="border-t border-edge">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-3 px-4 py-6 sm:px-6">
-          <p className="x-tag">NIGHTSHIFT · TELEGRAPH NETWORK EXPLORER</p>
-          {/* Seven links cannot sit on one phone row: they wrap instead of widening the page. */}
-          <div className="flex w-full flex-wrap items-center gap-x-5 gap-y-2 sm:ml-auto sm:w-auto">
-            <NavLinks items={NAV.slice(1)} variant="footer" />
+      {/* Footer is a colophon, not a second navigation bar: brand and what this
+          deployment is, the protocol's real published surfaces, and the
+          machine-readable endpoints this app actually exposes. */}
+      <footer className="border-t border-edge bg-panel/50">
+        <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+          <div className="grid gap-8 sm:grid-cols-[1.5fr_1fr_1fr] sm:gap-10">
+            <div>
+              <p className="text-[13px] font-bold tracking-[0.22em] text-ink">NIGHTSHIFT</p>
+              <p className="mt-3 max-w-[46ch] text-[12.5px] leading-relaxed text-ink-soft">
+                A clear view of the Telegraph network — who is on it, what they answer, and what an ask costs today.
+                Every figure is read from the public registries; nothing is cached into a claim.
+              </p>
+              <p className="mt-4 inline-flex items-center gap-2">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-teal" />
+                <span className="x-label">Registries read live</span>
+              </p>
+            </div>
+
+            <div>
+              <p className="x-label">Protocol</p>
+              <ul className="mt-3 space-y-2.5 text-[12.5px]">
+                <li>
+                  <Ext href="https://docs.telegraphprotocol.com">Official documentation</Ext>
+                </li>
+                <li>
+                  <Ext href="https://devnode.telegraphprotocol.com/engine/v1/intents">Node API · testnet</Ext>
+                </li>
+                <li>
+                  <Ext href="https://devnode.telegraphprotocol.com/daemon/health">Daemon health</Ext>
+                </li>
+              </ul>
+            </div>
+
+            <div>
+              <p className="x-label">Machine-readable</p>
+              <ul className="mt-3 space-y-2.5 text-[12.5px]">
+                <li>
+                  <Ext href="/api/status">Integration & store status</Ext>
+                </li>
+                <li>
+                  <Ext href="/api/network">Registry aggregates</Ext>
+                </li>
+                <li>
+                  <Link href="/terminal" className="text-ink-soft underline-offset-4 transition-colors hover:text-amber hover:underline">
+                    Run an ask in the Terminal
+                  </Link>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-edge pt-5">
+            <p className="x-tag">© 2026 NIGHTSHIFT</p>
+            <p className="x-tag">PUBLIC TELEGRAPH REGISTRIES · NO OPERATOR DATA</p>
+            <p className="x-tag sm:ml-auto">x402 SETTLEMENT · TESTNET</p>
           </div>
         </div>
       </footer>
