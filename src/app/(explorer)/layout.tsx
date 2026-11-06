@@ -18,6 +18,7 @@ const NAV = [
   { href: "/intents", label: "Intents" },
   { href: "/signals", label: "Signals" },
   { href: "/activity", label: "Activity" },
+  { href: "/developers", label: "Developers" },
 ];
 
 export default function ExplorerLayout({ children }: { children: React.ReactNode }) {

@@ -252,6 +252,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 - `GET /signals`: Telegraph Daemon signal feed (search, filters, live refresh)
 - `GET /signals/<signal_hash>`: one stored signal recording, as the node records it
 - `GET /api/daemon/signals`: lean JSON relay of the Daemon feed for polling
+- `GET /developers`: developer centre — official-docs-grounded integration guide (API reference, SDKs, MCP, payments, examples, network role guides)
 - `GET /activity`: the activity centre (recorded requests, payments, receipts)
 - `GET /activity/<task_id>`: one activity record — request, outcome, payments, receipts
 - `GET /history`: filtered work history (status groups, test records separated and labeled)
