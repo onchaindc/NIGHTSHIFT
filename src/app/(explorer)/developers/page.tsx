@@ -132,7 +132,7 @@ const REPO_TERMINAL = `curl https://<this-deployment>/api/terminal/verify \\
 
 function Section({ id, n, title, children }: { id: string; n: string; title: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="scroll-mt-28 border-t border-edge pt-10">
+    <section id={id} className="scroll-mt-40 border-t border-edge pt-10 lg:scroll-mt-28">
       <p className="x-label">SECTION {n}</p>
       <h2 className="x-display-2 mt-2 text-ink">{title}</h2>
       <div className="mt-4 max-w-[76ch] space-y-5 text-[13.5px] leading-relaxed text-ink-soft">{children}</div>
@@ -236,7 +236,7 @@ export default function DevelopersPage() {
               </li>
             ))}
           </ul>
-          <ul className="flex gap-2 overflow-x-auto pb-1 lg:hidden" aria-label="Developer sections, compact">
+          <ul className="flex flex-wrap gap-2 lg:hidden" aria-label="Developer sections, compact">
             {SECTIONS.map((s) => (
               <li key={s.id} className="shrink-0">
                 <a

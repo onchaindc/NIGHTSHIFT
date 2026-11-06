@@ -76,7 +76,7 @@ export default async function SignalDetailPage({ params }: { params: Promise<{ i
         )}
       </p>
 
-      <div className="mt-8 grid gap-4 lg:grid-cols-2">
+      <div className="mt-8 grid gap-5 lg:grid-cols-2 lg:gap-4">
         {/* Question */}
         {q && (q.text || q.category) && (
           <section className="rounded-lg border border-edge bg-panel p-5 sm:col-span-2">
