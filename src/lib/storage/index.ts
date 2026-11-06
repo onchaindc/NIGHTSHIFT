@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { TaskRecord } from "@/lib/engine/types";
 import type { WatchConfig } from "@/lib/watch/types";
-import { dbClose, dbHealth, dbSql, isDatabaseConfigured } from "@/lib/db/client";
+import { dbClose, dbHealth, dbMigrate, dbSql, isDatabaseConfigured, resolveDatabase } from "@/lib/db/client";
 
 /**
  * Swappable persistence backend for every durable store in the app:
@@ -390,16 +390,18 @@ class PostgresPersistence implements Persistence {
   async ready(): Promise<void> {
     if (this.migrated) return;
     if (!isDatabaseConfigured()) throw new Error("postgres persistence requested without a database URL");
+    const resolved = await resolveDatabase();
+    if (!resolved.ok) {
+      const detail = resolved.tried.map((t) => `${t.host} (${t.error ?? "unreachable"})`).join(", ");
+      throw new Error(`database unreachable: ${detail || "no URL configured"}`);
+    }
     await this.migrate();
   }
   private async migrate(): Promise<void> {
-    const client = dbSql();
-    await client`create table if not exists ns_migrations (
-      version integer primary key,
-      name text not null,
-      applied_at timestamptz not null default now()
-    )`;
-    await client.unsafe(`select 1`); // no-op touch: fail fast if unreachable
+    // Apply the REAL versioned schema (ns_tasks, ns_watches, ns_kv, indexes),
+    // not just the ledger: a brand-new database must be usable on first query
+    // without anyone remembering to run the CLI. Idempotent by construction.
+    await dbMigrate();
     this.migrated = true;
   }
   async health(): Promise<"ok" | "unreachable" | "unconfigured"> {

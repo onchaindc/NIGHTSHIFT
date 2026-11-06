@@ -11,24 +11,65 @@ import postgres from "postgres";
  * never opens a socket.
  */
 
+/**
+ * Every configured Postgres URL, in preference order, de-duplicated.
+ * A deployment can legitimately carry more than one (a pooled URL, a direct
+ * URL, an environment-specific override); the store connects to whichever
+ * one actually answers instead of dying on a stale entry.
+ */
+function candidateUrls(): string[] {
+  const configured = [process.env.NIGHTSHIFT_DATABASE_URL, process.env.DATABASE_URL]
+    .map((v) => (v ?? "").trim())
+    .filter(Boolean);
+  // The direct/unpooled twin is only a fallback: when both primary variables are
+  // blank the deployment has deliberately opted out of Postgres (tests, local
+  // file store), and a leftover variable must not overrule that.
+  const fallback = configured.length > 0 ? [(process.env.DATABASE_URL_UNPOOLED ?? "").trim()] : [];
+  return [...configured, ...fallback].filter((v, i, all) => v.length > 0 && all.indexOf(v) === i);
+}
+
+/** Active URL chosen by the last successful probe (per process). */
+function activeUrl(): string | undefined {
+  return g.__nightshiftActiveUrl ?? candidateUrls()[0];
+}
+
 export function databaseUrl(): string | undefined {
-  return (process.env.NIGHTSHIFT_DATABASE_URL || process.env.DATABASE_URL || "").trim() || undefined;
+  return activeUrl();
 }
 
 export function isDatabaseConfigured(): boolean {
-  return Boolean(databaseUrl());
+  return candidateUrls().length > 0;
 }
 
 interface PostgresGlobal {
   __nightshiftSql?: postgres.Sql;
+  __nightshiftActiveUrl?: string;
+  __nightshiftResolving?: Promise<DbResolution>;
 }
 
 const g = globalThis as typeof globalThis & PostgresGlobal;
 
+export interface DbResolution {
+  ok: boolean;
+  /** Host of the URL actually in use (never credentials). */
+  host: string | null;
+  /** Every candidate tried, host + failure class only. */
+  tried: Array<{ host: string; ok: boolean; error?: string }>;
+}
+
+/** Hostname only: safe to log and to surface in status responses. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "(unparseable url)";
+  }
+}
+
 /** Lazy shared client; never opens a connection until a query runs. */
 function sql(): postgres.Sql {
   if (g.__nightshiftSql) return g.__nightshiftSql;
-  const url = databaseUrl();
+  const url = activeUrl();
   if (!url) throw new Error("no database configured: NIGHTSHIFT_DATABASE_URL / DATABASE_URL is missing");
   g.__nightshiftSql = postgres(url, {
     max: 1, // serverless-safe: one connection per runtime, pooled upstream
@@ -40,9 +81,54 @@ function sql(): postgres.Sql {
   return g.__nightshiftSql;
 }
 
+/**
+ * Picks the first configured URL that answers `select 1`, once per process.
+ * Probes are read-only and short-lived; a failed candidate is reported by
+ * hostname and error code only. Never throws.
+ */
+export function resolveDatabase(): Promise<DbResolution> {
+  if (g.__nightshiftResolving) return g.__nightshiftResolving;
+  g.__nightshiftResolving = (async (): Promise<DbResolution> => {
+    const urls = candidateUrls();
+    if (urls.length === 0) return { ok: false, host: null, tried: [] };
+    const tried: DbResolution["tried"] = [];
+    for (const url of urls) {
+      const host = hostOf(url);
+      let probe: postgres.Sql | undefined;
+      try {
+        probe = postgres(url, {
+          max: 1,
+          prepare: false,
+          connect_timeout: 8,
+          idle_timeout: 0,
+          onnotice: () => {},
+        });
+        await probe`select 1`;
+        tried.push({ host, ok: true });
+        g.__nightshiftActiveUrl = url;
+        if (g.__nightshiftSql && g.__nightshiftSql !== probe) {
+          await g.__nightshiftSql.end({ timeout: 5 }).catch(() => undefined);
+        }
+        g.__nightshiftSql = probe;
+        return { ok: true, host, tried };
+      } catch (err) {
+        const code =
+          typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : "error";
+        tried.push({ host, ok: false, error: code });
+        console.error(`database candidate ${host} unavailable: ${code}`);
+        if (probe) await probe.end({ timeout: 2 }).catch(() => undefined);
+      }
+    }
+    return { ok: false, host: null, tried };
+  })();
+  return g.__nightshiftResolving;
+}
+
 /** Cheap connectivity probe for /api/status (never throws). */
 export async function dbHealth(): Promise<"ok" | "unreachable"> {
   try {
+    const resolved = await resolveDatabase();
+    if (!resolved.ok) return "unreachable";
     await sql()`select 1`;
     return "ok";
   } catch (err) {
@@ -57,6 +143,9 @@ export async function dbClose(): Promise<void> {
     await g.__nightshiftSql.end({ timeout: 5 }).catch(() => undefined);
     g.__nightshiftSql = undefined;
   }
+  // Let the next caller re-probe candidates (CLI and tests run repeatedly).
+  g.__nightshiftResolving = undefined;
+  g.__nightshiftActiveUrl = undefined;
 }
 
 /* ------------------------------------------------------------------ */
@@ -111,6 +200,11 @@ export const MIGRATIONS: Array<{ version: number; name: string; statements: stri
  * idempotent, and each applied version is recorded exactly once.
  */
 export async function dbMigrate(): Promise<Array<{ version: number; name: string }>> {
+  const resolved = await resolveDatabase();
+  if (!resolved.ok) {
+    const detail = resolved.tried.map((t) => `${t.host}: ${t.error ?? "unknown"}`).join("; ");
+    throw new Error(`no reachable database (${detail || "nothing configured"})`);
+  }
   const client = sql();
   const applied: Array<{ version: number; name: string }> = [];
   await client`create table if not exists ns_migrations (
