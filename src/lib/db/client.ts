@@ -57,6 +57,27 @@ export interface DbResolution {
   tried: Array<{ host: string; ok: boolean; error?: string }>;
 }
 
+/** Hard cap on a single candidate probe: DNS and TCP stalls included. */
+function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error(label) as Error & { code?: string };
+      err.code = "timeout";
+      reject(err);
+    }, ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err as Error);
+      },
+    );
+  });
+}
+
 /** Hostname only: safe to log and to surface in status responses. */
 function hostOf(url: string): string {
   try {
@@ -99,11 +120,11 @@ export function resolveDatabase(): Promise<DbResolution> {
         probe = postgres(url, {
           max: 1,
           prepare: false,
-          connect_timeout: 8,
+          connect_timeout: 6,
           idle_timeout: 0,
           onnotice: () => {},
         });
-        await probe`select 1`;
+        await withTimeout(probe`select 1`, 7000, "probe timeout");
         tried.push({ host, ok: true });
         g.__nightshiftActiveUrl = url;
         if (g.__nightshiftSql && g.__nightshiftSql !== probe) {
@@ -116,7 +137,13 @@ export function resolveDatabase(): Promise<DbResolution> {
           typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : "error";
         tried.push({ host, ok: false, error: code });
         console.error(`database candidate ${host} unavailable: ${code}`);
-        if (probe) await probe.end({ timeout: 2 }).catch(() => undefined);
+        if (probe) {
+          try {
+            await withTimeout(probe.end({ timeout: 2 }), 2500, "close timeout");
+          } catch {
+            /* a failed probe's socket may already be gone */
+          }
+        }
       }
     }
     return { ok: false, host: null, tried };

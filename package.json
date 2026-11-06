@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit",
-    "db:migrate": "bun scripts/db-migrate.ts"
+    "db:migrate": "bun scripts/db-migrate.ts",
+    "db:verify": "bun scripts/db-verify.ts"
   },
   "dependencies": {
     "@neon/config": "^1.9.6",
