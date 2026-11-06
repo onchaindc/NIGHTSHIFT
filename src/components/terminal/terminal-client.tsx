@@ -178,6 +178,9 @@ export default function TerminalClient({
   const [failure, setFailure] = useState<{ heading: string; detail: string; node?: unknown } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyStatus, setVerifyStatus] = useState<{ kind: "verified" | "recorded" | "unverified"; note: string } | null>(null);
+  // Phase 5b: whether the execute route could durably record this attempt in
+  // the activity store. Reported exactly as answered: saved, or NOT saved.
+  const [activitySaved, setActivitySaved] = useState<{ id?: string; saved: boolean; detail?: string } | null>(null);
   const [log, setLog] = useState<Array<{ ts: number; text: string; tone: "info" | "warn" | "bad" | "good" }>>([]);
 
   const pushLog = useCallback((text: string, tone: "info" | "warn" | "bad" | "good" = "info") => {
@@ -348,6 +351,7 @@ export default function TerminalClient({
         body: JSON.stringify(payload),
       });
       const body = (await res.json()) as Record<string, unknown>;
+      setActivitySaved((body.activity as { id?: string; saved: boolean; detail?: string } | undefined) ?? null);
       if (body.status === "answered") {
         setAnswer({
           answer: body.answer as AnswerInfo,
@@ -758,6 +762,28 @@ export default function TerminalClient({
         </section>
       )}
 
+      {/* ---------------- activity record status (Phase 5b) ---------------- */}
+      {activitySaved && (
+        <p className="mt-4 max-w-[74ch] text-[12px] leading-relaxed">
+          {activitySaved.saved && activitySaved.id ? (
+            <>
+              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-teal align-middle" />
+              This attempt is recorded as durable activity:{" "}
+              <Link href={`/activity/${activitySaved.id}`} className="text-amber underline offset-2 hover:underline">
+                open it in the Activity centre
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-risk align-middle" />
+              This attempt could <strong className="text-ink">not</strong> be saved to the activity store
+              {activitySaved.detail ? ` (${activitySaved.detail})` : ""}. It stays visible in this session only — it is recorded nowhere else.
+            </>
+          )}
+        </p>
+      )}
+
       {/* ---------------- result ---------------- */}
       {answer && (
         <section className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -832,6 +858,28 @@ export default function TerminalClient({
             )}
           </section>
         </section>
+      )}
+
+      {/* ---------------- activity record status (Phase 5b) ---------------- */}
+      {activitySaved && (
+        <p className="mt-4 max-w-[74ch] text-[12px] leading-relaxed">
+          {activitySaved.saved && activitySaved.id ? (
+            <>
+              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-teal align-middle" />
+              Saved to the Activity centre as a durable record with its receipt and signal:{" "}
+              <Link href={`/activity/${activitySaved.id}`} className="text-amber underline offset-2 hover:underline">
+                /activity/ record
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-risk align-middle" />
+              This attempt could <strong className="text-ink">not</strong> be saved to the activity store
+              {activitySaved.detail ? ` (${activitySaved.detail})` : ""}. It stays visible in this session only — it is recorded nowhere else.
+            </>
+          )}
+        </p>
       )}
 
       {/* ---------------- log ---------------- */}

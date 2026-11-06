@@ -41,6 +41,10 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
   }
 
   const ledger = reconcileLedger(task);
+  // Phase 5b: interactive Terminal asks carry their own facts (intent, miner,
+  // request body, the user-approved offer). Render those instead of the
+  // planner-criteria block, which only an engine run has.
+  const terminal = task.jobType === "terminal_request" ? task.terminal ?? null : null;
   const entries = task.spend.entries ?? [];
   const intent = task.criteria.goalIntent ? INTENT_LABEL[task.criteria.goalIntent] ?? task.criteria.goalIntent : null;
   const primarySource = task.criteria.primarySource ?? null;
@@ -54,7 +58,7 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
         ← ACTIVITY
       </Link>
 
-      <p className="x-tag mt-4">ACTIVITY RECORD · {task.jobType === "protocol_watch" ? "WATCH RUN" : "TASK"}</p>
+      <p className="x-tag mt-4">ACTIVITY RECORD · {task.jobType === "protocol_watch" ? "WATCH RUN" : task.jobType === "terminal_request" ? "TERMINAL ASK" : "TASK"}</p>
       <h1 className="x-display-1 mt-3 max-w-[70ch] text-ink">{task.goal}</h1>
       <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-soft">
         <StatusChip state={task.state} />
@@ -70,16 +74,40 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
       <div className="mt-8 grid gap-4 lg:grid-cols-2">
         {/* Request */}
         <section className="rounded-lg border border-edge bg-panel p-5">
-          <p className="x-label">THE REQUEST</p>
+          <p className="x-label">{terminal ? "THE TERMINAL ASK" : "THE REQUEST"}</p>
           <dl className="mt-3 grid gap-x-8 gap-y-2 text-[13px]">
-            <Row k="Goal intent" v={intent ?? "not classified"} />
-            <Row
-              k="Answer source"
-              v={primarySource === "telegraph" ? "Paid Telegraph miner" : primarySource === "free" ? "Free sources and read-only chain access" : "Planner chose automatically"}
-            />
-            <Row k="Approval required" v={task.permissions.requiresApproval ? "Yes: a plan needs explicit approval before paid steps" : "No"} />
-            <Row k="Budget ceiling" v={`${money(task.spend.limitUsdCents)} (spend cap before execution)`} />
+            {terminal ? (
+              <>
+                <Row k="Intent" v={terminal.intent ?? "not stated by the response"} />
+                <Row k="Miner" v={terminal.miner ?? "not stated by the response"} />
+                {terminal.endpointPath && <Row k="Paid endpoint" v={terminal.endpointPath} mono />}
+                {terminal.offer && (
+                  <Row
+                    k="Approved offer"
+                    v={`${Number(terminal.offer.amount) / 10000} USDC to ${terminal.offer.payTo} on ${terminal.offer.network} (${terminal.offer.asset})`}
+                  />
+                )}
+                {terminal.payerAddress && <Row k="Payer (public address)" v={terminal.payerAddress} mono />}
+                {typeof terminal.durationMs === "number" && <Row k="Duration" v={`${terminal.durationMs} ms`} />}
+                {terminal.timestamp && <Row k="Node timestamp" v={terminal.timestamp} />}
+              </>
+            ) : (
+              <>
+                <Row k="Goal intent" v={intent ?? "not classified"} />
+                <Row
+                  k="Answer source"
+                  v={primarySource === "telegraph" ? "Paid Telegraph miner" : primarySource === "free" ? "Free sources and read-only chain access" : "Planner chose automatically"}
+                />
+                <Row k="Approval required" v={task.permissions.requiresApproval ? "Yes: a plan needs explicit approval before paid steps" : "No"} />
+                <Row k="Budget ceiling" v={`${money(task.spend.limitUsdCents)} (spend cap before execution)`} />
+              </>
+            )}
           </dl>
+          {terminal?.request != null && (
+            <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-md border border-edge bg-panel-3 p-3 text-[11.5px] leading-relaxed text-ink">
+              {typeof terminal.request === "string" ? terminal.request : JSON.stringify(terminal.request, null, 2)}
+            </pre>
+          )}
         </section>
 
         {/* Execution outcome */}
@@ -135,7 +163,9 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
                     <tr key={i} className="border-b border-edge/60 last:border-0">
                       <td className="py-2.5 pr-4 tabular text-ink">{money(e.amountUsdCents)}</td>
                       <td className="py-2.5 pr-4 text-ink-soft">USDC</td>
-                      <td className="py-2.5 pr-4 text-ink-soft">Base Sepolia (testnet)</td>
+                      <td className="tabular py-2.5 pr-4 text-ink-soft">
+                        {terminal?.offer?.network ?? "Base Sepolia (testnet)"}
+                      </td>
                       <td className="py-2.5 pr-4">
                         {e.txHash ? (
                           <a
@@ -197,6 +227,11 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
                 ) : null,
               )}
               <EvidenceList evidence={resultEvidence} />
+              {terminal?.settlementHeader && (
+                <div className="rounded-md border border-edge bg-panel-2 px-3.5 py-2.5 text-[12.5px]">
+                  <Row k="PAYMENT-RESPONSE (settlement proof, verbatim)" v={terminal.settlementHeader} mono />
+                </div>
+              )}
             </div>
           )}
         </section>

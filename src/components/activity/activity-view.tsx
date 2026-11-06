@@ -231,9 +231,11 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
               <StatusChip state={t.state} />
               <span className="min-w-0">
                 <span className={`${isTestRun(t) ? "text-ink-soft" : "text-ink"} block truncate text-[13.5px] transition group-hover:text-amber`}>{t.goal}</span>
-                {t.criteria.goalIntent && (
+                {t.criteria.goalIntent ? (
                   <span className="block text-[11px] text-ink-faint">{INTENT_LABELS[t.criteria.goalIntent]}</span>
-                )}
+                ) : t.terminal?.intent ? (
+                  <span className="block text-[11px] text-ink-faint">terminal ask · {t.terminal.intent.toLowerCase()}</span>
+                ) : null}
               </span>
               <span className="hidden items-baseline gap-3 tabular text-[11px] text-ink-faint sm:flex">
                 {(t.spend.entries?.length ?? 0) > 0 && (
