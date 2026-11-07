@@ -41,6 +41,19 @@ export function isDatabaseConfigured(): boolean {
   return candidateUrls().length > 0;
 }
 
+/**
+ * Connections per process. One is right for serverless, where many instances
+ * each hold a single connection. Tests and CLIs can raise it to exercise real
+ * concurrency: a one-connection pool serializes writers, so a concurrency test
+ * against it is not testing concurrency at all.
+ */
+function poolMax(): number {
+  const raw = Number(process.env.NIGHTSHIFT_DB_POOL_MAX ?? "");
+  if (!Number.isFinite(raw)) return 1;
+  const n = Math.floor(raw);
+  return n >= 1 && n <= 20 ? n : 1;
+}
+
 interface PostgresGlobal {
   __nightshiftSql?: postgres.Sql;
   __nightshiftActiveUrl?: string;
@@ -93,7 +106,7 @@ function sql(): postgres.Sql {
   const url = activeUrl();
   if (!url) throw new Error("no database configured: NIGHTSHIFT_DATABASE_URL / DATABASE_URL is missing");
   g.__nightshiftSql = postgres(url, {
-    max: 1, // serverless-safe: one connection per runtime, pooled upstream
+    max: poolMax(), // one per runtime by default: serverless-safe, pooled upstream
     prepare: false, // pgbouncer/Neon pooled endpoints do not support named prepared statements
     idle_timeout: 20,
     connect_timeout: 10,
@@ -108,8 +121,17 @@ function sql(): postgres.Sql {
  * hostname and error code only. Never throws.
  */
 export function resolveDatabase(): Promise<DbResolution> {
+  // Already connected in this process: answer from the live client.
+  if (g.__nightshiftSql && g.__nightshiftActiveUrl) {
+    const host = hostOf(g.__nightshiftActiveUrl);
+    return Promise.resolve({ ok: true, host, tried: [{ host, ok: true }] });
+  }
+  // Share one in-flight attempt between concurrent callers, but only while it
+  // is in flight. Keeping the settled promise would freeze the first outcome
+  // for the life of the process: one stalled probe or one unreachable moment
+  // would hang or fail every later request until a restart.
   if (g.__nightshiftResolving) return g.__nightshiftResolving;
-  g.__nightshiftResolving = (async (): Promise<DbResolution> => {
+  const attempt = (async (): Promise<DbResolution> => {
     const urls = candidateUrls();
     if (urls.length === 0) return { ok: false, host: null, tried: [] };
     const tried: DbResolution["tried"] = [];
@@ -118,7 +140,7 @@ export function resolveDatabase(): Promise<DbResolution> {
       let probe: postgres.Sql | undefined;
       try {
         probe = postgres(url, {
-          max: 1,
+          max: poolMax(),
           prepare: false,
           connect_timeout: 6,
           idle_timeout: 0,
@@ -148,7 +170,16 @@ export function resolveDatabase(): Promise<DbResolution> {
     }
     return { ok: false, host: null, tried };
   })();
-  return g.__nightshiftResolving;
+  g.__nightshiftResolving = attempt;
+  void attempt.then(
+    () => {
+      if (g.__nightshiftResolving === attempt) g.__nightshiftResolving = undefined;
+    },
+    () => {
+      if (g.__nightshiftResolving === attempt) g.__nightshiftResolving = undefined;
+    },
+  );
+  return attempt;
 }
 
 /** Cheap connectivity probe for /api/status (never throws). */
