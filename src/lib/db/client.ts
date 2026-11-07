@@ -107,6 +107,12 @@ function sql(): postgres.Sql {
   if (!url) throw new Error("no database configured: NIGHTSHIFT_DATABASE_URL / DATABASE_URL is missing");
   g.__nightshiftSql = postgres(url, {
     max: poolMax(), // one per runtime by default: serverless-safe, pooled upstream
+    // A pooled endpoint can accept a connection and then never answer (a
+    // cancelled serverless invocation can leave a transaction behind). Without
+    // these, the request hangs until the platform kills it and the caller sees
+    // nothing; with them it fails in seconds with a real error.
+    queue_timeout: 8_000,
+    connection: { statement_timeout: 12_000 },
     prepare: false, // pgbouncer/Neon pooled endpoints do not support named prepared statements
     idle_timeout: 20,
     connect_timeout: 10,
@@ -141,6 +147,8 @@ export function resolveDatabase(): Promise<DbResolution> {
       try {
         probe = postgres(url, {
           max: poolMax(),
+          queue_timeout: 6_000,
+          connection: { statement_timeout: 8_000 },
           prepare: false,
           connect_timeout: 6,
           idle_timeout: 0,
