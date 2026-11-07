@@ -6,7 +6,10 @@ import { AUDIT_LABEL } from "@/components/taskParts";
 import { listWatches } from "@/lib/watch/store";
 import type { TaskRecord } from "@/lib/engine/types";
 
-export const revalidate = 60;
+// This page renders live counts from the task store, so it must never be
+// prerendered: building it meant the build machine opened the database, and a
+// slow or unreachable store aborted the export and failed the whole build.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "NIGHTSHIFT",

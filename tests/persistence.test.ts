@@ -274,7 +274,9 @@ describe.skipIf(!dbUrl)("postgres backend: durability and atomicity", () => {
       ),
     );
     expect((await getTask(id))?.goal).toMatch(/^writer-[0-7]$/);
-  });
+    // Eight serialized writes against a remote pooled database need more than
+    // the default 5s; the assertion above is unchanged.
+  }, 30_000);
 
   it("a claimed telegram update is claimed exactly once under N parallel calls", async () => {
     const attempts = await Promise.all(
@@ -282,7 +284,7 @@ describe.skipIf(!dbUrl)("postgres backend: durability and atomicity", () => {
     );
     expect(attempts.filter(Boolean)).toHaveLength(1);
     expect(await isUpdateProcessed(ids.stamp)).toBe(true);
-  });
+  }, 30_000);
 
   it("named state round-trips through the database (jsonb in both directions)", async () => {
     const name = ids.lock.replace("p-pg-lock", "p-pg-kv");
