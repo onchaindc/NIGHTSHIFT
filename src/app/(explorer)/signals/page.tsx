@@ -29,7 +29,7 @@ export default async function SignalsPage({
           The Daemon&apos;s public feed could not be read, so no signals are listed rather than a cached or invented
           list. Detail: <span className="tabular text-[12px]">{fetched.detail}</span>
         </p>
-        <Link href="/" className="btn-quiet mt-6 !min-h-9">
+        <Link href="/network" className="btn-quiet mt-6 !min-h-9">
           Back to overview
         </Link>
       </div>

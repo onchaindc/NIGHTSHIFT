@@ -445,7 +445,7 @@ export default async function LandingPage() {
             </Link>
           </div>
           <p className="x-tag mt-10">
-            NIGHTSHIFT · NEON/POSTGRES · TELEGRAM RELAY · READ-ONLY VERIFICATION RPC
+            NIGHTSHIFT · POSTGRES · TELEGRAM RELAY · READ-ONLY VERIFICATION RPC
           </p>
         </div>
       </section>

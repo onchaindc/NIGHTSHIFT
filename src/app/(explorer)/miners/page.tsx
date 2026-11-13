@@ -36,7 +36,7 @@ export default async function MinersPage({
           The public node at devnode.telegraphprotocol.com could not be reached, so no miners are listed rather than a
           cached or invented list. Detail: <span className="tabular text-[12px]">{fetched.detail}</span>
         </p>
-        <Link href="/" className="btn-quiet mt-6 !min-h-9">
+        <Link href="/network" className="btn-quiet mt-6 !min-h-9">
           Back to overview
         </Link>
       </div>
@@ -51,7 +51,7 @@ export default async function MinersPage({
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The intent list could not be fetched, so miners cannot be grouped by intent right now. Retry shortly.
         </p>
-        <Link href="/" className="btn-quiet mt-6 !min-h-9">
+        <Link href="/network" className="btn-quiet mt-6 !min-h-9">
           Back to overview
         </Link>
       </div>

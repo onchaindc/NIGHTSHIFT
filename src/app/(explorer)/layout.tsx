@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 const NAV = [
-  { href: "/", label: "Overview" },
+  { href: "/network", label: "Network" },
   { href: "/miners", label: "Miners" },
   { href: "/evaluators", label: "Evaluators" },
   { href: "/validators", label: "Validators" },
@@ -45,7 +45,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
     <div className="flex min-h-dvh flex-col bg-night">
       <header className="sticky top-0 z-40 max-h-dvh overflow-y-auto border-b border-edge bg-night/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 sm:px-6">
-          <Link href="/" className="text-[13px] font-bold tracking-[0.22em] text-ink">
+          <Link href="/network" className="text-[13px] font-bold tracking-[0.22em] text-ink">
             NIGHTSHIFT
           </Link>
           <span aria-hidden className="hidden h-3.5 w-px bg-edge-strong sm:block" />
