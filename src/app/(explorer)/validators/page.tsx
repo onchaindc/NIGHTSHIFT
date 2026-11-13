@@ -16,7 +16,7 @@ export default async function ValidatorsPage() {
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The validator registry could not be read: <span className="tabular text-[12px]">{fetched.detail}</span>
         </p>
-        <Link href="/network" className="btn-quiet mt-6 !min-h-9">
+        <Link href="/" className="btn-quiet mt-6 !min-h-9">
           Back to overview
         </Link>
       </div>
