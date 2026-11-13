@@ -151,7 +151,7 @@ export default function TaskDetails({ id }: { id: string }) {
           record never existed. History always lists the real ids.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <Link href="/console" className="btn-quiet">
+          <Link href="/" className="btn-quiet">
             <ChevronLeft size={13} aria-hidden /> Overview
           </Link>
           <Link href="/history" className="btn-quiet">
