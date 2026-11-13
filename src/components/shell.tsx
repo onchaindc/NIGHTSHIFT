@@ -148,7 +148,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[236px] flex-col border-r border-edge bg-panel lg:flex">
         <div className="flex items-center gap-3 px-5 pb-6 pt-6">
-          <Link href="/" aria-label="NIGHTSHIFT overview" className="group flex items-center gap-3">
+          <Link href="/console" aria-label="NIGHTSHIFT overview" className="group flex items-center gap-3">
             <span aria-hidden className="grid h-9 w-9 place-items-center rounded-lg border border-amber/40 bg-amber/10">
               <Terminal size={15} strokeWidth={2} className="text-amber" />
             </span>
@@ -197,7 +197,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 {drawerOpen ? <X size={17} strokeWidth={1.8} /> : <Menu size={17} strokeWidth={1.8} />}
               </button>
               <Link
-                href="/"
+                href="/console"
                 aria-label="NIGHTSHIFT overview"
                 className="shrink-0 text-[12.5px] font-bold tracking-[0.18em] text-ink lg:hidden"
               >

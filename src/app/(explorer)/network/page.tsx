@@ -4,7 +4,7 @@ import { ArrowRight, CircleDollarSign, KeyRound, MousePointerClick } from "lucid
 import { fetchIntents, fetchLiveOffer, fetchMiners, fetchValidators, type LiveChallengeOffer } from "@/lib/explorer/network";
 import { NetworkBadge } from "@/components/explorer/network-badge";
 
-export const metadata = { title: "Overview" };
+export const metadata = { title: "Network" };
 export const dynamic = "force-dynamic";
 
 function microcents(usdc?: number) {

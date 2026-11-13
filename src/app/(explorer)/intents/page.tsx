@@ -19,7 +19,7 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
           The canonical intent list could not be fetched: <span className="tabular text-[12px]">{fetched.detail}</span>{" "}
           Nothing is shown rather than a cached or invented list.
         </p>
-        <Link href="/" className="btn-quiet mt-6 !min-h-9">Back to overview</Link>
+        <Link href="/network" className="btn-quiet mt-6 !min-h-9">Back to overview</Link>
       </div>
     );
   }
