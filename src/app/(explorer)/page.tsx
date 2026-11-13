@@ -205,11 +205,11 @@ export default async function OverviewPage() {
               <NetworkBadge live={allOk} />
             </div>
             <h1 className="x-display-hero mt-6 max-w-[20ch] text-balance text-ink">
-              Ask the network. <span className="italic text-amber-deep">Get a verified answer.</span>
+              See who answers. <span className="italic text-amber-deep">Know what it costs.</span>
             </h1>
             <p className="mt-6 max-w-[52ch] text-[16px] leading-relaxed text-pretty text-ink-soft">
-              Miners answer questions for a micropayment. NIGHTSHIFT shows who is answering, what they cover, and what
-              one ask costs right now. Everything you see is read live from the public registries.
+              Telegraph pays miners per answer. Here is the public view: who is live, the questions they accept, the
+              validators behind them, and the price the node quotes before you commit anything.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href="/miners" className="btn-primary !min-h-11 !px-5">
