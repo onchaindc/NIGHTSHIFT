@@ -47,17 +47,26 @@ export function isDatabaseConfigured(): boolean {
  * concurrency: a one-connection pool serializes writers, so a concurrency test
  * against it is not testing concurrency at all.
  */
+/**
+ * Connections per runtime. Two is the floor on purpose: a page that reads two
+ * collections in parallel (Promise.all) issued two queries at once, and with a
+ * single-connection pool the second one waited for a connection that was never
+ * handed to it, so the request hung forever against a perfectly healthy
+ * database. Two connections still sit comfortably behind a pooled endpoint
+ * (pgbouncer), so serverless safety is preserved.
+ */
 function poolMax(): number {
   const raw = Number(process.env.NIGHTSHIFT_DB_POOL_MAX ?? "");
-  if (!Number.isFinite(raw)) return 1;
+  if (!Number.isFinite(raw) || raw === 0) return 2;
   const n = Math.floor(raw);
-  return n >= 1 && n <= 20 ? n : 1;
+  return n >= 2 && n <= 20 ? n : 2;
 }
 
 interface PostgresGlobal {
   __nightshiftSql?: postgres.Sql;
   __nightshiftActiveUrl?: string;
   __nightshiftResolving?: Promise<DbResolution>;
+  __nightshiftMigrated?: Promise<Array<{ version: number; name: string }>>;
 }
 
 const g = globalThis as typeof globalThis & PostgresGlobal;
@@ -106,7 +115,7 @@ function sql(): postgres.Sql {
   const url = activeUrl();
   if (!url) throw new Error("no database configured: NIGHTSHIFT_DATABASE_URL / DATABASE_URL is missing");
   g.__nightshiftSql = postgres(url, {
-    max: poolMax(), // one per runtime by default: serverless-safe, pooled upstream
+    max: poolMax(), // small per runtime, pooled upstream
     // A pooled endpoint can accept a connection and then never answer (a
     // cancelled serverless invocation can leave a transaction behind). Without
     // these, the request hangs until the platform kills it and the caller sees
@@ -209,6 +218,7 @@ export async function dbClose(): Promise<void> {
     await g.__nightshiftSql.end({ timeout: 5 }).catch(() => undefined);
     g.__nightshiftSql = undefined;
   }
+  g.__nightshiftMigrated = undefined;
   // Let the next caller re-probe candidates (CLI and tests run repeatedly).
   g.__nightshiftResolving = undefined;
   g.__nightshiftActiveUrl = undefined;
@@ -264,8 +274,26 @@ export const MIGRATIONS: Array<{ version: number; name: string; statements: stri
  * Applies all pending migrations. Safe to call from every cold serverless
  * instance and from the db:migrate CLI: statement list is explicitly
  * idempotent, and each applied version is recorded exactly once.
+ *
+ * Single-flight per process, and the success is remembered. Two migrations
+ * running at once deadlock on the schema tables and never return; a page that
+ * reads two collections in parallel (Promise.all) does exactly that on its very
+ * first request against a cold instance, which is how a request could hang
+ * forever with a perfectly healthy database.
  */
-export async function dbMigrate(): Promise<Array<{ version: number; name: string }>> {
+export function dbMigrate(): Promise<Array<{ version: number; name: string }>> {
+  if (g.__nightshiftMigrated) return g.__nightshiftMigrated;
+  const attempt = runMigrations();
+  g.__nightshiftMigrated = attempt;
+  // A failed migration must be retried by the next caller instead of being
+  // cached as the permanent answer for this process.
+  attempt.catch(() => {
+    if (g.__nightshiftMigrated === attempt) g.__nightshiftMigrated = undefined;
+  });
+  return attempt;
+}
+
+async function runMigrations(): Promise<Array<{ version: number; name: string }>> {
   const resolved = await resolveDatabase();
   if (!resolved.ok) {
     const detail = resolved.tried.map((t) => `${t.host}: ${t.error ?? "unknown"}`).join("; ");

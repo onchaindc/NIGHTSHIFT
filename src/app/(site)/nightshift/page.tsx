@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { listTasks } from "@/lib/engine/store";
-import { AUDIT_LABEL } from "@/components/taskParts";
 import { listWatches } from "@/lib/watch/store";
 import type { TaskRecord } from "@/lib/engine/types";
 
@@ -12,13 +11,21 @@ import type { TaskRecord } from "@/lib/engine/types";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "NIGHTSHIFT",
+  // Absolute: the root template would otherwise render "NIGHTSHIFT · NIGHTSHIFT".
+  title: { absolute: "NIGHTSHIFT" },
 };
 
 /**  * Product story rendered from the task store and the monitoring
   * capability. If the store cannot be reached the intel
   * band and outcome sections are omitted instead of faked.
  */
+
+/** Same label taskParts uses for rehearsal records. Defined here so this
+ * server page never imports a client module for one string. */
+const AUDIT_LABEL = "audit-rehearsal";
+
+/** The page is a story first: live numbers are a bonus, never a reason to wait. */
+const INTEL_BUDGET_MS = 4_000;
 
 interface Intel {
   operations: number;
@@ -31,6 +38,22 @@ interface Intel {
 }
 
 async function readIntel(): Promise<Intel | null> {
+  let budget: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      collectIntel(),
+      new Promise<null>((resolve) => {
+        budget = setTimeout(() => resolve(null), INTEL_BUDGET_MS);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (budget) clearTimeout(budget);
+  }
+}
+
+async function collectIntel(): Promise<Intel | null> {
   try {
     const [tasks, watches] = await Promise.all([listTasks(), listWatches()]);
     const real = tasks.filter((t) => !(t.labels ?? []).includes(AUDIT_LABEL));
@@ -214,26 +237,12 @@ export default async function LandingPage() {
 
   return (
     <div className="min-h-dvh bg-night text-ink">
-      {/* Top bar */}
-      <header className="border-b border-edge">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <span className="text-[13px] font-bold tracking-[0.22em] text-ink">NIGHTSHIFT</span>
-            <span aria-hidden className="hidden h-3.5 w-px bg-edge-strong sm:block" />
-            <span className="x-tag hidden sm:block">Autonomous intelligence operations</span>
-          </div>
-          <Link href="/console" className="btn-primary !min-h-9 !px-4 !text-[12.5px]">
-            Enter the workspace
-            <ArrowRight size={13} aria-hidden />
-          </Link>
-        </div>
-      </header>
-
-      {/* Hero */}
+      {/* Hero — no navigation bar: the page is a document, not a dashboard. */}
       <section className="border-b border-edge">
-        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:py-24">
+        <div className="mx-auto grid max-w-6xl gap-10 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:pb-24 lg:pt-16">
           <div>
-            <p className="x-tag">NS-OPS/00 · PRODUCT BRIEF</p>
+            <p className="text-[13px] font-bold tracking-[0.24em] text-ink">NIGHTSHIFT</p>
+            <p className="x-tag mt-3">NS-OPS/00 · PRODUCT BRIEF</p>
             <h1 className="x-display-hero mt-5 text-ink">
               Give it the outcome.
               <span className="block italic text-amber-deep">It handles the work.</span>
@@ -291,7 +300,7 @@ export default async function LandingPage() {
                 <p className="x-label mt-2">Protocol changes detected</p>
               </div>
             </div>
-            <p className="x-tag mt-8">LIVE COUNTS FROM THE PRODUCTION TASK STORE · REFRESHED EVERY MINUTE</p>
+            <p className="x-tag mt-8">LIVE COUNTS FROM THE PRODUCTION TASK STORE</p>
           </div>
         </section>
       )}
