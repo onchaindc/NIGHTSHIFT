@@ -167,6 +167,8 @@ export default function TerminalClient({
   // Pipeline state
   const [stage, setStage] = useState<PipelineStage>("compose");
   const [previewStatus, setPreviewStatus] = useState<"challenge" | "refused" | "unavailable" | null>(null);
+  /** Our own "fill this in first" message, distinct from a node verdict. */
+  const [composeError, setComposeError] = useState<string | null>(null);
   const [nodeVerdict, setNodeVerdict] = useState<unknown>(null);
   const [previewHttp, setPreviewHttp] = useState<number | null>(null);
   const [bodyPlan, setBodyPlan] = useState<{ path: string; body: unknown } | null>(null);
@@ -280,12 +282,17 @@ export default function TerminalClient({
   const runPreview = useCallback(async () => {
     const spec = buildSpec();
     if (spec.error) {
-      setPreviewStatus("refused");
+      // The node was never called: this is our own completeness check. Saying
+      // "the node refused" here blamed the network for a form we never filled
+      // in, and read like a payment decision the node had made.
+      setPreviewStatus(null);
       setPreviewHttp(null);
-      setNodeVerdict({ error: "invalid request composition", message: spec.error });
-      pushLog(`Compose is incomplete: ${spec.error}`, "warn");
+      setNodeVerdict(null);
+      setComposeError(spec.error);
+      pushLog(`Nothing was sent: ${spec.error}`, "warn");
       return;
     }
+    setComposeError(null);
     setStage("preview");
     setFailure(null);
     setApprovalBox(false);
@@ -427,7 +434,14 @@ export default function TerminalClient({
 
   /* ---- rendering ---------------------------------------------------- */
 
-  const canPreview = mode === "advanced" ? rawJson.trim().length > 0 : !!intentDetail;
+  // The button is only offered when the body is actually complete: a required
+  // parameter that the node will reject should never look like a payable ask.
+  const composed = useMemo(() => buildSpec(), [buildSpec]);
+  const canPreview = composed.body !== null;
+  const composeProblem =
+    composed.body === null && composed.error && (selectedIntent !== null || rawJson.trim().length > 0)
+      ? composed.error
+      : null;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
@@ -632,6 +646,14 @@ export default function TerminalClient({
           <button onClick={runPreview} disabled={!canPreview} className="btn-primary mt-5 w-full !justify-center">
             Preview the request (no payment) <ArrowRight size={14} aria-hidden />
           </button>
+          {composeProblem && !canPreview && (
+            <p className="mt-2.5 flex items-start gap-1.5 text-[12px] leading-snug text-ink-soft">
+              <AlertTriangle size={13} className="mt-px shrink-0 text-amber" aria-hidden />
+              <span>
+                <span className="font-medium text-ink">Fill this in before previewing.</span> {composeProblem}
+              </span>
+            </p>
+          )}
           {!wallet.configured && (
             <p className="mt-3 text-[11.5px] text-amber">Without a payer wallet configured on this deployment, previews still validate, but execution cannot sign.</p>
           )}
@@ -645,6 +667,16 @@ export default function TerminalClient({
             <div className="mt-4 rounded-lg border border-dashed border-edge bg-panel-2 p-6 text-[12.5px] text-ink-faint">
               Compose the request, then run the preview. The pre-flight posts the body with no payment: the node
               validates intent, params and miner before charging, and a valid ask returns the current x402 price
+            </div>
+          )}
+
+          {composeError && !canPreview && !failure && (
+            <div className="mt-4 rounded-lg border border-edge-strong bg-panel-2 p-4">
+              <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+                <AlertTriangle size={13} aria-hidden className="text-amber" /> Complete the request first
+              </p>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">{composeError}</p>
+              <p className="mt-1.5 text-[11.5px] text-ink-faint">Nothing was sent to the node and nothing can be charged.</p>
             </div>
           )}
 
