@@ -10,6 +10,20 @@ function money(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+/** The explorer for the chain the payment actually settled on. */
+const EXPLORERS: Record<string, string> = {
+  "eip155:11155111": "https://sepolia.etherscan.io/tx/",
+  "eip155:84532": "https://sepolia.basescan.org/tx/",
+  "eip155:8453": "https://basescan.org/tx/",
+  "eip155:1": "https://etherscan.io/tx/",
+};
+
+function txHref(hash: string | undefined, network: string | undefined): string | null {
+  if (!hash) return null;
+  const base = network ? EXPLORERS[network] : undefined;
+  return base ? `${base}${hash}` : null;
+}
+
 function fmtTime(ts: number) {
   return new Date(ts).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
@@ -164,18 +178,20 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
                       <td className="py-2.5 pr-4 tabular text-ink">{money(e.amountUsdCents)}</td>
                       <td className="py-2.5 pr-4 text-ink-soft">USDC</td>
                       <td className="tabular py-2.5 pr-4 text-ink-soft">
-                        {terminal?.offer?.network ?? "Base Sepolia (testnet)"}
+                        {terminal?.offer?.network ?? "testnet"}
                       </td>
                       <td className="py-2.5 pr-4">
-                        {e.txHash ? (
+                        {txHref(e.txHash, terminal?.offer?.network) ? (
                           <a
-                            href={`https://sepolia.basescan.org/tx/${e.txHash}`}
+                            href={txHref(e.txHash, terminal?.offer?.network) as string}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-blue hover:underline underline-offset-2"
                           >
-                            <span className="tabular">{e.txHash}</span>
+                            <span className="tabular break-all">{e.txHash}</span>
                           </a>
+                        ) : e.txHash ? (
+                          <span className="tabular break-all">{e.txHash}</span>
                         ) : (
                           <span className="text-ink-faint">not on file</span>
                         )}

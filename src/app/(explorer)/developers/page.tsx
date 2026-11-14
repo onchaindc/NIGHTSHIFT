@@ -288,8 +288,10 @@ export default function DevelopersPage() {
               Telegraph is an HTTP-native intelligence network: agents pay a micropayment for an answer routed to a
               marketplace of independent miners. There is no account and no API key —{" "}
               <strong className="text-ink">the x402 payment itself is the authentication</strong>. Discovery, the
-              Daemon&apos;s signal feed and verification reads are free and keyless; a wallet holding test USDC on
-              Base Sepolia (or Solana Devnet) plus an x402 client is enough for the paid path.
+              Daemon&apos;s signal feed and verification reads are free and keyless; a wallet holding test USDC on the
+              network the challenge names, plus an x402 client, is enough for the paid path. Read that network from the
+              challenge: the live node currently asks for Ethereum Sepolia, and a client that assumes another chain will
+              refuse to sign.
             </P>
             <P>
               Two facts from the{" "}
@@ -503,10 +505,10 @@ PAYMENT-REQUIRED: eyJ4NDAyVmVyc2lvbiI6Mi...
 
 { "x402Version": 2,
   "accepts": [
-    { "scheme": "exact", "network": "eip155:84532",
-      "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    { "scheme": "exact", "network": "eip155:11155111",
+      "asset": "0xcc194e1a843B658526D0D5C431f670028582Ae17",
       "amount": "10000", "payTo": "0x...", "maxTimeoutSeconds": 60,
-      "extra": { "name": "USDC", "version": "2" } }
+      "extra": { "name": "USD Coin", "version": "2" } }
   ] }`}
               title="JSON · DECODED CHALLENGE (AMOUNT IS 6-DECIMAL USDC: '10000' = $0.01)"
             />
@@ -514,11 +516,11 @@ PAYMENT-REQUIRED: eyJ4NDAyVmVyc2lvbiI6Mi...
               rows={[
                 ["authoritative header", "Sign from the decoded header, never from the body: the body summary prices a bare $0.01 without asset or amount."],
                 ["payTo", "Per node — read it from the challenge you received, never hardcode it."],
-                ["asset", "USDC on Base Sepolia (0x036CbD53842c5426634e7929541eC2318f3dCF7e) or Solana Devnet; not every client knows it by default, so allowlist it in spendControls."],
-                ["extra", "The signature domain ({name USDC, version 2} on Base Sepolia; feePayer on Solana) — the SDK reads these for you."],
+                ["asset", "The token the challenge names. Live today: USD Coin at 0xcc194e1a843B658526D0D5C431f670028582Ae17 on Ethereum Sepolia. Not every client knows it by default, so allowlist it in spendControls."],
+                ["extra", "The signature domain the challenge carries ({name, version}) — the SDK reads these for you."],
                 ["dynamic pricing", "min_price_usdc times a demand multiplier from rolling 24-hour volume; the charged amount lands in the challenge."],
                 ["escrow", "The same endpoints accept scheme \"escrow\": pre-fund once, then skip the per-request settlement."],
-                ["Solana path", "Same receipt fields, epoch_id 0 (settled on its own chain, no Telegraph epoch)."],
+                ["other schemes", "This terminal signs the exact-scheme EVM entry only. A challenge offering something else is refused with the reason, never paid on a guess."],
               ]}
             />
             <P>
@@ -532,7 +534,7 @@ PAYMENT-REQUIRED: eyJ4NDAyVmVyc2lvbiI6Mi...
             <CodeBlock
               code={`{ "receipt_hash": "0x3f1c…", "rail": "x402", "payer": "0xyourwallet…",
   "miner": "377", "intent": "STOCK_PRICE", "amount_uusdc": "10000",
-  "epoch_id": 314, "settlement": "onchain", "chain": "eip155:84532",
+  "epoch_id": 314, "settlement": "onchain", "chain": "eip155:11155111",
   "tx_hash": "0x6bb27730…", "timestamp": 1789466181 }`}
               title="JSON · X-TELEGRAPH-RECEIPT (BASE64-ENCODED HEADER)"
             />
