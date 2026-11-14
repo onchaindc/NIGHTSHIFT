@@ -2,8 +2,13 @@
 
 import { PrivyProvider } from "@privy-io/react-auth";
 
-export function AppPrivyProvider({ children }: { children: React.ReactNode }) {
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+export function AppPrivyProvider({
+  appId,
+  children,
+}: {
+  appId: string | undefined;
+  children: React.ReactNode;
+}) {
   if (!appId) {
     return <>{children}</>;
   }

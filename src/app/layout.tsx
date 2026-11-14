@@ -59,7 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className="min-h-full"><AppPrivyProvider>{children}</AppPrivyProvider></body>
+      <body className="min-h-full"><AppPrivyProvider appId={process.env.PRIVY_APP_ID}>{children}</AppPrivyProvider></body>
     </html>
   );
 }
