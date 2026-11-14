@@ -2,6 +2,7 @@
 
 import { usePrivy, useWallets, useConnectWallet, useCreateWallet } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
+import { Copy, Check, Wallet, Plus, LogOut } from "lucide-react";
 
 const SEPOLIA_RPCS = [
   "https://ethereum-sepolia-rpc.publicnode.com",
@@ -35,6 +36,10 @@ async function fetchEthBalance(address: string): Promise<string> {
   return "0";
 }
 
+function shortAddr(addr: string) {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
 function WalletCard({
   label,
   address,
@@ -44,15 +49,37 @@ function WalletCard({
   address: string;
   balance: string | null;
 }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(address).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    });
+  };
   return (
-    <div className="rounded-lg border border-edge bg-panel p-5">
-      <p className="x-label">{label}</p>
-      <p className="tabular mt-1 break-all text-[11.5px] text-ink-faint">{address}</p>
-      <p className="mt-3 text-[28px] font-semibold tabular leading-none text-ink">
+    <div className="relative overflow-hidden rounded-2xl border border-edge bg-panel p-6 shadow-sm">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal/40 to-transparent" />
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">{label}</p>
+          <button
+            type="button"
+            onClick={copy}
+            className="mt-1.5 flex items-center gap-1.5 tabular text-[12.5px] text-ink-soft transition-colors hover:text-ink"
+          >
+            {shortAddr(address)}
+            {copied ? <Check size={12} className="text-teal" /> : <Copy size={12} className="opacity-50" />}
+          </button>
+        </div>
+        <div className="grid h-9 w-9 place-items-center rounded-full bg-teal/10 text-teal">
+          <Wallet size={16} strokeWidth={1.8} />
+        </div>
+      </div>
+      <p className="mt-5 text-[32px] font-semibold tabular leading-none tracking-tight text-ink">
         {balance === null ? "…" : balance}
-        <span className="ml-1.5 text-[16px] font-medium text-ink-soft">ETH</span>
+        <span className="ml-1.5 text-[15px] font-medium text-ink-soft">ETH</span>
       </p>
-      <p className="mt-1 text-[11px] text-ink-faint">Sepolia testnet</p>
+      <p className="mt-1.5 text-[11px] text-ink-faint">Sepolia testnet</p>
     </div>
   );
 }
@@ -79,9 +106,7 @@ export default function FundsPage() {
       for (const addr of addrs) {
         if (cancelled) return;
         const bal = await fetchEthBalance(addr);
-        if (!cancelled) {
-          setBalances((prev) => ({ ...prev, [addr]: bal }));
-        }
+        if (!cancelled) setBalances((prev) => ({ ...prev, [addr]: bal }));
       }
     })();
     return () => {
@@ -96,13 +121,27 @@ export default function FundsPage() {
       if (!authenticated) {
         await login();
       }
-      await new Promise((r) => setTimeout(r, 300));
+      // Privy session must be fully settled before createWallet is allowed.
+      // Poll briefly; the previous 300ms delay was not always enough.
+      let tries = 0;
+      while (!authenticated && tries < 20) {
+        await new Promise((r) => setTimeout(r, 150));
+        tries++;
+      }
+      if (!authenticated) {
+        setError("Log in first, then create the wallet.");
+        return;
+      }
+      // If an embedded wallet already exists for this account, do nothing.
       if (!embedded) {
         await createWallet();
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not create in-app wallet";
-      setError(msg);
+      // Swallow the race-condition message if a wallet actually appeared.
+      if (!/must be authenticated/i.test(msg) || !embedded) {
+        setError(msg);
+      }
     } finally {
       setCreating(false);
     }
@@ -134,13 +173,13 @@ export default function FundsPage() {
   }
 
   const hasWallet = !!(embedded || external);
+  const hasEmbedded = !!embedded;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
       <p className="x-tag">WALLET</p>
       <h1 className="x-display-1 mt-3 text-ink">Wallet</h1>
 
-      {/* Balance first — the thing people open this page to see */}
       {hasWallet && (
         <div className="mt-6 space-y-3">
           {embedded && (
@@ -158,13 +197,16 @@ export default function FundsPage() {
             />
           )}
           <div className="flex items-center justify-between pt-1">
-            <p className="text-[11.5px] text-ink-faint">Sepolia testnet ETH</p>
+            <p className="text-[11.5px] text-ink-faint">
+              Logging out and back in with the same method restores this wallet.
+            </p>
             <button
               type="button"
               onClick={handleLogout}
               disabled={loggingOut}
-              className="btn-quiet !min-h-8 !px-3 !text-[12px]"
+              className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-ink-faint hover:text-ink disabled:opacity-50"
             >
+              <LogOut size={12} strokeWidth={1.8} />
               {loggingOut ? "Logging out…" : "Log out"}
             </button>
           </div>
@@ -172,39 +214,54 @@ export default function FundsPage() {
       )}
 
       <p className="mt-8 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
-        {hasWallet
-          ? "Connect another wallet or create an in-app one."
-          : "Connect an existing wallet, or create an in-app wallet that stays in this browser."}
+        {hasEmbedded
+          ? "Your in-app wallet is ready. Connect an external wallet if you also want one."
+          : hasWallet
+            ? "Connect another wallet, or create an in-app one."
+            : "Connect an existing wallet, or create an in-app wallet that stays with your account."}
       </p>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <div className={`mt-4 grid gap-4 ${hasEmbedded ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
         <button
           type="button"
           onClick={handleConnectExternal}
-          className="rounded-lg border border-edge bg-panel p-5 text-left transition-colors hover:border-teal"
+          className="group rounded-2xl border border-edge bg-panel p-5 text-left transition-all hover:border-teal hover:shadow-sm"
         >
-          <p className="text-[13.5px] font-medium text-ink">Connect wallet</p>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
+          <div className="flex items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-panel-2 text-ink-soft group-hover:text-teal">
+              <Wallet size={14} strokeWidth={1.8} />
+            </span>
+            <p className="text-[13.5px] font-medium text-ink">Connect wallet</p>
+          </div>
+          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
             Use MetaMask, WalletConnect, or another external wallet.
           </p>
         </button>
-        <button
-          type="button"
-          onClick={handleCreateInApp}
-          disabled={creating}
-          className="rounded-lg border border-edge bg-panel p-5 text-left transition-colors hover:border-teal disabled:opacity-60"
-        >
-          <p className="text-[13.5px] font-medium text-ink">
-            {creating ? "Creating…" : "Create in-app wallet"}
-          </p>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
-            Privy creates a wallet for you. Fund it and pay from this browser.
-          </p>
-        </button>
+
+        {!hasEmbedded && (
+          <button
+            type="button"
+            onClick={handleCreateInApp}
+            disabled={creating}
+            className="group rounded-2xl border border-edge bg-panel p-5 text-left transition-all hover:border-teal hover:shadow-sm disabled:opacity-60"
+          >
+            <div className="flex items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-full bg-panel-2 text-ink-soft group-hover:text-teal">
+                <Plus size={14} strokeWidth={1.8} />
+              </span>
+              <p className="text-[13.5px] font-medium text-ink">
+                {creating ? "Creating…" : "Create in-app wallet"}
+              </p>
+            </div>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
+              Privy creates a wallet for your account. Log in with the same method later to get it back.
+            </p>
+          </button>
+        )}
       </div>
 
       {error && (
-        <p className="mt-4 text-[12.5px] text-risk">{error}</p>
+        <p className="mt-4 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">{error}</p>
       )}
     </div>
   );
