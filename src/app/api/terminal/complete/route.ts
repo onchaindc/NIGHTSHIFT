@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
-import { telegraphNodeUrl, decodeChallenge } from "@/lib/telegraph/client";
+import { telegraphNodeUrl, decodeChallenge, extractReceipt } from "@/lib/telegraph/client";
+import { recordTerminalOutcome } from "@/lib/terminal/store";
+import type { ExecuteOutcome } from "@/lib/terminal/ask";
 
-/** POST /api/terminal/complete — send a signed payment and return the answer. */
+/** POST /api/terminal/complete — send a signed payment, record activity, return the answer. */
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
@@ -41,6 +43,32 @@ export async function POST(req: Request) {
     parsed = JSON.parse(text);
   } catch {
     parsed = text.slice(0, 400);
+  }
+
+  const receipt = extractReceipt(res.headers);
+  const signalHash = parsed && typeof parsed === "object" && "signal_hash" in parsed
+    ? String((parsed as { signal_hash?: string }).signal_hash ?? "")
+    : "";
+
+  if (res.status === 200 && signalHash && receipt) {
+    // Record activity so it shows in the user's history.
+    try {
+      const outcome: ExecuteOutcome = {
+        kind: "answered",
+        urlPath,
+        requestSent: input.body,
+        offer: { scheme: "exact", network: "eip155:11155111", asset: "", payTo: "", amount: receipt.amount_uusdc ?? "0" },
+        result: (parsed as { result?: unknown }).result ?? parsed,
+        signalHash,
+        receipt,
+        settlementHeader: res.headers.get("payment-response") ?? undefined,
+        minerName: (parsed as { miner_name?: string }).miner_name,
+        minerId: (parsed as { miner_id?: string }).miner_id,
+      };
+      await recordTerminalOutcome(outcome, { query: "" } as never, input.payer);
+    } catch {
+      /* recording is best-effort */
+    }
   }
 
   if (res.status === 402) {
