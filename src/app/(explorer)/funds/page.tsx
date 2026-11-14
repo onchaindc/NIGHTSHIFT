@@ -12,7 +12,7 @@ const SEPOLIA_RPCS = [
 const SEPOLIA_CHAIN_ID = 11155111;
 const CIRCLE_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const TELEGRAPH_USDC = "0xcc194e1a843B658526D0D5C431f670028582Ae17";
-const MINT_AMOUNT = 10_000_000n; // 10 USDC (6 decimals)
+const MINT_AMOUNT = 10_000_000n;
 
 async function rpc(method: string, params: unknown[]): Promise<string | null> {
   for (const url of SEPOLIA_RPCS) {
@@ -51,7 +51,6 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-/** mint(address,uint256) calldata. Selector 0x40c10f19. */
 function mintCalldata(to: string, amount: bigint): `0x${string}` {
   const addr = to.replace(/^0x/i, "").toLowerCase().padStart(64, "0");
   const amt = amount.toString(16).padStart(64, "0");
@@ -386,8 +385,23 @@ export default function FundsPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-      <p className="x-tag">WALLET</p>
-      <h1 className="x-display-1 mt-3 text-ink">Wallet</h1>
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <p className="x-tag">WALLET</p>
+          <h1 className="x-display-1 mt-3 text-ink">Wallet</h1>
+        </div>
+        {hasWallet && (
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-edge bg-panel px-3.5 py-2 text-[13px] text-ink-soft transition-colors hover:border-ink-faint hover:text-ink disabled:opacity-50"
+          >
+            <LogOut size={14} strokeWidth={1.8} />
+            {loggingOut ? "…" : "Log out"}
+          </button>
+        )}
+      </div>
 
       {hasWallet && (
         <div className="mt-6 space-y-3">
@@ -413,32 +427,10 @@ export default function FundsPage() {
               telegraphUsdc={balances[external.address]?.telegraph ?? null}
             />
           )}
-          <div className="flex items-center justify-between pt-1">
-            <p className="text-[11.5px] text-ink-faint">
-              Logging out and back in with the same method restores this wallet.
-            </p>
-            <button
-              type="button"
-              onClick={handleLogout}
-              disabled={loggingOut}
-              className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-ink-faint hover:text-ink disabled:opacity-50"
-            >
-              <LogOut size={12} strokeWidth={1.8} />
-              {loggingOut ? "Logging out…" : "Log out"}
-            </button>
-          </div>
         </div>
       )}
 
-      <p className="mt-8 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
-        {hasEmbedded
-          ? "Your in-app wallet is ready. Connect an external wallet if you also want one."
-          : hasWallet
-            ? "Connect another wallet, or create an in-app one."
-            : "Connect an existing wallet, or create an in-app wallet that stays with your account."}
-      </p>
-
-      <div className={`mt-4 grid gap-4 ${hasEmbedded ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
+      <div className={`mt-8 grid gap-4 ${hasEmbedded ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
         <button
           type="button"
           onClick={handleConnectExternal}
@@ -451,7 +443,7 @@ export default function FundsPage() {
             <p className="text-[13.5px] font-medium text-ink">Connect wallet</p>
           </div>
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-            Use MetaMask, WalletConnect, or another external wallet.
+            MetaMask, WalletConnect, or another external wallet.
           </p>
         </button>
 
@@ -471,7 +463,7 @@ export default function FundsPage() {
               </p>
             </div>
             <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-              Privy creates a wallet for your account. Log in with the same method later to get it back.
+              A wallet that stays with your account.
             </p>
           </button>
         )}
