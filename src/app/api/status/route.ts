@@ -177,7 +177,7 @@ export async function GET() {
     degradedReason: "scheduler status unavailable",
     lastSuccessAt: null,
     consecutiveFailures: 0,
-    cronHint: "external cron recommended every 3h on serverless",
+    cronHint: "vercel.json cron: once daily (Hobby limit)",
   };
   try {
     const { schedulerStatus } = await import("@/lib/watch/scheduler");
@@ -191,7 +191,7 @@ export async function GET() {
       degradedReason: s.degradedReason,
       lastSuccessAt: s.lastSuccessAt,
       consecutiveFailures: s.consecutiveFailures,
-      cronHint: s.workerMode === "external-trigger" ? "vercel.json cron: every 3 hours" : "in-process interval",
+      cronHint: s.workerMode === "external-trigger" ? "vercel.json cron: once daily" : "in-process interval",
     };
   } catch {
     // keep the honest default above
