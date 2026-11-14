@@ -8,8 +8,9 @@ import { usePathname } from "next/navigation";
  * marked with a real aria-current, so the navigation reads as tabs instead of a
  * row of identical links.
  *
- * `area` is the product's top level; `tab` is the Explorer's own contents, drawn
- * as a lighter, underlined row so the two levels never look like one long menu.
+ * `area` is the product's top level, set in a raised tab so "you are here" is
+ * legible at a glance. `tab` is the Explorer's own contents, drawn as a lighter
+ * underlined row so the two levels never look like one long menu.
  */
 export function NavLinks({
   items,
@@ -31,13 +32,15 @@ export function NavLinks({
         const active = isActive(l);
         const className =
           variant === "tab"
-            ? `-mb-px whitespace-nowrap border-b-2 px-0.5 py-2.5 text-[12.5px] transition-colors ${
+            ? `-mb-px whitespace-nowrap border-b-2 px-0.5 pb-3 pt-3 text-[12.5px] transition-colors ${
                 active
-                  ? "border-teal font-medium text-ink"
+                  ? "border-teal font-semibold text-ink"
                   : "border-transparent text-ink-soft hover:border-edge-strong hover:text-ink"
               }`
-            : `rounded-lg px-2.5 py-1.5 text-[13px] transition-colors ${
-                active ? "bg-panel-3 font-medium text-ink" : "text-ink-soft hover:bg-panel-3/70 hover:text-ink"
+            : `rounded-lg px-3 py-1.5 text-[13px] transition-all duration-150 ${
+                active
+                  ? "bg-panel font-medium text-ink shadow-[0_1px_2px_rgba(22,24,29,0.06)] ring-1 ring-edge"
+                  : "text-ink-soft hover:bg-panel-3 hover:text-ink"
               }`;
 
         return (

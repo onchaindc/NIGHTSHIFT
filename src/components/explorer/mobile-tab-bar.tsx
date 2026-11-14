@@ -27,7 +27,7 @@ export function MobileTabBar() {
   return (
     <nav
       aria-label="Sections"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-edge bg-night/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-edge bg-night/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_-24px_rgba(22,24,29,0.45)] backdrop-blur-md sm:hidden"
     >
       <div className="mx-auto flex max-w-md">
         {ITEMS.map((item) => {
@@ -40,12 +40,15 @@ export function MobileTabBar() {
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
-              className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-1 pb-1.5 pt-2 text-[10.5px] transition-colors ${
+              className={`relative flex min-h-14 flex-1 flex-col items-center justify-center gap-1 pb-1.5 pt-2 text-[10px] transition-colors active:bg-panel-3 ${
                 active ? "text-teal" : "text-ink-faint hover:text-ink"
               }`}
             >
-              <Icon size={19} strokeWidth={active ? 2.2 : 1.7} aria-hidden />
-              <span className={active ? "font-medium" : undefined}>{item.label}</span>
+              {active && (
+                <span aria-hidden className="absolute inset-x-0 top-0 mx-auto h-[2px] w-7 rounded-b-full bg-teal" />
+              )}
+              <Icon size={19} strokeWidth={active ? 2.1 : 1.6} aria-hidden />
+              <span className={active ? "font-semibold" : "font-medium"}>{item.label}</span>
             </Link>
           );
         })}
