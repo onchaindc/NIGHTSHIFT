@@ -145,13 +145,23 @@ function answerParagraphs(result: unknown): string[] {
     const v = o[key];
     if (typeof v === "string") push(v);
   }
-  if (out.length === 0) {
-    const longest = Object.values(o)
-      .filter((v): v is string => typeof v === "string" && v.trim().length > 40)
-      .sort((a, b) => b.length - a.length)[0];
-    if (longest) push(longest);
-  }
   return out;
+}
+
+function hasExtractedValue(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number" || typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.some(hasExtractedValue);
+  if (value && typeof value === "object") return Object.values(value as Record<string, unknown>).some(hasExtractedValue);
+  return false;
+}
+
+/** A URL echo or router explanation is not a content-extraction result. */
+function isExtractionIncomplete(answer: AnswerInfo): boolean {
+  if (!(answer.intent ?? "").toUpperCase().startsWith("CONTENT_EXTRACTION")) return false;
+  if (!answer.result || typeof answer.result !== "object" || Array.isArray(answer.result)) return true;
+  const result = answer.result as Record<string, unknown>;
+  return !["title", "content", "entities", "brief"].some((key) => hasExtractedValue(result[key]));
 }
 
 /** `ACADEMIC_SEARCH_GENERAL` reads as a database key; the list should read as a choice. */
@@ -506,26 +516,50 @@ export default function TerminalClient({
           const result = await done.json();
           const signalHash = typeof result.body?.signal_hash === "string" ? result.body.signal_hash : null;
           if (result.status === 200 && signalHash) {
+            const nodeBody = (result.body ?? {}) as Record<string, unknown>;
+            const answerInfo: AnswerInfo = {
+              result: nodeBody.result ?? null,
+              resultShape: typeof nodeBody.result_shape === "string" ? nodeBody.result_shape : undefined,
+              shapeError: typeof nodeBody.shape_error === "string" ? nodeBody.shape_error : undefined,
+              fieldStatus: nodeBody.field_status as Record<string, unknown> | undefined,
+              minerId: nodeBody.miner_id != null ? String(nodeBody.miner_id) : undefined,
+              minerName: typeof nodeBody.miner_name === "string" ? nodeBody.miner_name : undefined,
+              endpoint: typeof nodeBody.endpoint === "string" ? nodeBody.endpoint : undefined,
+              intent: typeof nodeBody.intent === "string" ? nodeBody.intent : undefined,
+              input: nodeBody.input,
+              costUsd: typeof nodeBody.cost_usd === "number" ? nodeBody.cost_usd : undefined,
+              durationMs: typeof nodeBody.duration_ms === "number" ? nodeBody.duration_ms : undefined,
+              timestamp: typeof nodeBody.timestamp === "string" ? nodeBody.timestamp : undefined,
+              warnings: nodeBody.warnings,
+            };
+            const incomplete = isExtractionIncomplete(answerInfo);
+            const receiptData = result.receiptData as Partial<ReceiptInfo> | undefined;
             setAnswer({
-              answer: { result: result.body, minerName: undefined },
+              answer: answerInfo,
               signalHash,
               receipt: {
-                receipt_hash: result.receipt ?? "",
-                rail: "x402",
-                payer: privyWallet.address,
-                miner: challenge.payment.payTo,
-                intent: "",
-                amount_uusdc: challenge.payment.amount,
-                epoch_id: 0,
-                settlement: result.paymentResponse ?? "",
-                chain: challenge.payment.network,
-                timestamp: Date.now(),
+                receipt_hash: receiptData?.receipt_hash ?? "",
+                rail: receiptData?.rail ?? "x402",
+                payer: receiptData?.payer ?? privyWallet.address,
+                miner: receiptData?.miner ?? String(nodeBody.miner_id ?? ""),
+                intent: receiptData?.intent ?? String(nodeBody.intent ?? ""),
+                amount_uusdc: receiptData?.amount_uusdc ?? challenge.payment.amount,
+                epoch_id: receiptData?.epoch_id ?? 0,
+                settlement: receiptData?.settlement ?? result.paymentResponse ?? "",
+                chain: receiptData?.chain ?? challenge.payment.network,
+                tx_hash: receiptData?.tx_hash,
+                timestamp: receiptData?.timestamp ?? Math.floor(Date.now() / 1000),
               },
               settlement: result.paymentResponse,
             });
             setChallenge(null);
             setStage("result");
-            pushLog("Answer delivered from your wallet. Run verification before trusting it.", "good");
+            pushLog(
+              incomplete
+                ? "Payment completed, but the provider returned no extracted content. This is an incomplete result, not a successful extraction."
+                : "Answer delivered from your wallet. Run verification before trusting it.",
+              incomplete ? "warn" : "good",
+            );
             return;
           }
           setFailure({ heading: "Payment from your wallet failed", detail: result.error ?? JSON.stringify(result.body ?? result).slice(0, 300) });
@@ -1063,10 +1097,18 @@ export default function TerminalClient({
         <div className="mt-8 space-y-4">
           {/* Main answer — the spotlight */}
           <section className="rounded-2xl border border-teal/30 bg-panel p-5 sm:p-6">
-            <div className="flex items-center gap-2 text-teal">
-              <CheckCircle2 size={16} />
-              <span className="text-[13px] font-medium">Answer</span>
+            <div className={`flex items-center gap-2 ${isExtractionIncomplete(answer.answer) ? "text-amber" : "text-teal"}`}>
+              {isExtractionIncomplete(answer.answer) ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+              <span className="text-[13px] font-medium">{isExtractionIncomplete(answer.answer) ? "Extraction incomplete" : "Answer"}</span>
             </div>
+            {isExtractionIncomplete(answer.answer) ? (
+              <div className="mt-4 rounded-lg border border-amber/40 bg-amber-soft/40 p-4">
+                <p className="text-[13px] font-medium text-ink">The provider returned no extracted content.</p>
+                <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
+                  Your payment was processed, but the response contains no title, content, entities or brief. The URL was echoed back without a usable extraction. The provider&apos;s routing explanation is not the answer.
+                </p>
+              </div>
+            ) : (
             <div className="mt-4 space-y-3">
               {answerParagraphs(answer.answer.result).map((p, i) => (
                 <p key={i} className="text-[15px] leading-relaxed text-ink">{p}</p>
@@ -1093,6 +1135,7 @@ export default function TerminalClient({
                 );
               })()}
             </div>
+            )}
             <p className="mt-4 text-[11px] text-ink-faint">
               Paid {(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC
             </p>
@@ -1135,7 +1178,7 @@ export default function TerminalClient({
               Technical details
             </summary>
             <pre className="max-h-60 overflow-auto border-t border-edge px-4 py-3 text-[11px] leading-relaxed text-ink-soft">
-              {JSON.stringify(answer.answer.result ?? {}, null, 2).slice(0, 2000)}
+              {JSON.stringify(answer.answer, null, 2).slice(0, 4000)}
             </pre>
           </details>
         </div>
