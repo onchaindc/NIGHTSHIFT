@@ -94,10 +94,8 @@ export default function FundsPage() {
     setCreating(true);
     try {
       if (!authenticated) {
-        // login() opens the modal and resolves when the user finishes
         await login();
       }
-      // Give Privy a moment to settle the session if login just completed
       await new Promise((r) => setTimeout(r, 300));
       if (!embedded) {
         await createWallet();
@@ -135,15 +133,51 @@ export default function FundsPage() {
     );
   }
 
+  const hasWallet = !!(embedded || external);
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
       <p className="x-tag">WALLET</p>
       <h1 className="x-display-1 mt-3 text-ink">Wallet</h1>
-      <p className="mt-3 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
-        Pay for asks from your own wallet. Connect an existing one, or create an in-app wallet that stays in this browser.
+
+      {/* Balance first — the thing people open this page to see */}
+      {hasWallet && (
+        <div className="mt-6 space-y-3">
+          {embedded && (
+            <WalletCard
+              label="In-app wallet"
+              address={embedded.address}
+              balance={balances[embedded.address] ?? null}
+            />
+          )}
+          {external && (
+            <WalletCard
+              label="Connected wallet"
+              address={external.address}
+              balance={balances[external.address] ?? null}
+            />
+          )}
+          <div className="flex items-center justify-between pt-1">
+            <p className="text-[11.5px] text-ink-faint">Sepolia testnet ETH</p>
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="btn-quiet !min-h-8 !px-3 !text-[12px]"
+            >
+              {loggingOut ? "Logging out…" : "Log out"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <p className="mt-8 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
+        {hasWallet
+          ? "Connect another wallet or create an in-app one."
+          : "Connect an existing wallet, or create an in-app wallet that stays in this browser."}
       </p>
 
-      <div className="mt-10 grid gap-4 sm:grid-cols-2">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <button
           type="button"
           onClick={handleConnectExternal}
@@ -171,37 +205,6 @@ export default function FundsPage() {
 
       {error && (
         <p className="mt-4 text-[12.5px] text-risk">{error}</p>
-      )}
-
-      {(embedded || external) && (
-        <div className="mt-8 space-y-4">
-          <p className="x-label">Your wallets</p>
-          {embedded && (
-            <WalletCard
-              label="In-app wallet"
-              address={embedded.address}
-              balance={balances[embedded.address] ?? null}
-            />
-          )}
-          {external && (
-            <WalletCard
-              label="Connected wallet"
-              address={external.address}
-              balance={balances[external.address] ?? null}
-            />
-          )}
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={loggingOut}
-            className="btn-quiet !min-h-9 !px-4 !text-[13px]"
-          >
-            {loggingOut ? "Logging out…" : "Log out"}
-          </button>
-          <p className="text-[12px] text-ink-faint">
-            Balances are Sepolia testnet ETH. Fund the address with testnet USDC or ETH, then return to the terminal to pay for an ask.
-          </p>
-        </div>
       )}
     </div>
   );
