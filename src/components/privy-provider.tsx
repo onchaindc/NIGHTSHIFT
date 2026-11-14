@@ -21,7 +21,9 @@ export function AppPrivyProvider({
           accentColor: "#0f766e",
           walletChainType: "ethereum-only",
         },
-        loginMethods: ["email", "wallet", "google"],
+        // Google is not enabled in the Privy dashboard for this app.
+        // Offering it produces "Login with Google not allowed".
+        loginMethods: ["email", "wallet"],
         embeddedWallets: {
           ethereum: {
             createOnLogin: "users-without-wallets",
