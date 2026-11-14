@@ -28,7 +28,8 @@ export function ThemeToggle() {
       aria-label={dark ? "Switch to light" : "Switch to night"}
     >
       {dark ? <Sun size={14} aria-hidden /> : <Moon size={14} aria-hidden />}
-      <span className="ml-1.5">{dark ? "Light" : "Night"}</span>
+      {/* Icon only on a phone: the label would crowd the brand and Ask in a 56px bar. */}
+      <span className="ml-1.5 hidden sm:inline">{dark ? "Light" : "Night"}</span>
     </button>
   );
 }
