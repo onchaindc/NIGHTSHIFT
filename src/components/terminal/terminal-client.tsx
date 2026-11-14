@@ -104,7 +104,37 @@ interface ReceiptInfo {
 
 type PipelineStage = "compose" | "preview" | "executing" | "result";
 
-/** Renders the node's raw pre-payment verdict (error, problems, message). */
+/** The answer's own words, when the provider returns a labelled text field. */
+function answerParagraphs(result: unknown): string[] {
+  if (typeof result === "string") return result.trim() ? [result.trim()] : [];
+  if (!result || typeof result !== "object") return [];
+  const o = result as Record<string, unknown>;
+  const out: string[] = [];
+  for (const key of ["answer", "brief", "summary", "text", "content", "result"]) {
+    const v = o[key];
+    if (typeof v === "string" && v.trim()) out.push(v.trim());
+  }
+  if (out.length === 0) {
+    const longest = Object.values(o)
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 40)
+      .sort((a, b) => b.length - a.length)[0];
+    if (longest) out.push(longest.trim());
+  }
+  return out;
+}
+
+/** Chain ids are for machines; a payer needs a name. Unknown ids stay raw. */
+function chainName(network: string): string {
+  const names: Record<string, string> = {
+    "eip155:1": "Ethereum",
+    "eip155:8453": "Base",
+    "eip155:11155111": "the Ethereum Sepolia testnet",
+    "eip155:84532": "the Base Sepolia testnet",
+  };
+  return names[network] ?? network;
+}
+
+/** What the network said, in a sentence; the protocol form stays available. */
 function NodeVerdict({ verdict }: { verdict: unknown }) {
   if (verdict == null) return null;
   if (typeof verdict === "string") {
@@ -112,10 +142,13 @@ function NodeVerdict({ verdict }: { verdict: unknown }) {
   }
   const v = verdict as Record<string, unknown>;
   const problems = Array.isArray(v.problems) ? v.problems : null;
+  const code = typeof v.error === "string" ? v.error : null;
+  const plain = plainRefusal(code, typeof v.message === "string" ? v.message : null);
   return (
     <div className="mt-2 space-y-2">
-      {typeof v.error === "string" && <p className="tabular text-[11.5px] text-risk">{v.error}</p>}
-      {typeof v.message === "string" && v.message !== v.error && <p className="text-[12px] leading-relaxed text-ink-soft">{v.message}</p>}
+      {plain && <p className="text-[13px] leading-relaxed text-ink">{plain}</p>}
+      {!plain && code && <p className="tabular text-[11.5px] text-risk">{code}</p>}
+      {typeof v.message === "string" && v.message !== v.error && !plain && <p className="text-[12px] leading-relaxed text-ink-soft">{v.message}</p>}
       {Array.isArray(v.intents) && (
         <p className="tabular text-[11px] text-ink-faint">This miner serves: {(v.intents as string[]).join(", ").slice(0, 300)}</p>
       )}
@@ -130,11 +163,30 @@ function NodeVerdict({ verdict }: { verdict: unknown }) {
           ))}
         </ul>
       )}
-      {!v.error && !v.message && !problems && (
-        <pre className="overflow-x-auto rounded-lg bg-panel-2 p-2 font-mono text-[10.5px] leading-relaxed text-ink-soft">{JSON.stringify(v, null, 2).slice(0, 1200)}</pre>
-      )}
+      <details className="pt-1">
+        <summary className="cursor-pointer text-[11px] text-ink-faint transition-colors hover:text-ink-soft">
+          Technical details
+        </summary>
+        <pre className="mt-1.5 overflow-x-auto rounded-lg bg-panel-2 p-2 font-mono text-[10.5px] leading-relaxed text-ink-soft">{JSON.stringify(v, null, 2).slice(0, 1200)}</pre>
+      </details>
     </div>
   );
+}
+
+/** The network's error codes, said plainly. Unknown codes stay untouched. */
+function plainRefusal(code: string | null, message: string | null): string | null {
+  if (code === "no_compatible_miner") {
+    return "That answer service advertises this kind of question, but the network says its form does not match. Automatic routing picks one that works.";
+  }
+  if (code === "invalid_request_composition" || (message ? /required/i.test(message) : false)) {
+    return null;
+  }
+  if (code === "unknown_miner" || code === "miner_not_found") {
+    return "The network does not know that answer service. Use automatic routing.";
+  }
+  if (code === "rate_limited") return "The network is rate limiting right now. Try again in a moment.";
+  if (code === "unavailable" || code === "service_unavailable") return "The network is temporarily unavailable. Nothing was charged.";
+  return null;
 }
 
 export default function TerminalClient({
@@ -151,6 +203,8 @@ export default function TerminalClient({
   nodeUrl: string;
 }) {
   const [mode, setMode] = useState<"guided" | "advanced">("guided");
+  /** Advanced JSON and provider pinning are for people who work on the protocol. */
+  const [devMode, setDevMode] = useState(false);
 
   // Guided state
   const [intentQuery, setIntentQuery] = useState("");
@@ -219,7 +273,7 @@ export default function TerminalClient({
           setMinerId(initialMiner);
           pushLog(`Miner pre-selected: ${initialMiner}.`, "info");
         }
-        pushLog(`Intent ${body.intent}: ${(body.params ?? []).length} input params, ${body.minerCount} supporting miners live.`, "good");
+        pushLog(`Question type loaded: ${body.intent.toLowerCase().replaceAll("_", " ")}. ${(body.params ?? []).length} field(s) to fill, ${body.minerCount} answer services available.`, "good");
       } catch (err) {
         if (!alive) return;
         const msg = err instanceof Error ? err.message : String(err);
@@ -279,7 +333,8 @@ export default function TerminalClient({
 
   /* ---- preview ------------------------------------------------------ */
 
-  const runPreview = useCallback(async () => {
+  const runPreview = useCallback(async (minerOverride?: string | null) => {
+    const activeMiner = minerOverride === undefined ? minerId : minerOverride;
     const spec = buildSpec();
     if (spec.error) {
       // The node was never called: this is our own completeness check. Saying
@@ -304,8 +359,8 @@ export default function TerminalClient({
     try {
       const payload: Record<string, unknown> =
         mode === "advanced" ? { rawBody: spec.body } : { ...(spec.body as Record<string, unknown>) };
-      if (minerId) payload.miner = minerId;
-      pushLog(`Pre-flight, no payment: the same body execution would send.`, "info");
+      if (activeMiner) payload.miner = activeMiner;
+      pushLog(`Checking with the network. No payment is made by this step.`, "info");
       const res = await fetch("/api/terminal/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -318,7 +373,7 @@ export default function TerminalClient({
         setApprovedOffer(body.offer as Offer);
         setPreviewStatus("challenge");
         const p = body.payment as ChallengeInfo;
-        pushLog(`The node challenges this request: ${p.amount} atomic units of ${p.assetName ?? p.asset} on ${p.network} to ${p.payTo}. Nothing is signed yet.`, "good");
+        pushLog(`Price: $${p.amountUsdCents.toFixed(2)} in ${p.assetName ?? "USD Coin"} on ${chainName(p.network)}. Nothing is signed until you approve.`, "good");
       } else if (body.status === "refused") {
         setPreviewHttp(typeof body.httpStatus === "number" ? body.httpStatus : null);
         setNodeVerdict(body.node ?? body.detail ?? null);
@@ -442,33 +497,37 @@ export default function TerminalClient({
     composed.body === null && composed.error && (selectedIntent !== null || rawJson.trim().length > 0)
       ? composed.error
       : null;
+  // The network's way of saying "this provider's form does not take this question".
+  const isNoCompatibleMiner = JSON.stringify(nodeVerdict ?? "").includes("no_compatible_miner");
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="x-tag">EXPLORER · PAY PER REQUEST · x402 v2</p>
-          <h1 className="x-display-1 mt-3 text-ink">The interactive terminal</h1>
+          <p className="x-tag">ASK A QUESTION · PAY PER ANSWER</p>
+          <h1 className="x-display-1 mt-3 text-ink">Ask the network</h1>
           <p className="mt-3 max-w-[70ch] text-[13.5px] leading-relaxed text-ink-soft">
-            Compose an ask, read the node&apos;s verdict and the x402 price before anything is signed, approve that
-            exact offer, and receive the answer with its receipt and signal.
+            Choose what kind of answer you need, write your question, and see the price before anything is charged.
+            You approve one payment, then get the answer with its receipt.
           </p>
         </div>
-        <div className="rounded-lg border border-edge bg-panel px-4 py-3">
-          <p className="x-label">Payer wallet</p>
-          <p className="tabular mt-1 text-[11.5px] text-ink">
-            {wallet.configured && wallet.address
-              ? `${wallet.address}`
-              : "Not configured. Previews still run; execution cannot sign."}
-          </p>
-        </div>
+        {devMode && (
+          <div className="rounded-lg border border-edge bg-panel px-4 py-3">
+            <p className="x-label">Payment wallet</p>
+            <p className="tabular mt-1 text-[11.5px] text-ink">
+              {wallet.configured && wallet.address
+                ? `${wallet.address}`
+                : "Not configured. Previews still run; execution cannot sign."}
+            </p>
+          </div>
+        )}
       </div>
 
       <ol className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-faint">
-        {(["compose", "preview", "executing", "result"] as const).map((s, i) => (
+        {([["compose", "Write"], ["preview", "Price"], ["executing", "Pay"], ["result", "Answer"]] as const).map(([s, label], i) => (
           <li key={s} className="flex items-center gap-2">
             <span className={`tabular rounded-full px-2 py-0.5 ${stage === s ? "bg-amber-soft text-amber-deep" : stage === "result" && s === "result" ? "text-teal" : ""}`}>
-              {i + 1}. {s}
+              {i + 1}. {label}
             </span>
             {i < 3 && <ChevronRight size={12} aria-hidden />}
           </li>
@@ -478,9 +537,30 @@ export default function TerminalClient({
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* ---------------- compose ---------------- */}
         <section className="rounded-lg border border-edge bg-panel p-5">
-          <div className="flex items-center justify-between">
-            <p className="x-label">Compose the request</p>
-            <div className="flex rounded-lg border border-edge p-0.5" role="tablist" aria-label="Request mode">
+          <div className="flex items-center justify-between gap-3">
+            <p className="x-label">Your question</p>
+            <button
+              type="button"
+              aria-pressed={devMode}
+              onClick={() => {
+                const next = !devMode;
+                setDevMode(next);
+                if (!next) {
+                  setMode("guided");
+                  setMinerId(null);
+                }
+                setPreviewStatus(null);
+                setNodeVerdict(null);
+                setChallenge(null);
+              }}
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${devMode ? "border-amber/50 bg-amber-soft text-amber-deep" : "border-edge text-ink-faint hover:text-ink-soft"}`}
+            >
+              Developer mode
+            </button>
+          </div>
+
+          {devMode && (
+            <div className="mt-3 flex rounded-lg border border-edge p-0.5" role="tablist" aria-label="Request mode">
               {(["guided", "advanced"] as const).map((m) => (
                 <button
                   key={m}
@@ -499,12 +579,12 @@ export default function TerminalClient({
                 </button>
               ))}
             </div>
-          </div>
+          )}
 
           {mode === "guided" ? (
             <div className="mt-4 space-y-4">
               <div>
-                <p className="x-label">1 · Intent</p>
+                <p className="x-label">1 · Kind of answer</p>
                 {selectedIntent ? (
                   <p className="mt-2 text-[12px] text-ink-soft">
                     Selected: <span className="tabular text-ink">{selectedIntent}</span>{" "}
@@ -517,20 +597,20 @@ export default function TerminalClient({
                       <input
                         value={intentQuery}
                         onChange={(e) => setIntentQuery(e.target.value)}
-                        placeholder={`Search ${intents.length} intents…`}
+                        placeholder={`Search ${intents.length} question types…`}
                         aria-label="Search intents"
                         className="h-9 w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
                       />
                     </div>
                     <ul className="mt-2 max-h-44 divide-y divide-edge overflow-y-auto rounded-lg border border-edge bg-panel-2">
                       {filteredIntents.length === 0 ? (
-                        <li className="px-3 py-3 text-[12px] text-ink-faint">No intent matches the search.</li>
+                        <li className="px-3 py-3 text-[12px] text-ink-faint">No question type matches.</li>
                       ) : (
                         filteredIntents.slice(0, 80).map((i) => (
                           <li key={i.intent}>
                             <button onClick={() => setSelectedIntent(i.intent)} className="flex w-full items-baseline justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-panel-3">
                               <span className="tabular text-[11.5px] text-ink">{i.intent.toLowerCase().replaceAll("_", " ")}</span>
-                              <span className="tabular shrink-0 text-[10.5px] text-ink-faint">{i.minerCount} miners</span>
+                              <span className="tabular shrink-0 text-[10.5px] text-ink-faint">{i.minerCount} services</span>
                             </button>
                           </li>
                         ))
@@ -550,7 +630,7 @@ export default function TerminalClient({
               {intentDetail && (
                 <>
                   <div>
-                    <p className="x-label">2 · Parameters{intentDetail.params.length === 0 ? " — none: this intent takes a plain question" : ""}</p>
+                    <p className="x-label">2 · Your question{intentDetail.params.length === 0 ? " (plain language)" : ""}</p>
                     {intentDetail.params.length > 0 ? (
                       <div className="mt-2 space-y-3">
                         {intentDetail.params.map((p) => (
@@ -582,8 +662,14 @@ export default function TerminalClient({
                   </div>
 
                   <div>
-                    <p className="x-label">3 · Supporting miner</p>
-                    <div className="mt-2 space-y-1.5">
+                    <p className="x-label">3 · {devMode ? "Answer service" : "Answered by"}</p>
+                    {!devMode && (
+                      <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
+                        Automatic routing. The network picks an answer service that can take this question, and falls
+                        back if its first choice is down.
+                      </p>
+                    )}
+                    <div className={devMode ? "mt-2 space-y-1.5" : "hidden"}>
                       <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-edge bg-panel-2 px-3 py-2 text-[12px] text-ink-soft transition-colors hover:border-edge-strong">
                         <input type="radio" name="miner" checked={minerId === null} onChange={() => setMinerId(null)} className="mt-0.5 accent-[var(--color-amber)]" />
                         <span>
@@ -599,7 +685,7 @@ export default function TerminalClient({
                             checked={minerId === m.minerId || minerId === m.slug}
                             onChange={() => {
                               setMinerId(m.minerId);
-                              pushLog(`Miner pinned: ${m.name} (${m.minerId}). The ask goes direct; no fallback.`, "info");
+                              pushLog(`Using ${m.name} directly. If it cannot take the question, there is no fallback.`, "info");
                             }}
                             className="mt-0.5 accent-[var(--color-amber)]"
                           />
@@ -643,8 +729,8 @@ export default function TerminalClient({
             </div>
           )}
 
-          <button onClick={runPreview} disabled={!canPreview} className="btn-primary mt-5 w-full !justify-center">
-            Preview the request (no payment) <ArrowRight size={14} aria-hidden />
+          <button onClick={() => void runPreview()} disabled={!canPreview} className="btn-primary mt-5 w-full !justify-center">
+            See the price <ArrowRight size={14} aria-hidden />
           </button>
           {composeProblem && !canPreview && (
             <p className="mt-2.5 flex items-start gap-1.5 text-[12px] leading-snug text-ink-soft">
@@ -661,12 +747,12 @@ export default function TerminalClient({
 
         {/* ---------------- verdict / price ---------------- */}
         <section className="rounded-lg border border-edge bg-panel p-5">
-          <p className="x-label">The node&apos;s verdict and the live price</p>
+          <p className="x-label">What the network said</p>
 
           {previewStatus === null && !failure && (
-            <div className="mt-4 rounded-lg border border-dashed border-edge bg-panel-2 p-6 text-[12.5px] text-ink-faint">
-              Compose the request, then run the preview. The pre-flight posts the body with no payment: the node
-              validates intent, params and miner before charging, and a valid ask returns the current x402 price
+            <div className="mt-4 rounded-lg border border-dashed border-edge bg-panel-2 p-6 text-[12.5px] leading-relaxed text-ink-faint">
+              Write your question and see the price. The check is free: the network confirms it can answer before any
+              payment exists, and you approve the exact amount afterwards.
             </div>
           )}
 
@@ -681,10 +767,17 @@ export default function TerminalClient({
           )}
 
           {previewStatus === "refused" && !failure && (
-            <div className="mt-4 rounded-lg border border-risk/50 bg-panel-2 p-4">
-              <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-risk"><XCircle size={13} aria-hidden /> The node refused this request before payment</p>
-              {previewHttp != null && <p className="tabular mt-1 text-[11px] text-ink-faint">HTTP {previewHttp}</p>}
+            <div className="mt-4 rounded-lg border border-edge-strong bg-panel-2 p-4">
+              <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+                <XCircle size={13} aria-hidden className="text-risk" /> That request did not go through
+              </p>
               <NodeVerdict verdict={nodeVerdict} />
+              {isNoCompatibleMiner && (
+                <button onClick={() => void runPreview(null)} className="btn-quiet mt-3 !min-h-8 !text-[12px]">
+                  Use automatic routing <ArrowRight size={12} aria-hidden />
+                </button>
+              )}
+              <p className="mt-3 text-[11.5px] text-ink-faint">Nothing was charged.</p>
             </div>
           )}
 
@@ -697,8 +790,21 @@ export default function TerminalClient({
 
           {challenge && !failure && (
             <div className="mt-4 rounded-lg border border-edge bg-panel-3 p-4">
-              <p className="flex items-center gap-1.5 text-[12px] font-semibold text-teal"><TerminalIcon size={13} aria-hidden /> Payment requirements — the live x402 challenge</p>
+              <p className="flex items-center gap-1.5 text-[12px] font-semibold text-teal">
+                <TerminalIcon size={13} aria-hidden /> Price for this question
+              </p>
+              <p className="tabular mt-3 text-[28px] font-semibold leading-none text-ink">
+                ${challenge.payment.amountUsdCents.toFixed(2)}
+              </p>
+              <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
+                Paid once in {challenge.payment.assetName ?? "USDC"} on {chainName(challenge.payment.network)}. Nothing is
+                charged until you approve this exact amount.
+              </p>
 
+              <details open={devMode} className="mt-4 border-t border-edge pt-3">
+                <summary className="cursor-pointer text-[11.5px] text-ink-faint transition-colors hover:text-ink-soft">
+                  Payment details
+                </summary>
               <dl className="mt-3 space-y-1.5 text-[12px]">
                 <div className="flex justify-between gap-3">
                   <dt className="shrink-0 text-ink-faint">Amount</dt>
@@ -740,8 +846,9 @@ export default function TerminalClient({
                   </div>
                 )}
               </dl>
+              </details>
 
-              {bodyPlan && (
+              {devMode && bodyPlan && (
                 <div className="mt-3 rounded-lg border border-edge bg-panel p-2.5">
                   <p className="x-label">What would be sent</p>
                   <p className="tabular mt-1 text-[10.5px] text-ink-faint">POST {bodyPlan.path}</p>
@@ -758,10 +865,10 @@ export default function TerminalClient({
         <section className="mt-6 rounded-lg border border-amber/50 bg-panel p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-[62ch]">
-              <p className="x-label">Approve this exact payment</p>
+              <p className="x-label">Approve the payment</p>
               <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-                Approving means signing exactly this amount to this recipient, once. Before signing, the server re-reads
-                the live challenge; if the price or recipient has changed, it refuses with the fresh offer and pays nothing.
+                One payment for one answer. The price is checked again at the moment of signing; if it has changed, the
+                payment is refused and you are charged nothing.
               </p>
             </div>
             <label className="flex cursor-pointer items-start gap-2.5 text-[12.5px] text-ink">
@@ -774,7 +881,7 @@ export default function TerminalClient({
               {executing ? (
                 <><Loader2 size={14} className="animate-spin" aria-hidden /> Executing…</>
               ) : (
-                <>Execute — pay {challenge.payment.amount} atomic</>
+                <>Pay ${challenge.payment.amountUsdCents.toFixed(2)} and send</>
               )}
             </button>
             <button onClick={() => { setChallenge(null); setPreviewStatus(null); setApprovalBox(false); setStage("compose"); }} className="btn-quiet" disabled={executing}>
@@ -790,7 +897,7 @@ export default function TerminalClient({
           <p className="flex items-center gap-1.5 text-[13px] font-semibold text-risk"><XCircle size={14} aria-hidden /> {failure.heading}</p>
           <p className="mt-2 max-w-[72ch] text-[12.5px] leading-relaxed text-ink-soft">{failure.detail}</p>
           {failure.node !== null && failure.node !== undefined && <NodeVerdict verdict={failure.node} />}
-          <button onClick={() => { setFailure(null); setStage("compose"); }} className="btn-quiet mt-4">Compose again</button>
+          <button onClick={() => { setFailure(null); setStage("compose"); }} className="btn-quiet mt-4">Start again</button>
         </section>
       )}
 
@@ -830,9 +937,17 @@ export default function TerminalClient({
               {answer.answer.durationMs ? ` · ${answer.answer.durationMs} ms` : ""}
               {answer.answer.costUsd != null ? ` · ${answer.answer.costUsd.toFixed(2)} USD` : ""}
             </p>
-            <div className="mt-3 max-h-80 overflow-auto rounded-lg border border-edge bg-panel-2 p-3">
-              <pre className="font-mono text-[11px] leading-relaxed text-ink">{JSON.stringify(answer.answer.result ?? {}, null, 2).slice(0, 5000)}</pre>
-            </div>
+            {answerParagraphs(answer.answer.result).map((p, i) => (
+              <p key={i} className="mt-3 text-[14px] leading-relaxed text-ink">{p}</p>
+            ))}
+            <details className="mt-3">
+              <summary className="cursor-pointer text-[11.5px] text-ink-faint transition-colors hover:text-ink-soft">
+                Full response
+              </summary>
+              <div className="mt-2 max-h-80 overflow-auto rounded-lg border border-edge bg-panel-2 p-3">
+                <pre className="font-mono text-[11px] leading-relaxed text-ink">{JSON.stringify(answer.answer.result ?? {}, null, 2).slice(0, 5000)}</pre>
+              </div>
+            </details>
             {answer.answer.fieldStatus && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {Object.entries(answer.answer.fieldStatus).map(([field, status]) => (
@@ -917,7 +1032,7 @@ export default function TerminalClient({
       {/* ---------------- log ---------------- */}
       {log.length > 0 && (
         <section className="mt-6 rounded-lg border border-edge bg-panel p-4">
-          <p className="x-label">What this terminal did</p>
+          <p className="x-label">What happened</p>
           <ol className="mt-2 space-y-1">
             {log.map((l, i) => (
               <li key={`${l.ts}-${i}`} className={`tabular text-[10.5px] leading-relaxed ${l.tone === "good" ? "text-teal" : l.tone === "bad" ? "text-risk" : l.tone === "warn" ? "text-amber" : "text-ink-faint"}`}>
