@@ -1,16 +1,17 @@
 import Link from "next/link";
 
 /** Try to extract a brief + structured papers from a raw outcome string. */
-function parseOutcome(summary: string): { brief: string | null; papers: Array<{ title: string; doi?: string }> | null; raw: string } {
+function parseOutcome(summary: string): { brief: string | null; papers: Array<{ title: string; doi?: string }> | null; total: number | null; raw: string } {
   try {
     const o = JSON.parse(summary) as Record<string, unknown>;
     const brief = typeof o.brief === "string" ? o.brief : null;
     const titles = Array.isArray(o.paper_titles) ? o.paper_titles.filter((t): t is string => typeof t === "string") : [];
     const dois = Array.isArray(o.dois) ? o.dois.filter((d): d is string => typeof d === "string") : [];
     const papers = titles.length > 0 ? titles.map((title, i) => ({ title, doi: dois[i] })) : null;
-    return { brief, papers, raw: summary };
+    const total = typeof o.total_matches === "number" ? o.total_matches : null;
+    return { brief, papers, total, raw: summary };
   } catch {
-    return { brief: null, papers: null, raw: summary };
+    return { brief: null, papers: null, total: null, raw: summary };
   }
 }
 
@@ -149,18 +150,23 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
               <div className="mt-3">
                 {parsed.brief && <p className="text-[14px] leading-relaxed text-ink">{parsed.brief}</p>}
                 {parsed.papers && (
-                  <ul className="mt-3 space-y-2">
-                    {parsed.papers.map((p, i) => (
-                      <li key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-                        <p className="text-[13px] leading-snug text-ink">{p.title}</p>
-                        {p.doi && (
-                          <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2">
-                            {p.doi}
-                          </a>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="mt-3">
+                    {parsed.total != null && (
+                      <p className="mb-2 text-[11.5px] text-ink-faint">{parsed.total.toLocaleString()} matches · showing {parsed.papers.length}</p>
+                    )}
+                    <ul className="space-y-2">
+                      {parsed.papers.map((p, i) => (
+                        <li key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+                          <p className="text-[13px] leading-snug text-ink">{p.title}</p>
+                          {p.doi && (
+                            <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2">
+                              Open on DOI · {p.doi}
+                            </a>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
                 {!parsed.brief && !parsed.papers && (
                   <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink">{parsed.raw}</p>

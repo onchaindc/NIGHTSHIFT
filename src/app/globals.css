@@ -59,27 +59,28 @@
 /* Night theme — applied via .dark on <html> */
 html.dark {
   color-scheme: dark;
-  --color-night: #0f1115;
-  --color-panel: #171a20;
-  --color-panel-2: #1c2027;
-  --color-panel-3: #14171c;
-  --color-edge: #2a2e36;
-  --color-edge-strong: #3a3f48;
-  --color-hairline: #2a2e36;
-  --color-ink: #e8e6e1;
-  --color-ink-soft: #b8b5ad;
-  --color-ink-faint: #8a887f;
-  --color-amber: #d97706;
-  --color-amber-deep: #b45309;
+  /* Warm dark — close to the light paper's temperature, not cold slate */
+  --color-night: #14120f;
+  --color-panel: #1c1a16;
+  --color-panel-2: #221f1a;
+  --color-panel-3: #181612;
+  --color-edge: #2e2a24;
+  --color-edge-strong: #3f3a32;
+  --color-hairline: #2e2a24;
+  --color-ink: #efece6;
+  --color-ink-soft: #c4bfb4;
+  --color-ink-faint: #9a9488;
+  --color-amber: #e08a2c;
+  --color-amber-deep: #c46b1a;
   --color-amber-soft: #2a1f12;
-  --color-teal: #14b8a6;
-  --color-blue: #60a5fa;
-  --color-risk: #f87171;
-  --color-ivory: #1c2027;
-  --color-background: #0f1115;
-  --color-background2: #0f1115;
-  --color-surface: #171a20;
-  --color-surface-2: #1c2027;
+  --color-teal: #2dd4bf;
+  --color-blue: #7dd3fc;
+  --color-risk: #fca5a5;
+  --color-ivory: #221f1a;
+  --color-background: #14120f;
+  --color-background2: #14120f;
+  --color-surface: #1c1a16;
+  --color-surface-2: #221f1a;
 }
 
 html {
