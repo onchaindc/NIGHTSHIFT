@@ -2,18 +2,18 @@ import { NextResponse } from "next/server";
 import { privateKeyToAccount } from "viem/accounts";
 import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { ExactEvmScheme } from "@x402/evm";
-import { telegraphNodeUrl, selectTelegraphRequirement, exactEvmOffer, decodeChallenge } from "@/lib/telegraph/client";
+import {
+  telegraphNodeUrl,
+  selectTelegraphRequirement,
+  exactEvmOffer,
+  decodeChallenge,
+  diagnosePaymentRejection,
+} from "@/lib/telegraph/client";
 
 /**
  * POST /api/terminal/pay-with-key
  *
  * Signs and sends a Telegraph ask using the caller's in-app private key.
- * The browser cannot complete the x402 handshake (CORS hides the challenge
- * header, and the client-side payload encoding is unreliable). This route
- * uses the same server path that already works for TELEGRAPH_EVM_PRIVATE_KEY,
- * but with the key the user supplied for this one request.
- *
- * Body: { urlPath: string; body: unknown; privateKey: string; network: string; asset: string; payTo: string; amount: string }
  * The key is used only in memory for this request and is never logged or stored.
  */
 export const maxDuration = 60;
@@ -45,9 +45,8 @@ export async function POST(req: Request) {
   const node = telegraphNodeUrl();
   const account = privateKeyToAccount(input.privateKey as `0x${string}`);
   const network = (input.network ?? "eip155:11155111") as `${string}:${string}`;
-  const asset = input.asset ?? "";
 
-  // Probe first to pin the exact offer (same as the working server path).
+  // Probe first to pin the exact offer.
   let probeRes: Response;
   try {
     probeRes = await fetch(`${node}${urlPath}`, {
@@ -70,6 +69,14 @@ export async function POST(req: Request) {
   const offer = exactEvmOffer(challenge);
   if (!challenge || !offer || !offer.asset || !offer.payTo) {
     return NextResponse.json({ error: "challenge incomplete" }, { status: 502 });
+  }
+
+  // Check balance before signing so we can fail fast with a clear message.
+  const diagnosis = await diagnosePaymentRejection(account.address, challenge);
+  if (/holds 0 /i.test(diagnosis) || /must cover/i.test(diagnosis) && /0 whole/i.test(diagnosis)) {
+    return NextResponse.json({
+      error: `Wallet has no Telegraph USDC. Mint some from the Wallet page, then try again. (${diagnosis})`,
+    }, { status: 402 });
   }
 
   const client = x402Client.fromConfig({
@@ -103,6 +110,17 @@ export async function POST(req: Request) {
     parsed = JSON.parse(text);
   } catch {
     parsed = text.slice(0, 400);
+  }
+
+  if (res.status === 402) {
+    const fresh = decodeChallenge(res.headers.get("payment-required"));
+    const why = await diagnosePaymentRejection(account.address, fresh ?? challenge);
+    return NextResponse.json({
+      status: 402,
+      body: parsed,
+      error: why,
+      payer: account.address,
+    });
   }
 
   return NextResponse.json({
