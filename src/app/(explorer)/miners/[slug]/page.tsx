@@ -57,9 +57,6 @@ export default async function MinerDetailPage({ params }: { params: Promise<{ sl
         <Link href="/miners" className="inline-flex items-center gap-1.5 text-[12px] text-amber hover:text-amber-soft">
           <ArrowLeft size={12} aria-hidden /> All miners
         </Link>
-        <Link href="/watch" className="btn-quiet !min-h-8 !text-[12px]">
-          Watch this service
-        </Link>
       </div>
 
       <header className="mt-6 border-b border-edge pb-8">
