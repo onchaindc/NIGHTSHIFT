@@ -16,8 +16,17 @@ export function AppPrivyProvider({
     <PrivyProvider
       appId={appId}
       config={{
-        appearance: { theme: "light", accentColor: "#0f766e" },
-        embeddedWallets: { ethereum: { createOnLogin: "users-without-wallets" } },
+        appearance: {
+          theme: "light",
+          accentColor: "#0f766e",
+          walletChainType: "ethereum-only",
+        },
+        loginMethods: ["email", "wallet", "google"],
+        embeddedWallets: {
+          ethereum: {
+            createOnLogin: "users-without-wallets",
+          },
+        },
       }}
     >
       {children}
