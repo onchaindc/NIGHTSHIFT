@@ -208,7 +208,8 @@ export default async function OverviewPage() {
               The public view of <span className="italic text-amber-deep">Telegraph.</span>
             </h1>
             <p className="mt-6 max-w-[52ch] text-[16px] leading-relaxed text-pretty text-ink-soft">
-              One robot can need weather, navigation and object detection. Those are three different Intents with three different rankings. Telegraph lets one application consume each task from the market that currently performs best.
+              Telegraph pays miners per answer. Here is the public view: who is live, the questions they accept, the
+              validators behind them, and the price the node quotes before you commit anything.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href="/miners" className="btn-primary !min-h-11 !px-5">
