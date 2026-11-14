@@ -99,6 +99,9 @@ export default async function MinersPage({
             Every entry is a registry record: an independent service with declared endpoints, schemas, supported
             intents and price. Ordered by reported requests served, where a miner reports it.
           </p>
+          <p className="mt-2 max-w-[64ch] text-[12.5px] leading-relaxed text-ink-faint">
+            When asking a question, automatic routing is the recommended path. Pinning a specific miner is advanced and can fail if the service advertises an intent but cannot accept the request form.
+          </p>
         </div>
         <form action="/miners" method="GET" className="flex items-center gap-2">
           {intentSlug && <input type="hidden" name="intent" value={intentSlug} />}
