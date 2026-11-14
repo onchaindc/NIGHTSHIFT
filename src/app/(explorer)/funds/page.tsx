@@ -10,31 +10,41 @@ const SEPOLIA_RPCS = [
   "https://eth-sepolia.api.onfinality.io/public",
 ];
 const SEPOLIA_CHAIN_ID = 11155111;
+/** Telegraph test USDC on Sepolia. Anyone can mint it. */
+const TELEGRAPH_USDC = "0xcc194e1a843B658526D0D5C431f670028582Ae17";
 
-async function fetchEthBalance(address: string): Promise<string> {
-  for (const rpc of SEPOLIA_RPCS) {
+async function rpc(method: string, params: unknown[]): Promise<string | null> {
+  for (const url of SEPOLIA_RPCS) {
     try {
-      const res = await fetch(rpc, {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "eth_getBalance",
-          params: [address, "latest"],
-        }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       });
       const data = await res.json();
-      if (data.result) {
-        const wei = BigInt(data.result);
-        const eth = Number(wei) / 1e18;
-        return eth.toFixed(6).replace(/\.?0+$/, "") || "0";
-      }
+      if (data.result) return data.result as string;
     } catch {
       /* try next */
     }
   }
-  return "0";
+  return null;
+}
+
+async function fetchEthBalance(address: string): Promise<string> {
+  const result = await rpc("eth_getBalance", [address, "latest"]);
+  if (!result) return "0";
+  const eth = Number(BigInt(result)) / 1e18;
+  return eth.toFixed(6).replace(/\.?0+$/, "") || "0";
+}
+
+async function fetchUsdcBalance(address: string): Promise<string> {
+  // balanceOf(address) selector 0x70a08231
+  const data = `0x70a08231${address.replace(/^0x/i, "").toLowerCase().padStart(64, "0")}`;
+  const result = await rpc("eth_call", [{ to: TELEGRAPH_USDC, data }, "latest"]);
+  if (!result || result === "0x") return "0";
+  const raw = BigInt(result);
+  const usdc = Number(raw) / 1e6; // 6 decimals
+  return usdc.toFixed(2).replace(/\.?0+$/, "") || "0";
 }
 
 function shortAddr(addr: string) {
@@ -44,13 +54,15 @@ function shortAddr(addr: string) {
 function WalletCard({
   label,
   address,
-  balance,
+  ethBalance,
+  usdcBalance,
   onDeposit,
   onWithdraw,
 }: {
   label: string;
   address: string;
-  balance: string | null;
+  ethBalance: string | null;
+  usdcBalance: string | null;
   onDeposit?: () => void;
   onWithdraw?: () => void;
 }) {
@@ -73,11 +85,22 @@ function WalletCard({
           <Wallet size={16} strokeWidth={1.8} />
         </div>
       </div>
-      <p className="mt-5 text-[32px] font-semibold tabular leading-none tracking-tight text-ink">
-        {balance === null ? "…" : balance}
-        <span className="ml-1.5 text-[15px] font-medium text-ink-soft">ETH</span>
-      </p>
-      <p className="mt-1.5 text-[11px] text-ink-faint">Sepolia testnet</p>
+
+      <div className="mt-5 flex items-baseline gap-6">
+        <div>
+          <p className="text-[28px] font-semibold tabular leading-none tracking-tight text-ink">
+            {usdcBalance === null ? "…" : usdcBalance}
+          </p>
+          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">USDC</p>
+        </div>
+        <div>
+          <p className="text-[18px] font-medium tabular leading-none text-ink-soft">
+            {ethBalance === null ? "…" : ethBalance}
+          </p>
+          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">ETH</p>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] text-ink-faint">Sepolia testnet · asks are paid in USDC</p>
 
       <div className="mt-5 flex flex-wrap gap-2">
         <button
@@ -208,6 +231,8 @@ function WithdrawModal({
   );
 }
 
+type Balances = { eth: string | null; usdc: string | null };
+
 export default function FundsPage() {
   const { ready, authenticated, login, logout } = usePrivy();
   const { wallets } = useWallets();
@@ -216,7 +241,7 @@ export default function FundsPage() {
   const [creating, setCreating] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [balances, setBalances] = useState<Record<string, string | null>>({});
+  const [balances, setBalances] = useState<Record<string, Balances>>({});
   const [showDeposit, setShowDeposit] = useState<string | null>(null);
   const [showWithdraw, setShowWithdraw] = useState<string | null>(null);
 
@@ -226,8 +251,8 @@ export default function FundsPage() {
   const refreshBalances = async () => {
     const addrs = [embedded?.address, external?.address].filter(Boolean) as string[];
     for (const addr of addrs) {
-      const bal = await fetchEthBalance(addr);
-      setBalances((prev) => ({ ...prev, [addr]: bal }));
+      const [eth, usdc] = await Promise.all([fetchEthBalance(addr), fetchUsdcBalance(addr)]);
+      setBalances((prev) => ({ ...prev, [addr]: { eth, usdc } }));
     }
   };
 
@@ -238,8 +263,8 @@ export default function FundsPage() {
     (async () => {
       for (const addr of addrs) {
         if (cancelled) return;
-        const bal = await fetchEthBalance(addr);
-        if (!cancelled) setBalances((prev) => ({ ...prev, [addr]: bal }));
+        const [eth, usdc] = await Promise.all([fetchEthBalance(addr), fetchUsdcBalance(addr)]);
+        if (!cancelled) setBalances((prev) => ({ ...prev, [addr]: { eth, usdc } }));
       }
     })();
     return () => {
@@ -309,7 +334,8 @@ export default function FundsPage() {
             <WalletCard
               label="In-app wallet"
               address={embedded.address}
-              balance={balances[embedded.address] ?? null}
+              ethBalance={balances[embedded.address]?.eth ?? null}
+              usdcBalance={balances[embedded.address]?.usdc ?? null}
               onDeposit={() => setShowDeposit(embedded.address)}
               onWithdraw={() => setShowWithdraw(embedded.address)}
             />
@@ -318,7 +344,8 @@ export default function FundsPage() {
             <WalletCard
               label="Connected wallet"
               address={external.address}
-              balance={balances[external.address] ?? null}
+              ethBalance={balances[external.address]?.eth ?? null}
+              usdcBalance={balances[external.address]?.usdc ?? null}
             />
           )}
           <div className="flex items-center justify-between pt-1">
@@ -399,9 +426,10 @@ export default function FundsPage() {
               </button>
             </div>
             <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-              Send Sepolia ETH to this address from any wallet. It will appear here after the transaction confirms.
+              Send Sepolia ETH (for gas) and Telegraph test USDC to this address. Asks are paid in USDC.
             </p>
             <p className="mt-3 break-all rounded-lg bg-panel-2 px-3 py-2 tabular text-[12px] text-ink">{showDeposit}</p>
+            <p className="mt-2 text-[11px] text-ink-faint">Test USDC: {TELEGRAPH_USDC}</p>
             <button
               type="button"
               onClick={() => {
