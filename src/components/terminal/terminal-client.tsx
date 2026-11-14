@@ -618,15 +618,7 @@ export default function TerminalClient({
             You approve one payment, then get the answer with its receipt.
           </p>
         </div>
-        <div className="rounded-lg border border-edge bg-panel px-4 py-3">
-          <p className="x-label">Your wallet</p>
-          <p className="tabular mt-1 break-all text-[11.5px] text-ink">
-            {inAppWallet ? inAppWallet.address : "Creating…"}
-          </p>
-          <p className="mt-1.5 text-[11px] text-ink-faint">
-            Fund this address with testnet USDC to pay. The key stays in this browser.
-          </p>
-        </div>
+
       </div>
 
       <ol className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-faint">
