@@ -104,6 +104,16 @@ interface ReceiptInfo {
 
 type PipelineStage = "compose" | "preview" | "executing" | "result";
 
+/** Structured papers when the result looks like an academic search. */
+function paperList(result: unknown): Array<{ title: string; doi?: string }> | null {
+  if (!result || typeof result !== "object") return null;
+  const o = result as Record<string, unknown>;
+  const titles = Array.isArray(o.paper_titles) ? o.paper_titles.filter((t): t is string => typeof t === "string") : [];
+  const dois = Array.isArray(o.dois) ? o.dois.filter((d): d is string => typeof d === "string") : [];
+  if (titles.length === 0) return null;
+  return titles.map((title, i) => ({ title, doi: dois[i] }));
+}
+
 /** The answer's own words, when the provider returns a labelled text field. */
 function answerParagraphs(result: unknown): string[] {
   if (typeof result === "string") return result.trim() ? [result.trim()] : [];
@@ -954,23 +964,48 @@ export default function TerminalClient({
             {answerParagraphs(answer.answer.result).map((p, i) => (
               <p key={i} className="mt-3 text-[14px] leading-relaxed text-ink">{p}</p>
             ))}
-            <details className="mt-3">
+            {(() => {
+              const papers = paperList(answer.answer.result);
+              if (!papers) return null;
+              return (
+                <ul className="mt-4 space-y-2.5">
+                  {papers.map((p, i) => (
+                    <li key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+                      <p className="text-[13px] leading-snug text-ink">{p.title}</p>
+                      {p.doi && (
+                        <a
+                          href={`https://doi.org/${p.doi}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2 hover:text-teal"
+                        >
+                          {p.doi}
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
+            <details className="mt-4">
               <summary className="cursor-pointer text-[11.5px] text-ink-faint transition-colors hover:text-ink-soft">
-                Full response
+                Technical details
               </summary>
-              <div className="mt-2 max-h-80 overflow-auto rounded-lg border border-edge bg-panel-2 p-3">
-                <pre className="font-mono text-[11px] leading-relaxed text-ink">{JSON.stringify(answer.answer.result ?? {}, null, 2).slice(0, 5000)}</pre>
+              <div className="mt-2 space-y-2">
+                {answer.answer.fieldStatus && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(answer.answer.fieldStatus).map(([field, status]) => (
+                      <span key={field} className={`tabular rounded-full px-2 py-0.5 text-[10px] ${status === "ok" ? "bg-teal/10 text-teal" : "bg-risk/10 text-risk"}`}>
+                        {field}: {String(status)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="max-h-80 overflow-auto rounded-lg border border-edge bg-panel-2 p-3">
+                  <pre className="font-mono text-[11px] leading-relaxed text-ink">{JSON.stringify(answer.answer.result ?? {}, null, 2).slice(0, 5000)}</pre>
+                </div>
               </div>
             </details>
-            {answer.answer.fieldStatus && (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {Object.entries(answer.answer.fieldStatus).map(([field, status]) => (
-                  <span key={field} className={`tabular rounded-full px-2 py-0.5 text-[10px] ${status === "ok" ? "bg-teal/10 text-teal" : "bg-risk/10 text-risk"}`}>
-                    {field}: {String(status)}
-                  </span>
-                ))}
-              </div>
-            )}
             {answer.answer.shapeError && <p className="mt-2 text-[11px] text-amber-deep">The intended shape was not applied (raw result): {answer.answer.shapeError}</p>}
             {answer.answer.warnings != null && <p className="mt-2 text-[11px] text-amber-deep">Warnings: {JSON.stringify(answer.answer.warnings)}</p>}
             <p className="mt-3 text-[11px] text-ink-faint">Delivery is not verification. Check the signal in the receipt panel.</p>
