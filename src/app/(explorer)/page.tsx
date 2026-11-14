@@ -205,7 +205,7 @@ export default async function OverviewPage() {
               <NetworkBadge live={allOk} />
             </div>
             <h1 className="x-display-hero mt-6 max-w-[20ch] text-balance text-ink">
-              The public view of Telegraph.
+              The public view of <span className="italic text-amber-deep">Telegraph.</span>
             </h1>
             <p className="mt-6 max-w-[52ch] text-[16px] leading-relaxed text-pretty text-ink-soft">
               Telegraph pays miners per answer. Here is the public view: who is live, the questions they accept, the
