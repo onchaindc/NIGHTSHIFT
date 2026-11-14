@@ -208,8 +208,7 @@ export default async function OverviewPage() {
               The public view of <span className="italic text-amber-deep">Telegraph.</span>
             </h1>
             <p className="mt-6 max-w-[52ch] text-[16px] leading-relaxed text-pretty text-ink-soft">
-              Telegraph pays miners per answer. Here is the public view: who is live, the questions they accept, the
-              validators behind them, and the price the node quotes before you commit anything.
+              NIGHTSHIFT reads the Telegraph node and shows who is live, what they serve, and the price before you pay. Discovery is free. Nothing is signed until you approve the exact offer.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href="/miners" className="btn-primary !min-h-11 !px-5">
