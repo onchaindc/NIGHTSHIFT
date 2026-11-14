@@ -105,13 +105,14 @@ interface ReceiptInfo {
 type PipelineStage = "compose" | "preview" | "executing" | "result";
 
 /** Structured papers when the result looks like an academic search. */
-function paperList(result: unknown): Array<{ title: string; doi?: string }> | null {
+function paperList(result: unknown): { papers: Array<{ title: string; doi?: string }>; total: number | null } | null {
   if (!result || typeof result !== "object") return null;
   const o = result as Record<string, unknown>;
   const titles = Array.isArray(o.paper_titles) ? o.paper_titles.filter((t): t is string => typeof t === "string") : [];
   const dois = Array.isArray(o.dois) ? o.dois.filter((d): d is string => typeof d === "string") : [];
   if (titles.length === 0) return null;
-  return titles.map((title, i) => ({ title, doi: dois[i] }));
+  const total = typeof o.total_matches === "number" ? o.total_matches : null;
+  return { papers: titles.map((title, i) => ({ title, doi: dois[i] })), total };
 }
 
 /** The answer's own words, when the provider returns a labelled text field. */
@@ -965,26 +966,31 @@ export default function TerminalClient({
               <p key={i} className="mt-3 text-[14px] leading-relaxed text-ink">{p}</p>
             ))}
             {(() => {
-              const papers = paperList(answer.answer.result);
-              if (!papers) return null;
+              const parsed = paperList(answer.answer.result);
+              if (!parsed) return null;
               return (
-                <ul className="mt-4 space-y-2.5">
-                  {papers.map((p, i) => (
-                    <li key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-                      <p className="text-[13px] leading-snug text-ink">{p.title}</p>
-                      {p.doi && (
-                        <a
-                          href={`https://doi.org/${p.doi}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2 hover:text-teal"
-                        >
-                          {p.doi}
-                        </a>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <div className="mt-4">
+                  {parsed.total != null && (
+                    <p className="mb-2 text-[11.5px] text-ink-faint">{parsed.total.toLocaleString()} matches · showing {parsed.papers.length}</p>
+                  )}
+                  <ul className="space-y-2.5">
+                    {parsed.papers.map((p, i) => (
+                      <li key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+                        <p className="text-[13px] leading-snug text-ink">{p.title}</p>
+                        {p.doi && (
+                          <a
+                            href={`https://doi.org/${p.doi}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2 hover:text-teal"
+                          >
+                            Open on DOI · {p.doi}
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               );
             })()}
             <details className="mt-4">
