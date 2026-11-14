@@ -2,7 +2,7 @@
 
 import { usePrivy, useWallets, useConnectWallet, useCreateWallet, useSendTransaction } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
-import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X } from "lucide-react";
+import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins } from "lucide-react";
 
 const SEPOLIA_RPCS = [
   "https://ethereum-sepolia-rpc.publicnode.com",
@@ -10,10 +10,9 @@ const SEPOLIA_RPCS = [
   "https://eth-sepolia.api.onfinality.io/public",
 ];
 const SEPOLIA_CHAIN_ID = 11155111;
-/** Circle's official Sepolia USDC (what most faucets give). */
 const CIRCLE_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
-/** Telegraph's own test USDC. Asks are paid in this token. */
 const TELEGRAPH_USDC = "0xcc194e1a843B658526D0D5C431f670028582Ae17";
+const MINT_AMOUNT = 10_000_000n; // 10 USDC (6 decimals)
 
 async function rpc(method: string, params: unknown[]): Promise<string | null> {
   for (const url of SEPOLIA_RPCS) {
@@ -52,6 +51,13 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+/** mint(address,uint256) calldata. Selector 0x40c10f19. */
+function mintCalldata(to: string, amount: bigint): `0x${string}` {
+  const addr = to.replace(/^0x/i, "").toLowerCase().padStart(64, "0");
+  const amt = amount.toString(16).padStart(64, "0");
+  return `0x40c10f19${addr}${amt}` as `0x${string}`;
+}
+
 function WalletCard({
   label,
   address,
@@ -60,6 +66,8 @@ function WalletCard({
   telegraphUsdc,
   onDeposit,
   onWithdraw,
+  onMint,
+  minting,
 }: {
   label: string;
   address: string;
@@ -68,6 +76,8 @@ function WalletCard({
   telegraphUsdc: string | null;
   onDeposit?: () => void;
   onWithdraw?: () => void;
+  onMint?: () => void;
+  minting?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -109,7 +119,7 @@ function WalletCard({
           <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">ETH</p>
         </div>
       </div>
-      <p className="mt-2 text-[11px] text-ink-faint">Sepolia · asks are paid in Telegraph USDC, not Circle USDC</p>
+      <p className="mt-2 text-[11px] text-ink-faint">Sepolia · asks are paid in Telegraph USDC</p>
 
       <div className="mt-5 flex flex-wrap gap-2">
         <button
@@ -120,6 +130,17 @@ function WalletCard({
           {copied ? <Check size={13} className="text-teal" /> : <Copy size={13} />}
           {copied ? "Copied" : "Copy address"}
         </button>
+        {onMint && (
+          <button
+            type="button"
+            onClick={onMint}
+            disabled={minting}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[12px] text-teal transition-colors hover:bg-teal/15 disabled:opacity-50"
+          >
+            <Coins size={13} />
+            {minting ? "Minting…" : "Mint 10 test USDC"}
+          </button>
+        )}
         {onDeposit && (
           <button
             type="button"
@@ -247,8 +268,10 @@ export default function FundsPage() {
   const { wallets } = useWallets();
   const { connectWallet } = useConnectWallet();
   const { createWallet } = useCreateWallet();
+  const { sendTransaction } = useSendTransaction();
   const [creating, setCreating] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [minting, setMinting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [balances, setBalances] = useState<Record<string, Balances>>({});
   const [showDeposit, setShowDeposit] = useState<string | null>(null);
@@ -288,6 +311,27 @@ export default function FundsPage() {
       cancelled = true;
     };
   }, [embedded?.address, external?.address]);
+
+  const handleMint = async () => {
+    if (!embedded) return;
+    setError(null);
+    setMinting(true);
+    try {
+      await sendTransaction(
+        {
+          to: TELEGRAPH_USDC as `0x${string}`,
+          data: mintCalldata(embedded.address, MINT_AMOUNT),
+          chainId: SEPOLIA_CHAIN_ID,
+        },
+        { address: embedded.address },
+      );
+      setTimeout(refreshBalances, 4000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Mint failed");
+    } finally {
+      setMinting(false);
+    }
+  };
 
   const handleCreateInApp = async () => {
     setError(null);
@@ -356,6 +400,8 @@ export default function FundsPage() {
               telegraphUsdc={balances[embedded.address]?.telegraph ?? null}
               onDeposit={() => setShowDeposit(embedded.address)}
               onWithdraw={() => setShowWithdraw(embedded.address)}
+              onMint={handleMint}
+              minting={minting}
             />
           )}
           {external && (
@@ -445,7 +491,7 @@ export default function FundsPage() {
               </button>
             </div>
             <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-              Send Sepolia ETH (for gas). Asks are paid in Telegraph USDC ({TELEGRAPH_USDC.slice(0, 8)}…), not Circle USDC.
+              Send Sepolia ETH (for gas). Asks are paid in Telegraph USDC.
             </p>
             <p className="mt-3 break-all rounded-lg bg-panel-2 px-3 py-2 tabular text-[12px] text-ink">{showDeposit}</p>
             <button
