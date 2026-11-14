@@ -3,7 +3,7 @@ import { Search } from "lucide-react";
 
 import { fetchIntents } from "@/lib/explorer/network";
 
-export const metadata = { title: "Question types" };
+export const metadata = { title: "Intents" };
 export const dynamic = "force-dynamic";
 
 export default async function IntentsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
@@ -13,7 +13,7 @@ export default async function IntentsPage({ searchParams }: { searchParams: Prom
   if (fetched.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-eyebrow">Question types</p>
+        <p className="x-eyebrow">Intents</p>
         <h1 className="x-display-1 mt-4 text-ink">Intent registry unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The canonical intent list could not be fetched: <span className="tabular text-[12px]">{fetched.detail}</span>{" "}

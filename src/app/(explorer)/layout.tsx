@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
 import { ExplorerHeader } from "@/components/explorer/explorer-header";
+import { MobileTabBar } from "@/components/explorer/mobile-tab-bar";
 
 export const metadata: Metadata = {
   title: {
@@ -38,7 +39,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
           repeating, and a live-data note. Anything longer competes with the
           page it sits under. */}
       <footer className="border-t border-edge bg-panel/60">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-8 gap-y-4 px-4 py-7 sm:px-6">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-8 gap-y-4 px-4 pb-24 pt-7 sm:px-6 sm:py-7">
           <div className="flex items-center gap-3">
             <p className="text-[12.5px] font-bold tracking-[0.2em] text-ink">NIGHTSHIFT</p>
             <span aria-hidden className="h-3 w-px bg-edge-strong" />
@@ -62,6 +63,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
           <p className="ml-auto text-[12px] text-ink-faint">© 2026 NIGHTSHIFT</p>
         </div>
       </footer>
+      <MobileTabBar />
     </div>
   );
 }

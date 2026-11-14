@@ -4,17 +4,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /**
- * Navigation tabs. Client-side only for the active state: the current route is
- * marked with a real aria-current and a filled pill, so the navigation reads as
- * tabs instead of a row of identical links.
+ * Navigation links. Client-side only for the active state: the current route is
+ * marked with a real aria-current, so the navigation reads as tabs instead of a
+ * row of identical links.
  *
- * `activeFor` lets one tab own several routes: "Explorer" is the parent of the
- * overview, miners, intents, evaluators and validators pages.
+ * `area` is the product's top level; `tab` is the Explorer's own contents, drawn
+ * as a lighter, underlined row so the two levels never look like one long menu.
  */
 export function NavLinks({
   items,
+  variant = "area",
 }: {
   items: { href: string; label: string; activeFor?: string[] }[];
+  variant?: "area" | "tab";
 }) {
   const pathname = usePathname();
 
@@ -25,20 +27,30 @@ export function NavLinks({
 
   return (
     <>
-      {items.map((l) => (
-        <Link
-          key={l.href}
-          href={l.href}
-          aria-current={isActive(l) ? "page" : undefined}
-          className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] leading-5 transition-colors ${
-            isActive(l)
-              ? "bg-panel text-ink shadow-[0_1px_2px_rgba(22,24,29,0.08)] ring-1 ring-edge"
-              : "text-ink-soft hover:bg-panel-3 hover:text-ink"
-          }`}
-        >
-          {l.label}
-        </Link>
-      ))}
+      {items.map((l) => {
+        const active = isActive(l);
+        const className =
+          variant === "tab"
+            ? `-mb-px whitespace-nowrap border-b-2 px-0.5 py-2.5 text-[12.5px] transition-colors ${
+                active
+                  ? "border-teal font-medium text-ink"
+                  : "border-transparent text-ink-soft hover:border-edge-strong hover:text-ink"
+              }`
+            : `rounded-lg px-2.5 py-1.5 text-[13px] transition-colors ${
+                active ? "bg-panel-3 font-medium text-ink" : "text-ink-soft hover:bg-panel-3/70 hover:text-ink"
+              }`;
+
+        return (
+          <Link
+            key={l.href}
+            href={l.href}
+            aria-current={active ? "page" : undefined}
+            className={className}
+          >
+            {l.label}
+          </Link>
+        );
+      })}
     </>
   );
 }
