@@ -975,7 +975,6 @@ export default function TerminalClient({
             {answer.answer.warnings != null && <p className="mt-2 text-[11px] text-amber-deep">Warnings: {JSON.stringify(answer.answer.warnings)}</p>}
             <p className="mt-3 text-[11px] text-ink-faint">Delivery is not verification. Check the signal in the receipt panel.</p>
           </section>
-        </>
 
           <section className="rounded-lg border border-edge bg-panel p-5">
             <p className="x-label">Receipt &amp; verification</p>
@@ -1020,6 +1019,7 @@ export default function TerminalClient({
             )}
           </section>
         </section>
+        </>
       )}
 
       {/* ---------------- activity record status (Phase 5b) ---------------- */}
