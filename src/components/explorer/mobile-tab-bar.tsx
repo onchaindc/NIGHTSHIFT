@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Code2, Compass, Radar, ReceiptText, type LucideIcon } from "lucide-react";
+import { Code2, Compass, Radar, ReceiptText, Wallet, type LucideIcon } from "lucide-react";
 
 /**
  * The phone's map. The old header stacked the areas and the Explorer tabs on top
- * of the page; this puts the four areas within thumb reach and lets the header
+ * of the page; this puts the areas within thumb reach and lets the header
  * scroll away, so only one bar ever costs vertical space.
  */
 type Item = { href: string; label: string; icon: LucideIcon; activeFor?: string[] };
@@ -15,6 +15,7 @@ const ITEMS: Item[] = [
   { href: "/miners", label: "Explorer", icon: Compass, activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
   { href: "/signals", label: "Signals", icon: Radar },
   { href: "/activity", label: "Activity", icon: ReceiptText },
+  { href: "/funds", label: "Funds", icon: Wallet },
   { href: "/developers", label: "Developers", icon: Code2 },
 ];
 
