@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
+import { AppPrivyProvider } from "@/components/privy-provider";
 
 import { SITE_DESCRIPTION, SITE_URL } from "@/lib/site";
 
@@ -58,7 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full"><AppPrivyProvider>{children}</AppPrivyProvider></body>
     </html>
   );
 }

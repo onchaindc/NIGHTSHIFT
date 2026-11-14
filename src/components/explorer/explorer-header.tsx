@@ -13,6 +13,7 @@ const AREAS = [
   { href: "/miners", label: "Explorer", activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
   { href: "/signals", label: "Signals" },
   { href: "/activity", label: "Activity" },
+  { href: "/funds", label: "Funds" },
   { href: "/developers", label: "Developers" },
 ];
 
