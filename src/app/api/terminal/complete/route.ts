@@ -81,5 +81,6 @@ export async function POST(req: Request) {
     body: parsed,
     paymentResponse: res.headers.get("payment-response"),
     receipt: res.headers.get("x-telegraph-receipt"),
+    receiptData: receipt,
   });
 }
