@@ -305,9 +305,14 @@ export default function TerminalClient({
           responseFields: body.responseFields ?? null,
           miners: body.miners ?? [],
         });
-        if (initialMiner && (body.miners ?? []).some((m) => m.slug === initialMiner || m.minerId === initialMiner)) {
-          // Keep auto-route as the default. Specific miner pinning is advanced and can fail with no_compatible_miner.
-          pushLog(`A specific answer service was requested (${initialMiner}). Using automatic routing instead — it falls back if the first choice cannot take this question.`, "info");
+        if (initialMiner) {
+          const match = (body.miners ?? []).find((m) => m.slug === initialMiner || m.minerId === initialMiner);
+          if (match) {
+            setMinerId(match.minerId);
+            pushLog(`Pinned to ${match.name} (${initialMiner}). Automatic routing is still available if this service cannot take the question.`, "info");
+          } else {
+            pushLog(`Requested service ${initialMiner} is not available for this question. Using automatic routing.`, "warn");
+          }
         }
         const fields = (body.params ?? []).length;
         pushLog(
