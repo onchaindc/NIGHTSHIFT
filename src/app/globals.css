@@ -55,6 +55,33 @@
   --radius-card: 8px;
 }
 
+
+/* Night theme — applied via .dark on <html> */
+html.dark {
+  color-scheme: dark;
+  --color-night: #0f1115;
+  --color-panel: #171a20;
+  --color-panel-2: #1c2027;
+  --color-panel-3: #14171c;
+  --color-edge: #2a2e36;
+  --color-edge-strong: #3a3f48;
+  --color-hairline: #2a2e36;
+  --color-ink: #e8e6e1;
+  --color-ink-soft: #b8b5ad;
+  --color-ink-faint: #8a887f;
+  --color-amber: #d97706;
+  --color-amber-deep: #b45309;
+  --color-amber-soft: #2a1f12;
+  --color-teal: #14b8a6;
+  --color-blue: #60a5fa;
+  --color-risk: #f87171;
+  --color-ivory: #1c2027;
+  --color-background: #0f1115;
+  --color-background2: #0f1115;
+  --color-surface: #171a20;
+  --color-surface-2: #1c2027;
+}
+
 html {
   color-scheme: light;
   /* A single stray wide child must never shift the whole page sideways on a
