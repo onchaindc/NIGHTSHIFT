@@ -53,9 +53,14 @@ export default async function MinerDetailPage({ params }: { params: Promise<{ sl
 
   return (
     <article className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
-      <Link href="/miners" className="inline-flex items-center gap-1.5 text-[12px] text-amber hover:text-amber-soft">
-        <ArrowLeft size={12} aria-hidden /> All miners
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/miners" className="inline-flex items-center gap-1.5 text-[12px] text-amber hover:text-amber-soft">
+          <ArrowLeft size={12} aria-hidden /> All miners
+        </Link>
+        <Link href="/watch" className="btn-quiet !min-h-8 !text-[12px]">
+          Watch this service
+        </Link>
+      </div>
 
       <header className="mt-6 border-b border-edge pb-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -97,6 +102,9 @@ export default async function MinerDetailPage({ params }: { params: Promise<{ sl
           </p>
           {typeof miner.total_requests_served === "number" && (
             <p className="tabular mt-1 text-[11.5px] text-ink-faint">{miner.total_requests_served.toLocaleString()} requests served</p>
+          )}
+          {typeof miner.total_requests_served === "number" && miner.total_requests_served > 0 && (
+            <p className="mt-2 text-[11px] text-teal">Active on the network</p>
           )}
         </div>
       </section>

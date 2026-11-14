@@ -931,7 +931,15 @@ export default function TerminalClient({
 
       {/* ---------------- result ---------------- */}
       {answer && (
-        <section className="mt-6 grid gap-6 lg:grid-cols-2">
+        <>
+          <div className="mt-6 rounded-lg border border-teal/30 bg-teal/5 p-4">
+            <p className="text-[12.5px] font-medium text-teal">What just happened</p>
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
+              Paid {(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC to {answer.answer.minerName ?? answer.receipt.miner}. 
+              Receipt {answer.receipt.receipt_hash.slice(0, 10)}… recorded. Signal {answer.signalHash.slice(0, 10)}… ready to verify.
+            </p>
+          </div>
+          <section className="mt-6 grid gap-6 lg:grid-cols-2">
           <section className="rounded-lg border border-teal/40 bg-panel p-5">
             <div className="flex items-center justify-between gap-3">
               <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-teal"><CheckCircle2 size={14} aria-hidden /> Delivered</p>
@@ -967,6 +975,7 @@ export default function TerminalClient({
             {answer.answer.warnings != null && <p className="mt-2 text-[11px] text-amber-deep">Warnings: {JSON.stringify(answer.answer.warnings)}</p>}
             <p className="mt-3 text-[11px] text-ink-faint">Delivery is not verification. Check the signal in the receipt panel.</p>
           </section>
+        </>
 
           <section className="rounded-lg border border-edge bg-panel p-5">
             <p className="x-label">Receipt &amp; verification</p>
