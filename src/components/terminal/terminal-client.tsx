@@ -270,8 +270,8 @@ export default function TerminalClient({
           miners: body.miners ?? [],
         });
         if (initialMiner && (body.miners ?? []).some((m) => m.slug === initialMiner || m.minerId === initialMiner)) {
-          setMinerId(initialMiner);
-          pushLog(`Miner pre-selected: ${initialMiner}.`, "info");
+          // Keep auto-route as the default. Specific miner pinning is advanced and can fail with no_compatible_miner.
+          pushLog(`A specific answer service was requested (${initialMiner}). Using automatic routing instead — it falls back if the first choice cannot take this question.`, "info");
         }
         pushLog(`Question type loaded: ${body.intent.toLowerCase().replaceAll("_", " ")}. ${(body.params ?? []).length} field(s) to fill, ${body.minerCount} answer services available.`, "good");
       } catch (err) {
@@ -773,8 +773,14 @@ export default function TerminalClient({
               </p>
               <NodeVerdict verdict={nodeVerdict} />
               {isNoCompatibleMiner && (
-                <button onClick={() => void runPreview(null)} className="btn-quiet mt-3 !min-h-8 !text-[12px]">
-                  Use automatic routing <ArrowRight size={12} aria-hidden />
+                <button
+                  onClick={() => {
+                    setMinerId(null);
+                    void runPreview(null);
+                  }}
+                  className="btn-primary mt-3 !min-h-9 !text-[12.5px]"
+                >
+                  Try automatic routing <ArrowRight size={12} aria-hidden />
                 </button>
               )}
               <p className="mt-3 text-[11.5px] text-ink-faint">Nothing was charged.</p>
