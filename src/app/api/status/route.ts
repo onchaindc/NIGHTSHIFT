@@ -158,13 +158,26 @@ export async function GET() {
 
   // The scheduler reports its persisted tick state; a stopped or restarted
   // process cannot claim to have been monitoring while it was not running.
-  let watchScheduler: { autoChecks: boolean; intervalMs: number; freeOnly: boolean; workerMode: "in-process" | "external-trigger"; degraded: boolean; degradedReason: string | null } = {
+  let watchScheduler: {
+    autoChecks: boolean;
+    intervalMs: number;
+    freeOnly: boolean;
+    workerMode: "in-process" | "external-trigger";
+    degraded: boolean;
+    degradedReason: string | null;
+    lastSuccessAt: number | null;
+    consecutiveFailures: number;
+    cronHint: string;
+  } = {
     autoChecks: false,
     intervalMs: 600_000,
     freeOnly: true,
     workerMode: "in-process",
     degraded: true,
     degradedReason: "scheduler status unavailable",
+    lastSuccessAt: null,
+    consecutiveFailures: 0,
+    cronHint: "external cron recommended every 3h on serverless",
   };
   try {
     const { schedulerStatus } = await import("@/lib/watch/scheduler");
@@ -176,6 +189,9 @@ export async function GET() {
       workerMode: s.workerMode,
       degraded: s.degraded,
       degradedReason: s.degradedReason,
+      lastSuccessAt: s.lastSuccessAt,
+      consecutiveFailures: s.consecutiveFailures,
+      cronHint: s.workerMode === "external-trigger" ? "vercel.json cron: every 3 hours" : "in-process interval",
     };
   } catch {
     // keep the honest default above
