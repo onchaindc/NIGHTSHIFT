@@ -18,6 +18,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Loader2, Search, Terminal as TerminalIcon, XCircle } from "lucide-react";
+import { getOrCreateWallet, type InAppWallet } from "@/lib/wallet/in-app";
+import { executeWithInAppWallet } from "@/lib/wallet/execute-client";
 
 export interface TerminalIntentSummary {
   intent: string;
@@ -250,6 +252,10 @@ export default function TerminalClient({
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [queryText, setQueryText] = useState("");
   const [minerId, setMinerId] = useState<string | null>(null); // null = auto-route
+  const [inAppWallet, setInAppWallet] = useState<InAppWallet | null>(null);
+  useEffect(() => {
+    setInAppWallet(getOrCreateWallet());
+  }, []);
 
   // Advanced state
   const [rawJson, setRawJson] = useState("");
@@ -458,6 +464,49 @@ export default function TerminalClient({
       if (minerId) payload.miner = minerId;
       payload.approved = true;
       payload.offer = approvedOffer;
+
+      // Prefer the in-app wallet: sign in the browser, never use the shared server key.
+      if (inAppWallet && challenge) {
+        const nodeUrl = process.env.NEXT_PUBLIC_TELEGRAPH_NODE_URL ?? "https://devnode.telegraphprotocol.com";
+        const urlPath = minerId ? `/engine/v1/ask/${encodeURIComponent(minerId)}` : "/engine/v1/ask";
+        const result = await executeWithInAppWallet({
+          wallet: inAppWallet,
+          nodeUrl,
+          urlPath,
+          body: payload,
+          network: challenge.payment.network,
+          asset: challenge.payment.asset,
+          payTo: challenge.payment.payTo,
+          amount: challenge.payment.amount,
+        });
+        if (result.ok && result.signalHash) {
+          setAnswer({
+            answer: { result: result.body, minerName: undefined },
+            signalHash: result.signalHash,
+            receipt: {
+              receipt_hash: result.receiptHash ?? "",
+              rail: "x402",
+              payer: inAppWallet.address,
+              miner: challenge.payment.payTo,
+              intent: "",
+              amount_uusdc: challenge.payment.amount,
+              epoch_id: 0,
+              settlement: result.settlement ?? "",
+              chain: challenge.payment.network,
+              timestamp: Date.now(),
+            },
+            settlement: result.settlement,
+          });
+          setChallenge(null);
+          setStage("result");
+          pushLog("Answer delivered from your wallet. Run verification before trusting it.", "good");
+          return;
+        }
+        setFailure({ heading: "Payment from your wallet failed", detail: result.detail ?? `HTTP ${result.status}` });
+        pushLog(`In-app wallet payment failed: ${result.detail ?? result.status}`, "bad");
+        return;
+      }
+
       const res = await fetch("/api/terminal/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -512,7 +561,7 @@ export default function TerminalClient({
       clearTimeout(deadline);
       setExecuting(false);
     }
-  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog]);
+  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, inAppWallet]);
 
   /* ---- verify ------------------------------------------------------- */
 
@@ -569,16 +618,15 @@ export default function TerminalClient({
             You approve one payment, then get the answer with its receipt.
           </p>
         </div>
-        {devMode && (
-          <div className="rounded-lg border border-edge bg-panel px-4 py-3">
-            <p className="x-label">Payment wallet</p>
-            <p className="tabular mt-1 text-[11.5px] text-ink">
-              {wallet.configured && wallet.address
-                ? `${wallet.address}`
-                : "Not configured. Previews still run; execution cannot sign."}
-            </p>
-          </div>
-        )}
+        <div className="rounded-lg border border-edge bg-panel px-4 py-3">
+          <p className="x-label">Your wallet</p>
+          <p className="tabular mt-1 break-all text-[11.5px] text-ink">
+            {inAppWallet ? inAppWallet.address : "Creating…"}
+          </p>
+          <p className="mt-1.5 text-[11px] text-ink-faint">
+            Fund this address with testnet USDC to pay. The key stays in this browser.
+          </p>
+        </div>
       </div>
 
       <ol className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-faint">
