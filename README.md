@@ -99,3 +99,13 @@ borders, one amber accent, and Geist with a serif display face for headings. Num
 render on a tabular grid. Motion is limited to what explains state: a packet travelling the ask
 rail, a live dot, a caret, and short section reveals. All of it is disabled under
 `prefers-reduced-motion`.
+
+## Production: Protocol Watch scheduling
+
+On long-running processes the in-process scheduler runs every `NIGHTSHIFT_WATCH_INTERVAL_MS` (default 10 minutes).
+
+On serverless (Vercel) there is no long-lived process, so watches are driven by an external cron that hits `GET /api/watches/scheduler-tick`. The cron in `vercel.json` fires every 6 hours. The scheduler still respects each watch's own due time derived from its persisted `lastCheckedAt`, so a more frequent cron only increases how quickly overdue watches are caught up; fingerprints keep overlapping ticks idempotent.
+
+Set `NIGHTSHIFT_EXTERNAL_CRON=1` on Vercel so the app reports `workerMode: "external-trigger"` instead of claiming an in-process worker.
+
+`/api/status` always surfaces the current scheduler health (`autoChecks`, `intervalMs`, `workerMode`, `degraded`, `degradedReason`) so a stopped or lagging monitor is visible rather than silently assumed to be running.
