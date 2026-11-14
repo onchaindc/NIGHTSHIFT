@@ -1,12 +1,107 @@
 "use client";
 
-import { usePrivy, useWallets } from "@privy-io/react-auth";
-import { useState } from "react";
+import { usePrivy, useWallets, useConnectWallet, useCreateWallet } from "@privy-io/react-auth";
+import { useEffect, useState } from "react";
+
+const SEPOLIA_RPC = "https://rpc.sepolia.org";
+
+async function fetchEthBalance(address: string): Promise<string> {
+  try {
+    const res = await fetch(SEPOLIA_RPC, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_getBalance",
+        params: [address, "latest"],
+      }),
+    });
+    const data = await res.json();
+    if (!data.result) return "0";
+    const wei = BigInt(data.result);
+    const eth = Number(wei) / 1e18;
+    return eth.toFixed(6).replace(/\.?0+$/, "") || "0";
+  } catch {
+    return "—";
+  }
+}
+
+function WalletCard({
+  label,
+  address,
+  balance,
+}: {
+  label: string;
+  address: string;
+  balance: string | null;
+}) {
+  return (
+    <div className="rounded-lg border border-edge bg-panel p-5">
+      <p className="x-label">{label}</p>
+      <p className="tabular mt-2 break-all text-[12.5px] text-ink">{address}</p>
+      <p className="mt-2 text-[13px] text-ink-soft">
+        Balance (Sepolia): {balance === null ? "…" : `${balance} ETH`}
+      </p>
+    </div>
+  );
+}
 
 export default function FundsPage() {
-  const { ready, authenticated, login, logout, user } = usePrivy();
+  const { ready, authenticated, login, logout } = usePrivy();
   const { wallets } = useWallets();
-  const [mode, setMode] = useState<"choose" | "connect" | "create">("choose");
+  const { connectWallet } = useConnectWallet();
+  const { createWallet } = useCreateWallet();
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [balances, setBalances] = useState<Record<string, string | null>>({});
+
+  const embedded = wallets.find((w) => w.walletClientType === "privy");
+  const external = wallets.find((w) => w.walletClientType !== "privy");
+
+  useEffect(() => {
+    const addrs = [embedded?.address, external?.address].filter(Boolean) as string[];
+    if (addrs.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string | null> = {};
+      for (const addr of addrs) {
+        next[addr] = null;
+        const bal = await fetchEthBalance(addr);
+        if (!cancelled) {
+          next[addr] = bal;
+          setBalances((prev) => ({ ...prev, [addr]: bal }));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [embedded?.address, external?.address]);
+
+  const handleCreateInApp = async () => {
+    setError(null);
+    setCreating(true);
+    try {
+      if (!authenticated) {
+        await login();
+      }
+      // After login (or if already logged in), create the embedded wallet if missing
+      if (!embedded) {
+        await createWallet();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create in-app wallet");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleConnectExternal = () => {
+    setError(null);
+    connectWallet();
+  };
 
   if (!ready) {
     return (
@@ -16,61 +111,64 @@ export default function FundsPage() {
     );
   }
 
-  const embedded = wallets.find((w) => w.walletClientType === "privy");
-  const external = wallets.find((w) => w.walletClientType !== "privy");
-
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
       <p className="x-tag">FUNDS</p>
       <h1 className="x-display-1 mt-3 text-ink">Funds</h1>
       <p className="mt-3 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
-        Pay for asks from your own wallet. Connect an existing one, or create an in-app wallet.
+        Pay for asks from your own wallet. Connect an existing one, or create an in-app wallet that stays in this browser.
       </p>
 
-      {!authenticated ? (
-        <div className="mt-10 grid gap-4 sm:grid-cols-2">
-          <button
-            onClick={() => { setMode("connect"); login(); }}
-            className="rounded-lg border border-edge bg-panel p-5 text-left transition-colors hover:border-teal"
-          >
-            <p className="text-[13.5px] font-medium text-ink">Connect wallet</p>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
-              Use MetaMask, WalletConnect, or another external wallet.
-            </p>
+      <div className="mt-10 grid gap-4 sm:grid-cols-2">
+        <button
+          onClick={handleConnectExternal}
+          className="rounded-lg border border-edge bg-panel p-5 text-left transition-colors hover:border-teal"
+        >
+          <p className="text-[13.5px] font-medium text-ink">Connect wallet</p>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
+            Use MetaMask, WalletConnect, or another external wallet.
+          </p>
+        </button>
+        <button
+          onClick={handleCreateInApp}
+          disabled={creating}
+          className="rounded-lg border border-edge bg-panel p-5 text-left transition-colors hover:border-teal disabled:opacity-60"
+        >
+          <p className="text-[13.5px] font-medium text-ink">
+            {creating ? "Creating…" : "Create in-app wallet"}
+          </p>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
+            Privy creates a wallet for you. Fund it and pay from this browser.
+          </p>
+        </button>
+      </div>
+
+      {error && (
+        <p className="mt-4 text-[12.5px] text-risk">{error}</p>
+      )}
+
+      {(embedded || external) && (
+        <div className="mt-8 space-y-4">
+          <p className="x-label">Your wallets</p>
+          {embedded && (
+            <WalletCard
+              label="In-app wallet"
+              address={embedded.address}
+              balance={balances[embedded.address] ?? null}
+            />
+          )}
+          {external && (
+            <WalletCard
+              label="Connected wallet"
+              address={external.address}
+              balance={balances[external.address] ?? null}
+            />
+          )}
+          <button onClick={logout} className="btn-quiet !min-h-8 !text-[12px]">
+            Log out
           </button>
-          <button
-            onClick={() => { setMode("create"); login(); }}
-            className="rounded-lg border border-edge bg-panel p-5 text-left transition-colors hover:border-teal"
-          >
-            <p className="text-[13.5px] font-medium text-ink">Create in-app wallet</p>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
-              Privy creates a wallet for you. Fund it and pay from this browser.
-            </p>
-          </button>
-        </div>
-      ) : (
-        <div className="mt-10 space-y-6">
-          <div className="rounded-lg border border-edge bg-panel p-5">
-            <p className="x-label">Active</p>
-            {embedded && (
-              <p className="tabular mt-2 break-all text-[12.5px] text-ink">
-                In-app: {embedded.address}
-              </p>
-            )}
-            {external && (
-              <p className="tabular mt-2 break-all text-[12.5px] text-ink">
-                Connected: {external.address}
-              </p>
-            )}
-            {!embedded && !external && (
-              <p className="mt-2 text-[12.5px] text-ink-soft">No wallet yet. Log in again to create or connect one.</p>
-            )}
-            <button onClick={logout} className="btn-quiet mt-4 !min-h-8 !text-[12px]">
-              Log out
-            </button>
-          </div>
           <p className="text-[12px] text-ink-faint">
-            Fund the address above with testnet USDC on Sepolia, then return to the terminal to pay for an ask.
+            Balances shown are Sepolia testnet ETH. Fund the address with testnet USDC or ETH, then return to the terminal to pay for an ask.
           </p>
         </div>
       )}
