@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export const metadata = { title: "Evaluators" };
+export const metadata = { title: "Quality" };
 
 /**
  * Evaluators have NO public registration endpoint on the node today — we
@@ -11,7 +11,7 @@ export const metadata = { title: "Evaluators" };
 export default function EvaluatorsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-      <p className="x-eyebrow">Evaluators</p>
+      <p className="x-eyebrow">Quality</p>
       <h1 className="x-display-1 mt-3 text-ink">The quality layer</h1>
       <p className="mt-3 max-w-[68ch] text-[14px] leading-relaxed text-ink-soft">
         Evaluators make ranking mean something. Every epoch, they compare how different miners answered the same intent
