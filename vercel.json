@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/watches/scheduler-tick",
-      "schedule": "17 */6 * * *"
+      "schedule": "17 */3 * * *"
     }
   ]
 }
