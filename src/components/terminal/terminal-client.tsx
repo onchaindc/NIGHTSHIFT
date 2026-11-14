@@ -115,23 +115,48 @@ function paperList(result: unknown): { papers: Array<{ title: string; doi?: stri
   return { papers: titles.map((title, i) => ({ title, doi: dois[i] })), total };
 }
 
-/** The answer's own words, when the provider returns a labelled text field. */
+/** The answer's own words, when the provider returns a labelled text field.
+    Long answers arrive as one string; they read as prose only once split. */
 function answerParagraphs(result: unknown): string[] {
-  if (typeof result === "string") return result.trim() ? [result.trim()] : [];
+  const split = (text: string) =>
+    text
+      .trim()
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+  if (typeof result === "string") return split(result);
   if (!result || typeof result !== "object") return [];
+
   const o = result as Record<string, unknown>;
   const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string) => {
+    for (const paragraph of split(value)) {
+      if (paragraph.length > 1 && !seen.has(paragraph)) {
+        seen.add(paragraph);
+        out.push(paragraph);
+      }
+    }
+  };
+
   for (const key of ["answer", "brief", "summary", "text", "content", "result"]) {
     const v = o[key];
-    if (typeof v === "string" && v.trim()) out.push(v.trim());
+    if (typeof v === "string") push(v);
   }
   if (out.length === 0) {
     const longest = Object.values(o)
       .filter((v): v is string => typeof v === "string" && v.trim().length > 40)
       .sort((a, b) => b.length - a.length)[0];
-    if (longest) out.push(longest.trim());
+    if (longest) push(longest);
   }
   return out;
+}
+
+/** `ACADEMIC_SEARCH_GENERAL` reads as a database key; the list should read as a choice. */
+function humanIntent(raw: string): string {
+  const spaced = raw.toLowerCase().replaceAll("_", " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 /** Chain ids are for machines; a payer needs a name. Unknown ids stay raw. */
@@ -269,7 +294,7 @@ export default function TerminalClient({
         if (!alive) return;
         if (!res.ok) {
           setIntentDetailError(body.error ?? body.detail ?? `HTTP ${res.status}`);
-          pushLog(`Intent ${selectedIntent}: not available right now (${body.error ?? res.status}).`, "warn");
+          pushLog(`Intent ${humanIntent(selectedIntent)}: not available right now (${body.error ?? res.status}).`, "warn");
           return;
         }
         setIntentDetail({
@@ -284,12 +309,18 @@ export default function TerminalClient({
           // Keep auto-route as the default. Specific miner pinning is advanced and can fail with no_compatible_miner.
           pushLog(`A specific answer service was requested (${initialMiner}). Using automatic routing instead — it falls back if the first choice cannot take this question.`, "info");
         }
-        pushLog(`Question type loaded: ${body.intent.toLowerCase().replaceAll("_", " ")}. ${(body.params ?? []).length} field(s) to fill, ${body.minerCount} answer services available.`, "good");
+        const fields = (body.params ?? []).length;
+        pushLog(
+          `Intent loaded: ${humanIntent(body.intent)}. ${
+            fields === 0 ? "No fields to fill" : `${fields} field${fields === 1 ? "" : "s"} to fill`
+          }, ${body.minerCount} answer services available.`,
+          "good",
+        );
       } catch (err) {
         if (!alive) return;
         const msg = err instanceof Error ? err.message : String(err);
         setIntentDetailError(msg);
-        pushLog(`Intent ${selectedIntent} could not be read: ${msg}`, "bad");
+        pushLog(`Intent ${humanIntent(selectedIntent)} could not be read: ${msg}`, "bad");
       }
     })();
     return () => {
@@ -609,7 +640,7 @@ export default function TerminalClient({
                 <p className="x-label">1 · Kind of answer</p>
                 {selectedIntent ? (
                   <p className="mt-2 text-[12px] text-ink-soft">
-                    Selected: <span className="tabular text-ink">{selectedIntent}</span>{" "}
+                    Selected: <span className="text-ink">{humanIntent(selectedIntent)}</span>{" "}
                     <button onClick={() => { setSelectedIntent(null); setIntentDetail(null); setMinerId(null); }} className="text-[11px] text-amber hover:text-amber-deep">clear</button>
                   </p>
                 ) : (
@@ -619,20 +650,20 @@ export default function TerminalClient({
                       <input
                         value={intentQuery}
                         onChange={(e) => setIntentQuery(e.target.value)}
-                        placeholder={`Search ${intents.length} question types…`}
+                        placeholder={`Search ${intents.length} intents…`}
                         aria-label="Search intents"
                         className="h-9 w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
                       />
                     </div>
                     <ul className="mt-2 max-h-44 divide-y divide-edge overflow-y-auto rounded-lg border border-edge bg-panel-2">
                       {filteredIntents.length === 0 ? (
-                        <li className="px-3 py-3 text-[12px] text-ink-faint">No question type matches.</li>
+                        <li className="px-3 py-3 text-[12px] text-ink-faint">No intent matches.</li>
                       ) : (
                         filteredIntents.slice(0, 80).map((i) => (
                           <li key={i.intent}>
                             <button onClick={() => setSelectedIntent(i.intent)} className="flex w-full items-baseline justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-panel-3">
-                              <span className="tabular text-[11.5px] text-ink">{i.intent.toLowerCase().replaceAll("_", " ")}</span>
-                              <span className="tabular shrink-0 text-[10.5px] text-ink-faint">{i.minerCount} services</span>
+                              <span className="text-[12.5px] text-ink">{humanIntent(i.intent)}</span>
+                              <span className="shrink-0 text-[10.5px] text-ink-faint">{i.minerCount} services</span>
                             </button>
                           </li>
                         ))
@@ -657,15 +688,15 @@ export default function TerminalClient({
                       <div className="mt-2 space-y-3">
                         {intentDetail.params.map((p) => (
                           <label key={p.name} className="block">
-                            <span className="tabular text-[11px] font-medium text-ink">
-                              {p.name}
-                              <span className="ml-1.5 font-normal text-ink-faint">{p.type}{p.required ? " · required" : " · optional"}</span>
+                            <span className="text-[11.5px] font-medium text-ink">
+                              {humanIntent(p.name)}
+                              <span className="ml-1.5 font-normal text-ink-faint">{p.required ? "required" : "optional"}</span>
                             </span>
                             {p.description && <span className="mt-0.5 block text-[11.5px] leading-snug text-ink-faint">{p.description}</span>}
                             <input
                               value={paramValues[p.name] ?? ""}
                               onChange={(e) => setParamValues((v) => ({ ...v, [p.name]: e.target.value }))}
-                              placeholder={p.pattern ? `matches ${p.pattern}` : p.type}
+                              placeholder={`Enter ${p.name.replaceAll("_", " ")}`}
                               className="mt-1.5 h-9 w-full rounded-lg border border-edge bg-panel-2 px-3 tabular text-[13px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-teal"
                             />
                           </label>
@@ -973,8 +1004,9 @@ export default function TerminalClient({
               {answer.answer.durationMs ? ` · ${answer.answer.durationMs} ms` : ""}
               {answer.answer.costUsd != null ? ` · ${answer.answer.costUsd.toFixed(2)} USD` : ""}
             </p>
+            <div className="mt-4 border-t border-edge pt-4">
             {answerParagraphs(answer.answer.result).map((p, i) => (
-              <p key={i} className="mt-3 text-[14px] leading-relaxed text-ink">{p}</p>
+              <p key={i} className="mt-3 text-[14.5px] leading-[1.65] text-pretty text-ink first:mt-0">{p}</p>
             ))}
             {(() => {
               const parsed = paperList(answer.answer.result);
@@ -993,7 +1025,7 @@ export default function TerminalClient({
                             href={`https://doi.org/${p.doi}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2 hover:text-teal"
+                            className="mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2 hover:text-teal"
                           >
                             Open on DOI · {p.doi}
                           </a>
@@ -1004,6 +1036,7 @@ export default function TerminalClient({
                 </div>
               );
             })()}
+            </div>
             <details className="mt-4">
               <summary className="cursor-pointer text-[11.5px] text-ink-faint transition-colors hover:text-ink-soft">
                 Technical details
@@ -1098,12 +1131,29 @@ export default function TerminalClient({
 
       {/* ---------------- log ---------------- */}
       {log.length > 0 && (
-        <section className="mt-6 rounded-lg border border-edge bg-panel p-4">
+        <section className="mt-6 rounded-lg border border-edge bg-panel p-5">
           <p className="x-label">What happened</p>
-          <ol className="mt-2 space-y-1">
+          <ol className="mt-4 space-y-3.5">
             {log.map((l, i) => (
-              <li key={`${l.ts}-${i}`} className={`tabular text-[10.5px] leading-relaxed ${l.tone === "good" ? "text-teal" : l.tone === "bad" ? "text-risk" : l.tone === "warn" ? "text-amber" : "text-ink-faint"}`}>
-                {new Date(l.ts).toLocaleTimeString()} — {l.text}
+              <li key={`${l.ts}-${i}`} className="flex gap-3">
+                <span
+                  aria-hidden
+                  className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${
+                    l.tone === "good"
+                      ? "bg-teal"
+                      : l.tone === "bad"
+                        ? "bg-risk"
+                        : l.tone === "warn"
+                          ? "bg-amber"
+                          : "bg-edge-strong"
+                  }`}
+                />
+                <div className="min-w-0">
+                  <p className="text-[12.5px] leading-relaxed text-ink-soft">{l.text}</p>
+                  <p className="tabular mt-0.5 text-[10px] text-ink-faint">
+                    {new Date(l.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </p>
+                </div>
               </li>
             ))}
           </ol>
