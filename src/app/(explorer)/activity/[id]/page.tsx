@@ -98,7 +98,7 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
                 {terminal.offer && (
                   <Row
                     k="Approved offer"
-                    v={`${Number(terminal.offer.amount) / 10000} USDC to ${terminal.offer.payTo} on ${terminal.offer.network} (${terminal.offer.asset})`}
+                    v={`${(Number(terminal.offer.amount) / 1_000_000).toFixed(2)} USDC to ${terminal.offer.payTo} on ${terminal.offer.network} (${terminal.offer.asset})`}
                   />
                 )}
                 {terminal.payerAddress && <Row k="Payer (public address)" v={terminal.payerAddress} mono />}
