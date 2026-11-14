@@ -21,6 +21,10 @@ import { specFromBody, type PreviewBody } from "@/app/api/terminal/preview/route
  * never dressed up as success.
  */
 
+/* A paid request that cannot finish in a minute should fail loudly, not hold
+   the function open. The client stops waiting shortly after this. */
+export const maxDuration = 60;
+
 interface ExecuteBody extends PreviewBody {
   approved?: boolean;
   offer?: unknown;

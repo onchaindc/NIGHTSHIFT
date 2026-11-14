@@ -4,9 +4,18 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@x402/evm", "@x402/fetch", "@x402/core"],
   async redirects() {
     return [
-      // Legacy entry points that used to land on the workspace overview.
-      // They now route into the console; / itself is the product landing.
-      { source: "/overview", destination: "/console", permanent: true },
+      // The pre-pivot console is retired but its URLs still circulate. Send each
+      // one to the closest page of the current product instead of a second app.
+      { source: "/overview", destination: "/miners", permanent: false },
+      { source: "/console", destination: "/miners", permanent: false },
+      { source: "/operations", destination: "/miners", permanent: false },
+      { source: "/approvals", destination: "/miners", permanent: false },
+      { source: "/agents", destination: "/miners", permanent: false },
+      { source: "/nightshift", destination: "/", permanent: false },
+      { source: "/watch", destination: "/signals", permanent: false },
+      { source: "/history", destination: "/activity", permanent: false },
+      { source: "/tasks/:id", destination: "/activity", permanent: false },
+      { source: "/settings", destination: "/developers", permanent: false },
     ];
   },
 };
