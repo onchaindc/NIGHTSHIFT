@@ -1,18 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReceiptText, Search, X } from "lucide-react";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 
 import type { TaskRecord } from "@/lib/engine/types";
 import { isTestRun, money, StatusChip, timeOf } from "@/components/taskParts";
 
 /**
- * Activity (Phase 5): the workspace's recorded requests, newest first, with
- * what each one cost and how it ended. Reads the SAME task records every
- * other surface uses (GET /api/tasks, unchanged contract) and links each row
- * to an /activity/[id] detail page. Nothing is invented here: every count,
- * spend and receipt comes from a persisted record.
+ * Activity (personal): only the asks paid by the wallet(s) currently connected
+ * via Privy. Shared explorer views stay global; this surface is yours.
  */
 
 type StatusFilter = "all" | "completed" | "failed" | "running" | "awaiting" | "rejected" | "test";
@@ -57,16 +55,28 @@ function inWindow(t: TaskRecord, f: DateFilter, now: number) {
   return ms === 0 || now - t.createdAt <= ms;
 }
 
+function normalizeAddr(a: string | undefined | null) {
+  return a?.toLowerCase() ?? "";
+}
+
 export default function ActivityView({ persistenceMode }: { persistenceMode: string }) {
+  const { ready, authenticated, login } = usePrivy();
+  const { wallets } = useWallets();
   const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  /* Completed first: the page opens on what the network actually answered.
-     Failed and in-progress records stay one click away and are still counted. */
   const [status, setStatus] = useState<StatusFilter>("completed");
   const [intent, setIntent] = useState<IntentFilter>("all");
   const [date, setDate] = useState<DateFilter>("all");
   const [query, setQuery] = useState("");
   const busy = useRef(false);
+
+  const myAddresses = useMemo(() => {
+    const set = new Set<string>();
+    for (const w of wallets) {
+      if (w.address) set.add(normalizeAddr(w.address));
+    }
+    return set;
+  }, [wallets]);
 
   const refresh = useCallback(async () => {
     if (busy.current) return;
@@ -75,8 +85,6 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
       const res = await fetch("/api/tasks", { cache: "no-store" });
       if (res.ok) {
         const all = ((await res.json()) as { tasks: TaskRecord[] }).tasks;
-        // This is the Explorer's activity, so it shows asks made here. The
-        // retired console's watch and operation jobs have their own history.
         setTasks(all.filter((t) => t.jobType === "terminal_request"));
         setLoadFailed(false);
       } else {
@@ -95,12 +103,19 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
     return () => clearInterval(id);
   }, [refresh]);
 
-  const real = (tasks ?? []).filter((t) => !isTestRun(t));
-  const testRuns = (tasks ?? []).filter(isTestRun);
-  const total = tasks?.length ?? 0;
+  // Personal filter: only asks whose payer matches a currently connected wallet.
+  const mine = useMemo(() => {
+    if (!ready || !authenticated || myAddresses.size === 0) return [];
+    return (tasks ?? []).filter((t) => {
+      const payer = normalizeAddr(t.terminal?.payerAddress);
+      return payer && myAddresses.has(payer);
+    });
+  }, [tasks, ready, authenticated, myAddresses]);
 
-  // Overview: truth from the records only. Test runs are excluded from the
-  // business counts (they are labeled and kept separately, like History does).
+  const real = mine.filter((t) => !isTestRun(t));
+  const testRuns = mine.filter(isTestRun);
+  const total = mine.length;
+
   const spentReal = real.reduce((acc, t) => acc + t.spend.spentUsdCents, 0);
   const receiptCount = real.reduce((acc, t) => acc + (t.spend.entries?.length ?? 0), 0);
   const outcomeText =
@@ -129,137 +144,164 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
 
   const looking = q !== "" || status !== "all" || intent !== "all" || date !== "all";
 
+  const notLoggedIn = ready && !authenticated;
+  const noWallet = ready && authenticated && myAddresses.size === 0;
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-      <p className="x-tag">EXPLORER · ACTIVITY</p>
-      <h1 className="x-display-1 mt-3 text-ink">Activity centre</h1>
+      <p className="x-tag">YOUR ACTIVITY</p>
+      <h1 className="x-display-1 mt-3 text-ink">Your asks</h1>
+      <p className="mt-2 max-w-[60ch] text-[13.5px] leading-relaxed text-ink-soft">
+        Only the Telegraph requests paid by a wallet you have connected. Explorer, Signals and the rest stay shared.
+      </p>
+
       {persistenceMode === "ephemeral" ? (
         <p className="mt-3 max-w-[70ch] rounded-lg border border-amber/40 bg-amber/5 px-4 py-3 text-[13px] leading-relaxed text-amber">
-          This deployment has no durable database, so records live in a per-instance /tmp directory. What you see is
-          real activity from this instance only, and it does not survive restarts or cold starts.
+          This deployment has no durable database, so records live in a per-instance /tmp directory.
         </p>
       ) : null}
 
-      {/* Overview */}
-      <section className="mt-8 flex flex-wrap gap-x-10 gap-y-4 border-y border-edge py-5" aria-label="Activity overview">
-        <Stat label="REQUESTS" value={real.length.toLocaleString()} />
-        <Stat label="OUTCOMES" value={outcomeText} wide />
-        <Stat label="SPENT (PAID STEPS)" value={money(spentReal)} />
-        <Stat label="RECEIPTS ON FILE" value={receiptCount.toLocaleString()} />
-      </section>
-
-      {/* Search + filters */}
-      <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="relative w-full max-w-md">
-          <Search size={14} strokeWidth={1.8} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by request text, id or result"
-            aria-label="Search activity"
-            className="min-h-10 w-full rounded-md border border-edge bg-panel-2 pl-9 pr-9 text-[13px] text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none"
-          />
-          {q !== "" && (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              aria-label="Clear search"
-              className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-ink-faint transition-colors hover:text-ink"
-            >
-              <X size={13} strokeWidth={2} />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-4">
-          <FilterGroup label="Status" value={status} options={STATUS_FILTERS.map((s) => ({ id: s.id, label: s.label, count: countFor(s.id) }))} onChange={(v) => setStatus(v as StatusFilter)} />
-          <FilterGroup
-            label="Intent"
-            value={intent}
-            options={(["all", "information", "preparation", "execution"] as const).map((id) => ({
-              id,
-              label: id === "all" ? "All intents" : INTENT_LABELS[id],
-              count: (tasks ?? []).filter((t) => t.criteria.goalIntent === id).length,
-            }))}
-            onChange={(v) => setIntent(v as IntentFilter)}
-          />
-          <FilterGroup label="Window" value={date} options={DATE_FILTERS.map((d) => ({ id: d.id, label: d.label, count: 0 }))} onChange={(v) => setDate(v as DateFilter)} />
-        </div>
-      </div>
-
-      {tasks === null && !loadFailed && (
-        <div aria-live="polite" className="mt-8 space-y-2">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-12 rounded-md bg-panel-2 motion-safe:animate-pulse" />
-          ))}
-          <p className="pt-2 text-[13px] text-ink-faint">Loading activity…</p>
-        </div>
-      )}
-
-      {loadFailed && (
-        <p aria-live="assertive" className="mt-8 rounded-md border border-risk/40 bg-risk/5 px-4 py-3 text-[13px] text-risk">
-          The activity store could not be read. This is not an empty history; the view keeps retrying every few
-          seconds.
-        </p>
-      )}
-
-      {tasks !== null && !loadFailed && total === 0 && (
-        <div className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-6 py-12 text-center">
+      {notLoggedIn && (
+        <div className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-6 py-10 text-center">
           <p className="mx-auto max-w-md text-[13.5px] leading-relaxed text-ink-soft">
-            Nothing has been answered yet. A Terminal ask appears here once it runs, with what it cost, who answered
-            and how it ended.
+            Connect or create a wallet to see your own paid asks.
           </p>
-          <Link href="/terminal" className="btn-quiet mt-5 !min-h-9">
-            Open the Terminal
+          <button onClick={() => login()} className="btn-primary mt-5 !min-h-9">
+            Connect wallet
+          </button>
+        </div>
+      )}
+
+      {noWallet && (
+        <div className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-6 py-10 text-center">
+          <p className="mx-auto max-w-md text-[13.5px] leading-relaxed text-ink-soft">
+            You are logged in but no wallet is connected yet. Open Funds to create an in-app wallet or connect an external one.
+          </p>
+          <Link href="/funds" className="btn-quiet mt-5 !min-h-9">
+            Open Funds
           </Link>
         </div>
       )}
 
-      {tasks !== null && !loadFailed && total > 0 && filtered.length === 0 && (
-        <p className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-5 py-8 text-center text-[13.5px] text-ink-soft">
-          No records match {q !== "" ? <>the search <span className="tabular text-ink">“{query.trim()}”</span></> : "these filters"}.
-        </p>
-      )}
+      {!notLoggedIn && !noWallet && (
+        <>
+          <section className="mt-8 flex flex-wrap gap-x-10 gap-y-4 border-y border-edge py-5" aria-label="Activity overview">
+            <Stat label="YOUR REQUESTS" value={real.length.toLocaleString()} />
+            <Stat label="OUTCOMES" value={outcomeText} wide />
+            <Stat label="SPENT (PAID STEPS)" value={money(spentReal)} />
+            <Stat label="RECEIPTS ON FILE" value={receiptCount.toLocaleString()} />
+          </section>
 
-      {/* History, newest first */}
-      {filtered.length > 0 && (
-        <section className="mt-8" aria-label="Request history">
-          <p className="x-label">REQUEST HISTORY · {looking ? `${filtered.length} match` : "newest first"}</p>
-          <div className="x-rule mb-0 mt-1" />
-          {filtered.map((t) => (
-            <Link
-              key={t.id}
-              href={`/activity/${t.id}`}
-              className="history-row group grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 border-b border-edge px-1 py-3.5 transition-colors hover:bg-panel sm:grid-cols-[150px_minmax(0,1fr)_auto_auto] sm:gap-x-5"
-            >
-              <StatusChip state={t.state} />
-              <span className="min-w-0">
-                <span className={`${isTestRun(t) ? "text-ink-soft" : "text-ink"} block truncate text-[13.5px] transition group-hover:text-amber`}>{t.goal}</span>
-                {t.criteria.goalIntent ? (
-                  <span className="block text-[11px] text-ink-faint">{INTENT_LABELS[t.criteria.goalIntent]}</span>
-                ) : t.terminal?.intent ? (
-                  <span className="block text-[11px] text-ink-faint">terminal ask · {t.terminal.intent.toLowerCase()}</span>
-                ) : null}
-              </span>
-              <span className="hidden items-baseline gap-3 tabular text-[11px] text-ink-faint sm:flex">
-                {(t.spend.entries?.length ?? 0) > 0 && (
-                  <span className="inline-flex items-center gap-1">
-                    <ReceiptText size={11} strokeWidth={1.8} aria-hidden />
-                    {t.spend.entries.length}
+          <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="relative w-full max-w-md">
+              <Search size={14} strokeWidth={1.8} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search your requests"
+                aria-label="Search activity"
+                className="min-h-10 w-full rounded-md border border-edge bg-panel-2 pl-9 pr-9 text-[13px] text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none"
+              />
+              {q !== "" && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-ink-faint transition-colors hover:text-ink"
+                >
+                  <X size={13} strokeWidth={2} />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <FilterGroup label="Status" value={status} options={STATUS_FILTERS.map((s) => ({ id: s.id, label: s.label, count: countFor(s.id) }))} onChange={(v) => setStatus(v as StatusFilter)} />
+              <FilterGroup
+                label="Intent"
+                value={intent}
+                options={(["all", "information", "preparation", "execution"] as const).map((id) => ({
+                  id,
+                  label: id === "all" ? "All intents" : INTENT_LABELS[id],
+                  count: mine.filter((t) => t.criteria.goalIntent === id).length,
+                }))}
+                onChange={(v) => setIntent(v as IntentFilter)}
+              />
+              <FilterGroup label="Window" value={date} options={DATE_FILTERS.map((d) => ({ id: d.id, label: d.label, count: 0 }))} onChange={(v) => setDate(v as DateFilter)} />
+            </div>
+          </div>
+
+          {tasks === null && !loadFailed && (
+            <div aria-live="polite" className="mt-8 space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-12 rounded-md bg-panel-2 motion-safe:animate-pulse" />
+              ))}
+              <p className="pt-2 text-[13px] text-ink-faint">Loading your activity…</p>
+            </div>
+          )}
+
+          {loadFailed && (
+            <p aria-live="assertive" className="mt-8 rounded-md border border-risk/40 bg-risk/5 px-4 py-3 text-[13px] text-risk">
+              The activity store could not be read. The view keeps retrying every few seconds.
+            </p>
+          )}
+
+          {tasks !== null && !loadFailed && total === 0 && (
+            <div className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-6 py-12 text-center">
+              <p className="mx-auto max-w-md text-[13.5px] leading-relaxed text-ink-soft">
+                No paid asks from your connected wallet yet. Open the Terminal to make one.
+              </p>
+              <Link href="/terminal" className="btn-quiet mt-5 !min-h-9">
+                Open the Terminal
+              </Link>
+            </div>
+          )}
+
+          {tasks !== null && !loadFailed && total > 0 && filtered.length === 0 && (
+            <p className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-5 py-8 text-center text-[13.5px] text-ink-soft">
+              No records match {q !== "" ? <>the search <span className="tabular text-ink">“{query.trim()}”</span></> : "these filters"}.
+            </p>
+          )}
+
+          {filtered.length > 0 && (
+            <section className="mt-8" aria-label="Request history">
+              <p className="x-label">YOUR REQUEST HISTORY · {looking ? `${filtered.length} match` : "newest first"}</p>
+              <div className="x-rule mb-0 mt-1" />
+              {filtered.map((t) => (
+                <Link
+                  key={t.id}
+                  href={`/activity/${t.id}`}
+                  className="history-row group grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 border-b border-edge px-1 py-3.5 transition-colors hover:bg-panel sm:grid-cols-[150px_minmax(0,1fr)_auto_auto] sm:gap-x-5"
+                >
+                  <StatusChip state={t.state} />
+                  <span className="min-w-0">
+                    <span className={`${isTestRun(t) ? "text-ink-soft" : "text-ink"} block truncate text-[13.5px] transition group-hover:text-amber`}>{t.goal}</span>
+                    {t.criteria.goalIntent ? (
+                      <span className="block text-[11px] text-ink-faint">{INTENT_LABELS[t.criteria.goalIntent]}</span>
+                    ) : t.terminal?.intent ? (
+                      <span className="block text-[11px] text-ink-faint">terminal ask · {t.terminal.intent.toLowerCase()}</span>
+                    ) : null}
                   </span>
-                )}
-                <span>{t.spend.spentUsdCents > 0 ? `${money(t.spend.spentUsdCents)} spent` : "no spend"}</span>
-              </span>
-              <span className="tabular text-[11px] text-ink-faint">{timeOf(t.createdAt)}</span>
-            </Link>
-          ))}
-        </section>
+                  <span className="hidden items-baseline gap-3 tabular text-[11px] text-ink-faint sm:flex">
+                    {(t.spend.entries?.length ?? 0) > 0 && (
+                      <span className="inline-flex items-center gap-1">
+                        <ReceiptText size={11} strokeWidth={1.8} aria-hidden />
+                        {t.spend.entries.length}
+                      </span>
+                    )}
+                    <span>{t.spend.spentUsdCents > 0 ? `${money(t.spend.spentUsdCents)} spent` : "no spend"}</span>
+                  </span>
+                  <span className="tabular text-[11px] text-ink-faint">{timeOf(t.createdAt)}</span>
+                </Link>
+              ))}
+            </section>
+          )}
+        </>
       )}
     </div>
   );
 
   function countFor(f: StatusFilter) {
-    return (tasks ?? []).filter((t) =>
+    return mine.filter((t) =>
       f === "all" ? true : f === "test" ? isTestRun(t) : !isTestRun(t) && stateFor(t) === f,
     ).length;
   }
