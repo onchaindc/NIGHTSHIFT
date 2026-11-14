@@ -1,111 +1,94 @@
 # NIGHTSHIFT
 
-A live explorer for the **Telegraph** network. It shows who is answering questions, what
-they cover, what one ask costs right now, and every payment and receipt behind an answer.
+Explorer and payment terminal for the Telegraph network.
 
-Nothing on the screen is mocked. Miner, evaluator and validator registries are read from the
-public node at request time, and the price shown is the node's own payment challenge.
+Reads live miner, evaluator, validator, intent and signal registries from the public Telegraph node. Quotes the node's own x402 payment challenge before any signature. Executes a single paid ask only after an explicit approval pinned to that exact offer. Records the receipt and signal hash. Never retries a paid request that cannot be verified.
 
----
+## Stack
 
-## What you can do here
+- Next.js 16 (app router), React 19, TypeScript
+- Tailwind CSS 4
+- x402 (`@x402/evm`, `@x402/fetch`) for USDC payments on Base Sepolia
+- Neon Postgres (pooled) with a file-store fallback
+- Vitest
 
-| Route | What it is for |
+## Ask flow
+
+```
+Discover  →  free GET of miner/intent catalogs
+Probe     →  unpaid POST; node returns 402 + priced challenge
+Approve   →  user pins the exact offer (amount, payTo, network, asset)
+Execute   →  signed x402 payment; node returns answer + receipt + signal_hash
+Verify    →  optional GET /engine/v1/signal/{hash} + local re-derivation
+```
+
+Invariants enforced in `src/lib/terminal/ask.ts` and the execute route:
+
+- No signature without an explicit approval that matches the live challenge.
+- Server refuses if the challenge has drifted from the approved offer.
+- A paid response that cannot be reconciled (missing or mismatched `signal_hash`) is not retried.
+- Uncertain payments are recorded as uncertain; they are never converted into a second charge.
+
+## Storage
+
+Single interface in `src/lib/storage`. Two implementations:
+
+- Postgres (`src/lib/storage/postgres.ts`) — schema applied on first use; migrations tracked in `ns_migrations`. On serverless, prefers a pooled URL.
+- File (`src/lib/storage/file.ts`) — local development only.
+
+If multiple database URLs are set, each is probed with `SELECT 1`; the first reachable candidate is used. Unreachable candidates are reported by hostname, not by full URL.
+
+Leases (`ns_leases`) prevent concurrent scheduler ticks from double-running the same watch.
+
+## Protocol Watch
+
+Standing monitors against public sources (GitHub releases/commits, docs URL content hash, Discourse JSON, RSS/Atom). Fingerprints are stored; a change produces a finding. Optional Telegram delivery.
+
+On long-running processes the in-process scheduler fires every `NIGHTSHIFT_WATCH_INTERVAL_MS` (default 10 min). On Vercel Hobby the external cron in `vercel.json` is daily (`17 7 * * *`). Set `NIGHTSHIFT_EXTERNAL_CRON=1` so `/api/status` reports `workerMode: "external-trigger"` instead of claiming an in-process worker. Overlapping ticks are idempotent via fingerprints and leases.
+
+## Routes
+
+| Path | Purpose |
 | --- | --- |
-| `/` | Overview: live counts, the four roles, and today's price for one ask |
-| `/miners` | Every miner answering, with endpoints, supported intents and price |
-| `/evaluators` | Evaluators scoring answers, per intent |
-| `/validators` | Validators countersigning settlement |
-| `/intents` | The shared vocabulary of question types |
-| `/signals` | Signals produced by the Telegraph daemon, with detail pages |
-| `/activity` | Recorded requests, payments, receipts and reconciliation |
-| `/terminal` | Compose one ask, see the exact price, approve it, get the answer |
-| `/developers` | Integration guide: endpoints, request shape, payment flow, code samples |
+| `/` | Live counts, roles, current price for one ask |
+| `/miners`, `/evaluators`, `/validators`, `/intents` | Registry views |
+| `/signals`, `/signals/[id]` | Daemon signals |
+| `/activity`, `/activity/[id]` | Recorded asks, payments, receipts, ledger reconciliation |
+| `/terminal` | Compose, probe, approve, execute, verify |
+| `/watch` | Configure and run Protocol Watches |
+| `/developers` | Integration notes and request shapes |
+| `/api/status` | Scheduler health, storage mode, node reachability |
+| `/api/terminal/preview` | Unpaid probe |
+| `/api/terminal/execute` | Approved paid step |
+| `/api/terminal/verify` | Signal registry check |
+| `/api/watches` | Watch CRUD and check |
+| `/api/telegram/webhook` | Telegram adapter |
 
-## The ask flow
-
-```
-1. Discover   free       read the miner catalog
-2. Probe      HTTP 402   the node returns a priced offer
-3. Pay        x402       you sign the exact amount, once
-4. Answer     HTTP 200   the answer arrives with a receipt and a signal hash
-```
-
-The Terminal follows the same four steps in the browser. Nothing is signed until you approve
-the exact amount that was quoted, and a paid response that cannot be verified is never
-retried, so an uncertain payment can never become a double charge.
-
-## Data and persistence
-
-- **Reads** for the explorer come from the public Telegraph node. A failed read is shown as a
-  failed read, never as an empty success.
-- **Writes** (asks, terminal attempts, watches) go through one storage layer
-  (`src/lib/storage`) with a Postgres implementation and a file-based fallback for local
-  development.
-- The Postgres backend applies its schema on first use, so a fresh database becomes usable
-  without a manual migration step. Migrations are versioned and recorded in `ns_migrations`.
-- If more than one database URL is configured, each candidate is probed with a read-only
-  `select 1` and the first one that answers is used. A candidate that cannot be reached is
-  reported by hostname and error code only.
-
-Useful commands:
-
-```bash
-bun run db:migrate   # apply the schema explicitly
-bun run db:verify    # apply schema, round-trip a probe row, remove only that row
-```
-
-## API
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /api/status` | Integration and storage status |
-| `GET /api/network` | Registry aggregates used by the overview |
-| `GET/POST /api/tasks` | Task records behind Activity |
-| `POST /api/terminal/execute` | The approved, paid step of a Terminal ask |
-| `GET/POST /api/watches` | Protocol watches |
-| `GET /api/daemon/...` | Daemon signals and metadata |
-| `POST /api/telegram/webhook` | Telegram bot adapter |
-
-## Local development
+## Local
 
 ```bash
 bun install
-bun run dev        # http://localhost:3000
-bun run typecheck  # tsc -b --noEmit
-bun run test       # vitest
+bun run dev          # http://localhost:3000
+bun run typecheck
+bun run test
 ```
 
 ## Configuration
 
-Secrets live in `.env.local` and are never read or printed by the app or by tooling. The keys
-this project understands:
+Secrets in `.env.local`. Never read or printed by the app.
 
-| Key | Used for |
+| Key | Purpose |
 | --- | --- |
-| `DATABASE_URL` | Postgres for tasks, watches and leases (use a pooled URL on serverless) |
-| `NIGHTSHIFT_DATABASE_URL` | Optional primary database URL, takes precedence over `DATABASE_URL` |
-| `DATABASE_URL_UNPOOLED` | Fallback only, used when no primary URL is set |
-| `TELEGRAPH_EVM_PRIVATE_KEY` | Signing x402 payments in the Terminal |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` | Telegram adapter |
+| `TELEGRAPH_NODE_URL` | Node base (default testnet) |
+| `TELEGRAPH_EVM_PRIVATE_KEY` | Signs x402 payments (server only) |
+| `DATABASE_URL` / `NIGHTSHIFT_DATABASE_URL` | Postgres (pooled preferred) |
+| `DATABASE_URL_UNPOOLED` | Fallback only |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` | Optional Telegram adapter |
+| `NIGHTSHIFT_EXTERNAL_CRON` | `1` on Vercel so status reports external-trigger mode |
+| `NIGHTSHIFT_WATCH_INTERVAL_MS` | In-process scheduler interval (long-running only) |
 
-Without a database URL the app runs on the file store, which is fine for local work and not
-intended for production.
+Without a database URL the file store is used. Suitable for local work only.
 
-## Design
+## Status
 
-The interface is a light editorial console: warm paper background, white surfaces with hairline
-borders, one amber accent, and Geist with a serif display face for headings. Numbers always
-render on a tabular grid. Motion is limited to what explains state: a packet travelling the ask
-rail, a live dot, a caret, and short section reveals. All of it is disabled under
-`prefers-reduced-motion`.
-
-## Production: Protocol Watch scheduling
-
-On long-running processes the in-process scheduler runs every `NIGHTSHIFT_WATCH_INTERVAL_MS` (default 10 minutes).
-
-On serverless (Vercel) there is no long-lived process, so watches are driven by an external cron that hits `GET /api/watches/scheduler-tick`. The cron in `vercel.json` fires once daily (Hobby plan limit). The scheduler still respects each watch's own due time derived from its persisted `lastCheckedAt`, so a more frequent cron only increases how quickly overdue watches are caught up; fingerprints keep overlapping ticks idempotent.
-
-Set `NIGHTSHIFT_EXTERNAL_CRON=1` on Vercel so the app reports `workerMode: "external-trigger"` instead of claiming an in-process worker.
-
-`/api/status` always surfaces the current scheduler health (`autoChecks`, `intervalMs`, `workerMode`, `degraded`, `degradedReason`, `lastSuccessAt`, `consecutiveFailures`, `cronHint`) so a stopped or lagging monitor is visible rather than silently assumed to be running.
+`GET /api/status` returns node reachability, storage mode, and scheduler state (`autoChecks`, `intervalMs`, `workerMode`, `degraded`, `degradedReason`, `lastSuccessAt`, `consecutiveFailures`, `cronHint`). Missing integrations are reported as unconfigured. A stopped or lagging scheduler is named as degraded.
