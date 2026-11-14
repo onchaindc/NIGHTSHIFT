@@ -9,6 +9,7 @@ import { NavLinks } from "@/components/explorer/nav-links";
 /** The product's areas, in the order a newcomer needs them. */
 const AREAS = [
   { href: "/", label: "Explorer", activeFor: ["/", "/miners", "/intents", "/evaluators", "/validators"] },
+  { href: "/watch", label: "Watch" },
   { href: "/signals", label: "Signals" },
   { href: "/activity", label: "Activity" },
   { href: "/developers", label: "Developers" },
