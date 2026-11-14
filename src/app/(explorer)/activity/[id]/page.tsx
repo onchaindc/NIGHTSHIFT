@@ -1,5 +1,21 @@
 import Link from "next/link";
 
+/** Try to extract a brief + structured papers from a raw outcome string. */
+function parseOutcome(summary: string): { brief: string | null; papers: Array<{ title: string; doi?: string }> | null; raw: string } {
+  try {
+    const o = JSON.parse(summary) as Record<string, unknown>;
+    const brief = typeof o.brief === "string" ? o.brief : null;
+    const titles = Array.isArray(o.paper_titles) ? o.paper_titles.filter((t): t is string => typeof t === "string") : [];
+    const dois = Array.isArray(o.dois) ? o.dois.filter((d): d is string => typeof d === "string") : [];
+    const papers = titles.length > 0 ? titles.map((title, i) => ({ title, doi: dois[i] })) : null;
+    return { brief, papers, raw: summary };
+  } catch {
+    return { brief: null, papers: null, raw: summary };
+  }
+}
+
+
+
 import { getTask } from "@/lib/engine/store";
 import { reconcileLedger } from "@/lib/engine/ledger";
 import { EvidenceList, StatusChip } from "@/components/taskParts";
@@ -127,9 +143,35 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
         {/* Execution outcome */}
         <section className="rounded-lg border border-edge bg-panel p-5">
           <p className="x-label">EXECUTION OUTCOME</p>
-          {task.result ? (
-            <p className="mt-3 whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink">{task.result.summary}</p>
-          ) : task.error ? (
+          {task.result ? (() => {
+            const parsed = parseOutcome(task.result.summary);
+            return (
+              <div className="mt-3">
+                {parsed.brief && <p className="text-[14px] leading-relaxed text-ink">{parsed.brief}</p>}
+                {parsed.papers && (
+                  <ul className="mt-3 space-y-2">
+                    {parsed.papers.map((p, i) => (
+                      <li key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+                        <p className="text-[13px] leading-snug text-ink">{p.title}</p>
+                        {p.doi && (
+                          <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2">
+                            {p.doi}
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {!parsed.brief && !parsed.papers && (
+                  <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink">{parsed.raw}</p>
+                )}
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-[11.5px] text-ink-faint">Technical details</summary>
+                  <pre className="mt-2 max-h-60 overflow-auto rounded-lg border border-edge bg-panel-2 p-2 font-mono text-[11px] leading-relaxed text-ink-soft">{parsed.raw}</pre>
+                </details>
+              </div>
+            );
+          })() : task.error ? (
             <p className="mt-3 whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink">{task.error}</p>
           ) : task.state === "awaiting_approval" ? (
             <p className="mt-3 text-[13.5px] text-ink-soft">Waiting for explicit approval of the plan; nothing has been paid.</p>
