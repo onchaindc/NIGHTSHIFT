@@ -18,8 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Loader2, Search, Terminal as TerminalIcon, XCircle } from "lucide-react";
-import { getOrCreateWallet, type InAppWallet } from "@/lib/wallet/in-app";
-import { executeWithInAppWallet } from "@/lib/wallet/execute-client";
+import { useWallets, useX402Fetch } from "@privy-io/react-auth";
 
 export interface TerminalIntentSummary {
   intent: string;
@@ -252,10 +251,9 @@ export default function TerminalClient({
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [queryText, setQueryText] = useState("");
   const [minerId, setMinerId] = useState<string | null>(null); // null = auto-route
-  const [inAppWallet, setInAppWallet] = useState<InAppWallet | null>(null);
-  useEffect(() => {
-    setInAppWallet(getOrCreateWallet());
-  }, []);
+  const { wallets } = useWallets();
+  const { wrapFetchWithPayment } = useX402Fetch();
+  const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
 
   // Advanced state
   const [rawJson, setRawJson] = useState("");
@@ -465,46 +463,56 @@ export default function TerminalClient({
       payload.approved = true;
       payload.offer = approvedOffer;
 
-      // Prefer the in-app wallet: sign in the browser, never use the shared server key.
-      if (inAppWallet && challenge) {
+      // Pay with the Privy embedded wallet (the one shown on the Wallet page).
+      if (privyWallet && challenge) {
         const nodeUrl = process.env.NEXT_PUBLIC_TELEGRAPH_NODE_URL ?? "https://devnode.telegraphprotocol.com";
         const urlPath = minerId ? `/engine/v1/ask/${encodeURIComponent(minerId)}` : "/engine/v1/ask";
-        const result = await executeWithInAppWallet({
-          wallet: inAppWallet,
-          nodeUrl,
-          urlPath,
-          body: payload,
-          network: challenge.payment.network,
-          asset: challenge.payment.asset,
-          payTo: challenge.payment.payTo,
-          amount: challenge.payment.amount,
-        });
-        if (result.ok && result.signalHash) {
-          setAnswer({
-            answer: { result: result.body, minerName: undefined },
-            signalHash: result.signalHash,
-            receipt: {
-              receipt_hash: result.receiptHash ?? "",
-              rail: "x402",
-              payer: inAppWallet.address,
-              miner: challenge.payment.payTo,
-              intent: "",
-              amount_uusdc: challenge.payment.amount,
-              epoch_id: 0,
-              settlement: result.settlement ?? "",
-              chain: challenge.payment.network,
-              timestamp: Date.now(),
-            },
-            settlement: result.settlement,
+        try {
+          const fetchWithPayment = wrapFetchWithPayment({
+            walletAddress: privyWallet.address,
+            fetch,
+            maxValue: BigInt(challenge.payment.amount) * 2n,
           });
-          setChallenge(null);
-          setStage("result");
-          pushLog("Answer delivered from your wallet. Run verification before trusting it.", "good");
+          const res = await fetchWithPayment(`${nodeUrl}${urlPath}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+          const signalHash = typeof body?.signal_hash === "string" ? body.signal_hash : null;
+          if (res.ok && signalHash) {
+            setAnswer({
+              answer: { result: body, minerName: undefined },
+              signalHash,
+              receipt: {
+                receipt_hash: res.headers.get("x-telegraph-receipt") ?? "",
+                rail: "x402",
+                payer: privyWallet.address,
+                miner: challenge.payment.payTo,
+                intent: "",
+                amount_uusdc: challenge.payment.amount,
+                epoch_id: 0,
+                settlement: res.headers.get("payment-response") ?? "",
+                chain: challenge.payment.network,
+                timestamp: Date.now(),
+              },
+              settlement: res.headers.get("payment-response"),
+            });
+            setChallenge(null);
+            setStage("result");
+            pushLog("Answer delivered from your wallet. Run verification before trusting it.", "good");
+            return;
+          }
+          const detail = body ? JSON.stringify(body).slice(0, 300) : `HTTP ${res.status}`;
+          setFailure({ heading: "Payment from your wallet failed", detail });
+          pushLog(`Wallet payment failed: ${detail}`, "bad");
+          return;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setFailure({ heading: "Payment from your wallet failed", detail: msg.slice(0, 300) });
+          pushLog(`Wallet payment failed: ${msg}`, "bad");
           return;
         }
-        setFailure({ heading: "Payment from your wallet failed", detail: result.detail ?? `HTTP ${result.status}` });
-        pushLog(`In-app wallet payment failed: ${result.detail ?? result.status}`, "bad");
-        return;
       }
 
       const res = await fetch("/api/terminal/execute", {
@@ -561,7 +569,7 @@ export default function TerminalClient({
       clearTimeout(deadline);
       setExecuting(false);
     }
-  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, inAppWallet]);
+  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, privyWallet, wrapFetchWithPayment]);
 
   /* ---- verify ------------------------------------------------------- */
 
