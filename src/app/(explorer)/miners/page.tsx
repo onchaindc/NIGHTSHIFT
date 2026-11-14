@@ -4,7 +4,7 @@ import { Search } from "lucide-react";
 import { fetchIntents, fetchMiners, type NetworkMiner } from "@/lib/explorer/network";
 import { ParticipantCard } from "@/components/explorer/participant-card";
 
-export const metadata = { title: "Miners" };
+export const metadata = { title: "Answer services" };
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 60;
@@ -30,7 +30,7 @@ export default async function MinersPage({
   if (fetched.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-eyebrow">Miners</p>
+        <p className="x-eyebrow">Answer services</p>
         <h1 className="x-display-1 mt-4 text-ink">Miner catalog unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The public node at devnode.telegraphprotocol.com could not be reached, so no miners are listed rather than a
@@ -46,7 +46,7 @@ export default async function MinersPage({
   if (intents.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-eyebrow">Miners</p>
+        <p className="x-eyebrow">Answer services</p>
         <h1 className="x-display-1 mt-4 text-ink">Intents registry unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The intent list could not be fetched, so miners cannot be grouped by intent right now. Retry shortly.
