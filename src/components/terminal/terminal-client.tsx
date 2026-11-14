@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Loader2, Search, Terminal as TerminalIcon, XCircle } from "lucide-react";
-import { useWallets, useX402Fetch } from "@privy-io/react-auth";
+import { useWallets, useSignTypedData } from "@privy-io/react-auth";
 
 export interface TerminalIntentSummary {
   intent: string;
@@ -252,7 +252,7 @@ export default function TerminalClient({
   const [queryText, setQueryText] = useState("");
   const [minerId, setMinerId] = useState<string | null>(null); // null = auto-route
   const { wallets } = useWallets();
-  const { wrapFetchWithPayment } = useX402Fetch();
+  const { signTypedData } = useSignTypedData();
   const privyWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
 
   // Advanced state
@@ -463,9 +463,67 @@ export default function TerminalClient({
       payload.approved = true;
       payload.offer = approvedOffer;
 
-      // Browser cannot complete x402 directly (node CORS hides the
-      // PAYMENT-REQUIRED header). Fall through to the server path below,
-      // which can read the challenge and sign with the deployment key.
+      // Sign with the Privy wallet, send via server (CORS hides the challenge header).
+      if (privyWallet && challenge) {
+        try {
+          const nodeUrl = process.env.NEXT_PUBLIC_TELEGRAPH_NODE_URL ?? "https://devnode.telegraphprotocol.com";
+          const urlPath = minerId ? `/engine/v1/ask/${encodeURIComponent(minerId)}` : "/engine/v1/ask";
+          const chRes = await fetch("/api/terminal/challenge", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ urlPath, body: payload }),
+          });
+          const ch = await chRes.json();
+          if (!ch.typedData || !ch.offer) {
+            setFailure({ heading: "Could not get payment challenge", detail: ch.error ?? "unknown" });
+            return;
+          }
+          ch.typedData.message.from = privyWallet.address;
+          const { signature } = await signTypedData(ch.typedData, { address: privyWallet.address });
+          const payment = btoa(JSON.stringify({
+            x402Version: 2,
+            payload: { signature, authorization: ch.typedData.message },
+            accepted: ch.offer,
+          }));
+          const done = await fetch("/api/terminal/complete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ urlPath, body: payload, paymentSignature: payment, payer: privyWallet.address }),
+          });
+          const result = await done.json();
+          const signalHash = typeof result.body?.signal_hash === "string" ? result.body.signal_hash : null;
+          if (result.status === 200 && signalHash) {
+            setAnswer({
+              answer: { result: result.body, minerName: undefined },
+              signalHash,
+              receipt: {
+                receipt_hash: result.receipt ?? "",
+                rail: "x402",
+                payer: privyWallet.address,
+                miner: challenge.payment.payTo,
+                intent: "",
+                amount_uusdc: challenge.payment.amount,
+                epoch_id: 0,
+                settlement: result.paymentResponse ?? "",
+                chain: challenge.payment.network,
+                timestamp: Date.now(),
+              },
+              settlement: result.paymentResponse,
+            });
+            setChallenge(null);
+            setStage("result");
+            pushLog("Answer delivered from your wallet. Run verification before trusting it.", "good");
+            return;
+          }
+          setFailure({ heading: "Payment from your wallet failed", detail: result.error ?? JSON.stringify(result.body ?? result).slice(0, 300) });
+          return;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setFailure({ heading: "Payment from your wallet failed", detail: msg.slice(0, 300) });
+          return;
+        }
+      }
+      // Fall through to server path if no Privy wallet.
 
       const res = await fetch("/api/terminal/execute", {
         method: "POST",
@@ -521,7 +579,7 @@ export default function TerminalClient({
       clearTimeout(deadline);
       setExecuting(false);
     }
-  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, privyWallet, wrapFetchWithPayment]);
+  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, privyWallet, signTypedData]);
 
   /* ---- verify ------------------------------------------------------- */
 
