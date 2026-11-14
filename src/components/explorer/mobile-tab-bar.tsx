@@ -15,7 +15,7 @@ const ITEMS: Item[] = [
   { href: "/miners", label: "Explorer", icon: Compass, activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
   { href: "/signals", label: "Signals", icon: Radar },
   { href: "/activity", label: "Activity", icon: ReceiptText },
-  { href: "/funds", label: "Funds", icon: Wallet },
+  { href: "/funds", label: "Wallet", icon: Wallet },
   { href: "/developers", label: "Developers", icon: Code2 },
 ];
 
