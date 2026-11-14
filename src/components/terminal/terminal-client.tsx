@@ -373,7 +373,7 @@ export default function TerminalClient({
         setApprovedOffer(body.offer as Offer);
         setPreviewStatus("challenge");
         const p = body.payment as ChallengeInfo;
-        pushLog(`Price: $${p.amountUsdCents.toFixed(2)} in ${p.assetName ?? "USD Coin"} on ${chainName(p.network)}. Nothing is signed until you approve.`, "good");
+        pushLog(`Price: $${(p.amountUsdCents / 100).toFixed(2)} in ${p.assetName ?? "USD Coin"} on ${chainName(p.network)}. Nothing is signed until you approve.`, "good");
       } else if (body.status === "refused") {
         setPreviewHttp(typeof body.httpStatus === "number" ? body.httpStatus : null);
         setNodeVerdict(body.node ?? body.detail ?? null);
@@ -794,7 +794,7 @@ export default function TerminalClient({
                 <TerminalIcon size={13} aria-hidden /> Price for this question
               </p>
               <p className="tabular mt-3 text-[28px] font-semibold leading-none text-ink">
-                ${challenge.payment.amountUsdCents.toFixed(2)}
+                ${(challenge.payment.amountUsdCents / 100).toFixed(2)}
               </p>
               <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
                 Paid once in {challenge.payment.assetName ?? "USDC"} on {chainName(challenge.payment.network)}. Nothing is
@@ -810,12 +810,12 @@ export default function TerminalClient({
                   <dt className="shrink-0 text-ink-faint">Amount</dt>
                   <dd className="tabular text-right text-ink">
                     {challenge.payment.amount} atomic
-                    <span className="block text-[10.5px] text-ink-soft">{(Number(challenge.payment.amount) / 10000).toFixed(2)} USDC (${challenge.payment.amountUsdCents.toFixed(2)})</span>
+                    <span className="block text-[10.5px] text-ink-soft">{(Number(challenge.payment.amount) / 1_000_000).toFixed(2)} USDC (${(challenge.payment.amountUsdCents / 100).toFixed(2)})</span>
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="shrink-0 text-ink-faint">Token</dt>
-                  <dd className="tabular max-w-[70%] truncate text-right text-ink" title={challenge.payment.asset}>
+                  <dd className="tabular max-w-[70%] break-all text-right text-ink" title={challenge.payment.asset}>
                     {challenge.payment.asset}
                     {challenge.payment.assetName ? ` — ${challenge.payment.assetName}` : ""}
                     {challenge.payment.assetVersion ? ` v${challenge.payment.assetVersion}` : ""}
@@ -827,11 +827,11 @@ export default function TerminalClient({
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="shrink-0 text-ink-faint">Recipient (payTo)</dt>
-                  <dd className="tabular max-w-[70%] truncate text-right text-ink" title={challenge.payment.payTo}>{challenge.payment.payTo}</dd>
+                  <dd className="tabular max-w-[70%] break-all text-right text-ink" title={challenge.payment.payTo}>{challenge.payment.payTo}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="shrink-0 text-ink-faint">Payer</dt>
-                  <dd className="tabular max-w-[70%] truncate text-right text-ink" title={wallet.address ?? ""}>
+                  <dd className="tabular max-w-[70%] break-all text-right text-ink" title={wallet.address ?? ""}>
                     {wallet.address ?? "not configured"}
                   </dd>
                 </div>
@@ -881,7 +881,7 @@ export default function TerminalClient({
               {executing ? (
                 <><Loader2 size={14} className="animate-spin" aria-hidden /> Executing…</>
               ) : (
-                <>Pay ${challenge.payment.amountUsdCents.toFixed(2)} and send</>
+                <>Pay ${(challenge.payment.amountUsdCents / 100).toFixed(2)} and send</>
               )}
             </button>
             <button onClick={() => { setChallenge(null); setPreviewStatus(null); setApprovalBox(false); setStage("compose"); }} className="btn-quiet" disabled={executing}>
@@ -964,11 +964,11 @@ export default function TerminalClient({
 
           <section className="rounded-lg border border-edge bg-panel p-5">
             <p className="x-label">Receipt &amp; verification</p>
-            <p className="tabular mt-2 text-[11px] text-ink-faint">receipt {answer.receipt.receipt_hash} · epoch {answer.receipt.epoch_id} · rail {answer.receipt.rail}</p>
+            <p className="tabular mt-2 break-all text-[11px] text-ink-faint">receipt {answer.receipt.receipt_hash} · epoch {answer.receipt.epoch_id} · rail {answer.receipt.rail}</p>
             <dl className="mt-3 space-y-1.5 text-[12px]">
               <div className="flex justify-between gap-3">
                 <dt className="shrink-0 text-ink-faint">Charged</dt>
-                <dd className="tabular text-right text-ink">{Number(answer.receipt.amount_uusdc) / 10000} USDC</dd>
+                <dd className="tabular text-right text-ink">{(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="shrink-0 text-ink-faint">Settlement</dt>
@@ -976,13 +976,13 @@ export default function TerminalClient({
               </div>
               <div className="flex justify-between items-center gap-3">
                 <dt className="shrink-0 text-ink-faint">Transaction</dt>
-                <dd className="tabular max-w-[70%] truncate text-right text-ink" title={answer.receipt.tx_hash ?? "batched by the facilitator"}>
+                <dd className="tabular max-w-[70%] break-all text-right text-ink" title={answer.receipt.tx_hash ?? "batched by the facilitator"}>
                   {answer.receipt.tx_hash ?? "batched by the facilitator; key settlements on the receipt hash"}
                 </dd>
               </div>
               <div className="flex justify-between items-center gap-3">
                 <dt className="shrink-0 text-ink-faint">Signal</dt>
-                <dd className="tabular max-w-[70%] truncate text-right text-ink" title={answer.signalHash}>{answer.signalHash}</dd>
+                <dd className="tabular max-w-[70%] break-all text-right text-ink" title={answer.signalHash}>{answer.signalHash}</dd>
               </div>
             </dl>
             <button onClick={runVerify} disabled={verifying} className="btn-signal mt-4 w-full !justify-center">

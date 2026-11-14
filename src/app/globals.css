@@ -62,6 +62,16 @@ html {
   overflow-x: clip;
 }
 
+/* A grid that declares columns only at a breakpoint has ONE implicit column on
+   smaller screens, and an implicit track is sized to max-content. One long hash
+   then makes that column wider than the phone, and because the page clips
+   horizontally the right side of every card becomes unreachable. Every grid now
+   starts at a single minmax(0, 1fr) column: content wraps instead of widening,
+   and grids that declare their own columns are untouched. */
+.grid {
+  grid-auto-columns: minmax(0, 1fr);
+}
+
 body {
   background-color: var(--color-night);
   color: var(--color-ink);
