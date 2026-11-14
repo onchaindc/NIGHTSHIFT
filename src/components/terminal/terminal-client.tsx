@@ -478,7 +478,7 @@ export default function TerminalClient({
             return;
           }
           ch.typedData.message.from = privyWallet.address;
-          const { signature } = await signTypedData(ch.typedData, { address: privyWallet.address });
+          const { signature } = await signTypedData(ch.typedData, { address: privyWallet.address, uiOptions: { showWalletUIs: false } });
           const accepted = ch.challenge?.accepts?.find((a: { scheme?: string; network?: string }) =>
             a.scheme === "exact" && a.network === ch.offer.network
           );
@@ -1060,149 +1060,85 @@ export default function TerminalClient({
 
       {/* ---------------- result ---------------- */}
       {answer && (
-        <>
-          <div className="mt-6 rounded-lg border border-teal/30 bg-teal/5 p-4">
-            <p className="text-[12.5px] font-medium text-teal">What just happened</p>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
-              Paid {(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC to {answer.answer.minerName ?? answer.receipt.miner}. 
-              Receipt {answer.receipt.receipt_hash.slice(0, 10)}… recorded. Signal {answer.signalHash.slice(0, 10)}… ready to verify.
-            </p>
-          </div>
-          <section className="mt-6 grid gap-6 lg:grid-cols-2">
-          <section className="rounded-lg border border-teal/40 bg-panel p-5">
-            <div className="flex items-center justify-between gap-3">
-              <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-teal"><CheckCircle2 size={14} aria-hidden /> Delivered</p>
-              {answer.answer.timestamp != null && <span className="tabular text-[10.5px] text-ink-faint">{answer.answer.timestamp}</span>}
+        <div className="mt-8 space-y-4">
+          {/* Main answer — the spotlight */}
+          <section className="rounded-2xl border border-teal/30 bg-panel p-5 sm:p-6">
+            <div className="flex items-center gap-2 text-teal">
+              <CheckCircle2 size={16} />
+              <span className="text-[13px] font-medium">Answer</span>
             </div>
-            <p className="mt-1 text-[11.5px] text-ink-faint">
-              Provider: {answer.answer.minerName ?? answer.answer.minerId ?? answer.receipt.miner}
-              {answer.answer.endpoint ? ` · ${answer.answer.endpoint}` : ""}
-              {answer.answer.durationMs ? ` · ${answer.answer.durationMs} ms` : ""}
-              {answer.answer.costUsd != null ? ` · ${answer.answer.costUsd.toFixed(2)} USD` : ""}
-            </p>
-            <div className="mt-4 border-t border-edge pt-4">
-            {answerParagraphs(answer.answer.result).map((p, i) => (
-              <p key={i} className="mt-3 text-[14.5px] leading-[1.65] text-pretty text-ink first:mt-0">{p}</p>
-            ))}
-            {(() => {
-              const parsed = paperList(answer.answer.result);
-              if (!parsed) return null;
-              return (
-                <div className="mt-4">
-                  {parsed.total != null && (
-                    <p className="mb-2 text-[11.5px] text-ink-faint">{parsed.total.toLocaleString()} matches · showing {parsed.papers.length}</p>
-                  )}
-                  <ul className="space-y-2.5">
+            <div className="mt-4 space-y-3">
+              {answerParagraphs(answer.answer.result).map((p, i) => (
+                <p key={i} className="text-[15px] leading-relaxed text-ink">{p}</p>
+              ))}
+              {(() => {
+                const parsed = paperList(answer.answer.result);
+                if (!parsed) return null;
+                return (
+                  <div className="mt-4 space-y-2">
+                    {parsed.total != null && (
+                      <p className="text-[12px] text-ink-faint">{parsed.total} results</p>
+                    )}
                     {parsed.papers.map((p, i) => (
-                      <li key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-                        <p className="text-[13px] leading-snug text-ink">{p.title}</p>
+                      <div key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+                        <p className="text-[13.5px] text-ink">{p.title}</p>
                         {p.doi && (
-                          <a
-                            href={`https://doi.org/${p.doi}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2 hover:text-teal"
-                          >
-                            Open on DOI · {p.doi}
+                          <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" className="mt-1 block text-[12px] text-teal">
+                            {p.doi}
                           </a>
                         )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })()}
-            </div>
-            <details className="mt-4">
-              <summary className="cursor-pointer text-[11.5px] text-ink-faint transition-colors hover:text-ink-soft">
-                Technical details
-              </summary>
-              <div className="mt-2 space-y-2">
-                {answer.answer.fieldStatus && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(answer.answer.fieldStatus).map(([field, status]) => (
-                      <span key={field} className={`tabular rounded-full px-2 py-0.5 text-[10px] ${status === "ok" ? "bg-teal/10 text-teal" : "bg-risk/10 text-risk"}`}>
-                        {field}: {String(status)}
-                      </span>
+                      </div>
                     ))}
                   </div>
-                )}
-                <div className="max-h-80 overflow-auto rounded-lg border border-edge bg-panel-2 p-3">
-                  <pre className="font-mono text-[11px] leading-relaxed text-ink">{JSON.stringify(answer.answer.result ?? {}, null, 2).slice(0, 5000)}</pre>
-                </div>
-              </div>
-            </details>
-            {answer.answer.shapeError && <p className="mt-2 text-[11px] text-amber-deep">The intended shape was not applied (raw result): {answer.answer.shapeError}</p>}
-            {answer.answer.warnings != null && <p className="mt-2 text-[11px] text-amber-deep">Warnings: {JSON.stringify(answer.answer.warnings)}</p>}
-            <p className="mt-3 text-[11px] text-ink-faint">Delivery is not verification. Check the signal in the receipt panel.</p>
+                );
+              })()}
+            </div>
+            <p className="mt-4 text-[11px] text-ink-faint">
+              Paid {(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC
+            </p>
           </section>
 
-          <section className="rounded-lg border border-edge bg-panel p-5">
-            <p className="x-label">Receipt &amp; verification</p>
-            <p className="tabular mt-2 break-all text-[11px] text-ink-faint">receipt {answer.receipt.receipt_hash} · epoch {answer.receipt.epoch_id} · rail {answer.receipt.rail}</p>
-            <dl className="mt-3 space-y-1.5 text-[12px]">
+          {/* Receipt — collapsed, no overflow */}
+          <details className="rounded-xl border border-edge bg-panel">
+            <summary className="cursor-pointer px-4 py-3 text-[13px] text-ink-soft">
+              Receipt & verification
+            </summary>
+            <div className="space-y-2 border-t border-edge px-4 py-3 text-[12px]">
               <div className="flex justify-between gap-3">
-                <dt className="shrink-0 text-ink-faint">Charged</dt>
-                <dd className="tabular text-right text-ink">{(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC</dd>
+                <span className="text-ink-faint">Charged</span>
+                <span className="tabular text-ink">{(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC</span>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="shrink-0 text-ink-faint">Settlement</dt>
-                <dd className="tabular text-right text-ink">{answer.receipt.settlement} ({answer.receipt.chain})</dd>
+                <span className="shrink-0 text-ink-faint">Receipt</span>
+                <span className="truncate text-right tabular text-ink" title={answer.receipt.receipt_hash}>
+                  {answer.receipt.receipt_hash.slice(0, 12)}…
+                </span>
               </div>
-              <div className="flex justify-between items-center gap-3">
-                <dt className="shrink-0 text-ink-faint">Transaction</dt>
-                <dd className="tabular max-w-[70%] break-all text-right text-ink" title={answer.receipt.tx_hash ?? "batched by the facilitator"}>
-                  {answer.receipt.tx_hash ?? "batched by the facilitator; key settlements on the receipt hash"}
-                </dd>
+              <div className="flex justify-between gap-3">
+                <span className="shrink-0 text-ink-faint">Signal</span>
+                <span className="truncate text-right tabular text-ink" title={answer.signalHash}>
+                  {answer.signalHash.slice(0, 12)}…
+                </span>
               </div>
-              <div className="flex justify-between items-center gap-3">
-                <dt className="shrink-0 text-ink-faint">Signal</dt>
-                <dd className="tabular max-w-[70%] break-all text-right text-ink" title={answer.signalHash}>{answer.signalHash}</dd>
-              </div>
-            </dl>
-            <button onClick={runVerify} disabled={verifying} className="btn-signal mt-4 w-full !justify-center">
-              {verifying ? (
-                <><Loader2 size={14} className="animate-spin" aria-hidden /> Checking the signal registry…</>
-              ) : (
-                <><CheckCircle2 size={14} aria-hidden /> Verify against the network</>
+              <button onClick={runVerify} disabled={verifying} className="btn-signal mt-2 w-full !justify-center text-[12px]">
+                {verifying ? "Checking…" : "Verify"}
+              </button>
+              {verifyStatus && (
+                <p className="mt-2 text-[11px] text-ink-soft">{verifyStatus.note}</p>
               )}
-            </button>
-            {verifyStatus && (
-              <div className={`mt-3 rounded-lg border p-3 text-[12px] text-ink-soft ${verifyStatus.kind === "verified" ? "border-teal/40 bg-teal/5" : verifyStatus.kind === "recorded" ? "border-amber/40 bg-amber-soft/60" : "border-risk/40 bg-panel-2"}`}>
-                <p className="font-semibold text-ink">{verifyStatus.kind === "verified" ? "Confirmed" : verifyStatus.kind === "recorded" ? "Recorded, not confirmed" : "Not verified yet"}</p>
-                <p className="mt-1 leading-relaxed">{verifyStatus.note}</p>
-              </div>
-            )}
-            {!verifyStatus && (
-              <p className="mt-3 text-[11px] text-ink-faint">
-                Verification re-derives the signal hash over the node&apos;s recorded payload. Until it matches, treat the answer as a plain provider claim.
-              </p>
-            )}
-          </section>
-        </section>
-        </>
-      )}
+            </div>
+          </details>
 
-      {/* ---------------- activity record status (Phase 5b) ---------------- */}
-      {activitySaved && (
-        <p className="mt-4 max-w-[74ch] text-[12px] leading-relaxed">
-          {activitySaved.saved && activitySaved.id ? (
-            <>
-              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-teal align-middle" />
-              Saved to the Activity centre as a durable record with its receipt and signal:{" "}
-              <Link href={`/activity/${activitySaved.id}`} className="text-amber underline offset-2 hover:underline">
-                /activity/ record
-              </Link>
-              .
-            </>
-          ) : (
-            <>
-              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-risk align-middle" />
-              This attempt could <strong className="text-ink">not</strong> be saved to the activity store
-              {activitySaved.detail ? ` (${activitySaved.detail})` : ""}. It stays visible in this session only — it is recorded nowhere else.
-            </>
-          )}
-        </p>
+          {/* Technical details — collapsed */}
+          <details className="rounded-xl border border-edge bg-panel">
+            <summary className="cursor-pointer px-4 py-3 text-[13px] text-ink-soft">
+              Technical details
+            </summary>
+            <pre className="max-h-60 overflow-auto border-t border-edge px-4 py-3 text-[11px] leading-relaxed text-ink-soft">
+              {JSON.stringify(answer.answer.result ?? {}, null, 2).slice(0, 2000)}
+            </pre>
+          </details>
+        </div>
       )}
 
       {/* ---------------- log ---------------- */}
