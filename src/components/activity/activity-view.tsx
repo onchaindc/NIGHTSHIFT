@@ -60,7 +60,9 @@ function inWindow(t: TaskRecord, f: DateFilter, now: number) {
 export default function ActivityView({ persistenceMode }: { persistenceMode: string }) {
   const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [status, setStatus] = useState<StatusFilter>("all");
+  /* Completed first: the page opens on what the network actually answered.
+     Failed and in-progress records stay one click away and are still counted. */
+  const [status, setStatus] = useState<StatusFilter>("completed");
   const [intent, setIntent] = useState<IntentFilter>("all");
   const [date, setDate] = useState<DateFilter>("all");
   const [query, setQuery] = useState("");
@@ -72,7 +74,10 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
     try {
       const res = await fetch("/api/tasks", { cache: "no-store" });
       if (res.ok) {
-        setTasks(((await res.json()) as { tasks: TaskRecord[] }).tasks);
+        const all = ((await res.json()) as { tasks: TaskRecord[] }).tasks;
+        // This is the Explorer's activity, so it shows asks made here. The
+        // retired console's watch and operation jobs have their own history.
+        setTasks(all.filter((t) => t.jobType === "terminal_request"));
         setLoadFailed(false);
       } else {
         setLoadFailed(true);
@@ -126,7 +131,7 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-      <p className="x-tag">CONSOLE · ACTIVITY</p>
+      <p className="x-tag">EXPLORER · ACTIVITY</p>
       <h1 className="x-display-1 mt-3 text-ink">Activity centre</h1>
       {persistenceMode === "ephemeral" ? (
         <p className="mt-3 max-w-[70ch] rounded-lg border border-amber/40 bg-amber/5 px-4 py-3 text-[13px] leading-relaxed text-amber">
@@ -201,9 +206,8 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
       {tasks !== null && !loadFailed && total === 0 && (
         <div className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-6 py-12 text-center">
           <p className="mx-auto max-w-md text-[13.5px] leading-relaxed text-ink-soft">
-            Nothing has been recorded yet. Console operations and watch checks are recorded here with their payments
-            and outcomes; interactive Terminal requests run in their session and only become part of this history when
-            they are carried out as console tasks.
+            Nothing has been answered yet. A Terminal ask appears here once it runs, with what it cost, who answered
+            and how it ended.
           </p>
           <Link href="/terminal" className="btn-quiet mt-5 !min-h-9">
             Open the Terminal

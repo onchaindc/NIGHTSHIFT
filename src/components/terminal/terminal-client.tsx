@@ -412,6 +412,10 @@ export default function TerminalClient({
     setExecuting(true);
     setStage("executing");
     pushLog("Approval recorded for this exact offer. Executing the paid request…", "info");
+    /* No answer is also an answer: stop waiting instead of holding the UI on
+       "Executing…" until the platform kills the function. */
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), 70_000);
     try {
       const payload: Record<string, unknown> =
         mode === "advanced" ? { rawBody: JSON.parse(rawJson) } : { ...(buildSpec().body as Record<string, unknown>) };
@@ -422,6 +426,7 @@ export default function TerminalClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       const body = (await res.json()) as Record<string, unknown>;
       setActivitySaved((body.activity as { id?: string; saved: boolean; detail?: string } | undefined) ?? null);
@@ -459,10 +464,16 @@ export default function TerminalClient({
         setStage("preview");
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setFailure({ heading: "Execution failed", detail: msg });
-      pushLog(`Execution failed: ${msg}`, "bad");
+      const aborted = err instanceof DOMException && err.name === "AbortError";
+      const msg = aborted
+        ? "No answer came back within 70 seconds. The payment may already have settled — check Activity before trying again."
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      setFailure({ heading: aborted ? "Timed out — settlement unknown" : "Execution failed", detail: msg });
+      pushLog(`${aborted ? "Timed out" : "Execution failed"}: ${msg}`, "bad");
     } finally {
+      clearTimeout(deadline);
       setExecuting(false);
     }
   }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog]);
