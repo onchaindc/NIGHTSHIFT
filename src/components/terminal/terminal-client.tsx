@@ -463,57 +463,9 @@ export default function TerminalClient({
       payload.approved = true;
       payload.offer = approvedOffer;
 
-      // Pay with the Privy embedded wallet (the one shown on the Wallet page).
-      if (privyWallet && challenge) {
-        const nodeUrl = process.env.NEXT_PUBLIC_TELEGRAPH_NODE_URL ?? "https://devnode.telegraphprotocol.com";
-        const urlPath = minerId ? `/engine/v1/ask/${encodeURIComponent(minerId)}` : "/engine/v1/ask";
-        try {
-          const fetchWithPayment = wrapFetchWithPayment({
-            walletAddress: privyWallet.address,
-            fetch,
-            maxValue: BigInt(challenge.payment.amount) * 2n,
-          });
-          const res = await fetchWithPayment(`${nodeUrl}${urlPath}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-          const signalHash = typeof body?.signal_hash === "string" ? body.signal_hash : null;
-          if (res.ok && signalHash) {
-            setAnswer({
-              answer: { result: body, minerName: undefined },
-              signalHash,
-              receipt: {
-                receipt_hash: res.headers.get("x-telegraph-receipt") ?? "",
-                rail: "x402",
-                payer: privyWallet.address,
-                miner: challenge.payment.payTo,
-                intent: "",
-                amount_uusdc: challenge.payment.amount,
-                epoch_id: 0,
-                settlement: res.headers.get("payment-response") ?? "",
-                chain: challenge.payment.network,
-                timestamp: Date.now(),
-              },
-              settlement: res.headers.get("payment-response"),
-            });
-            setChallenge(null);
-            setStage("result");
-            pushLog("Answer delivered from your wallet. Run verification before trusting it.", "good");
-            return;
-          }
-          const detail = body ? JSON.stringify(body).slice(0, 300) : `HTTP ${res.status}`;
-          setFailure({ heading: "Payment from your wallet failed", detail });
-          pushLog(`Wallet payment failed: ${detail}`, "bad");
-          return;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          setFailure({ heading: "Payment from your wallet failed", detail: msg.slice(0, 300) });
-          pushLog(`Wallet payment failed: ${msg}`, "bad");
-          return;
-        }
-      }
+      // Browser cannot complete x402 directly (node CORS hides the
+      // PAYMENT-REQUIRED header). Fall through to the server path below,
+      // which can read the challenge and sign with the deployment key.
 
       const res = await fetch("/api/terminal/execute", {
         method: "POST",
