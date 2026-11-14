@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowRight } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 import { NavLinks } from "@/components/explorer/nav-links";
 
@@ -61,13 +62,16 @@ export function ExplorerHeader() {
           <NavLinks items={AREAS} />
         </nav>
 
-        <Link
-          href="/terminal"
-          className="btn-primary !min-h-9 !px-4 !text-[12.5px] justify-self-end"
-        >
-          Ask
-          <ArrowRight size={13} aria-hidden />
-        </Link>
+        <div className="flex items-center gap-2 justify-self-end">
+          <ThemeToggle />
+          <Link
+            href="/terminal"
+            className="btn-primary !min-h-9 !px-4 !text-[12.5px]"
+          >
+            Ask
+            <ArrowRight size={13} aria-hidden />
+          </Link>
+        </div>
       </div>
 
       {/* Explorer sub-tabs: the section's own contents, one quiet scrollable row. */}
