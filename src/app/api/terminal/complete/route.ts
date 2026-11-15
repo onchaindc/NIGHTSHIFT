@@ -63,7 +63,7 @@ export async function POST(req: Request) {
   const claimedPayer = normalizePayer(input.payer);
 
   const node = telegraphNodeUrl();
-  let res: Response;
+  let res: Response | null = null;
   try {
     res = await fetch(`${node}${urlPath}`, {
       method: "POST",
@@ -83,6 +83,9 @@ export async function POST(req: Request) {
       claimedPayer ?? undefined,
     );
     return NextResponse.json({ status: 502, error: detail, activity: activityRef(activity) });
+  }
+  if (!res) {
+    return NextResponse.json({ status: 502, error: "The node did not return a response." }, { status: 502 });
   }
 
   const text = await res.text();
