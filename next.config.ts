@@ -16,6 +16,8 @@ const nextConfig: NextConfig = {
       { source: "/history", destination: "/activity", permanent: false },
       { source: "/tasks/:id", destination: "/activity", permanent: false },
       { source: "/settings", destination: "/developers", permanent: false },
+      // The tab says Wallet; keep the old-ish path working for links and bookmarks.
+      { source: "/wallet", destination: "/funds", permanent: false },
     ];
   },
 };
