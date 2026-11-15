@@ -144,6 +144,25 @@ function paperList(result: unknown): { papers: Paper[]; total: number | null } |
   return { papers: titles.map((title, i) => ({ title, doi: dois[i] })), total };
 }
 
+function PaperCard({ paper }: { paper: Paper }) {
+  return (
+    <div className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+      <p className="text-[13.5px] leading-snug text-ink">{paper.title}</p>
+      {paper.venue && <p className="mt-0.5 text-[11.5px] text-ink-faint">{paper.venue}</p>}
+      {paper.doi && (
+        <a
+          href={`https://doi.org/${paper.doi}`}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 block text-[12px] text-teal underline decoration-teal/30 underline-offset-2"
+        >
+          {paper.doi}
+        </a>
+      )}
+    </div>
+  );
+}
+
 /** The answer's own words, when the provider returns a labelled text field.
     Long answers arrive as one string; they read as prose only once split. */
 function answerParagraphs(result: unknown): string[] {
@@ -1059,6 +1078,15 @@ export default function TerminalClient({
               <span className="max-w-[36ch]">I approve paying this exact amount for this exact request.</span>
             </label>
           </div>
+          {!privyWallet && (
+            <p className="mt-3 max-w-[66ch] text-[11.5px] leading-relaxed text-amber">
+              No wallet is connected, so this payment is signed by the deployment&apos;s own test wallet.{" "}
+              <Link href="/funds" className="underline offset-2 hover:no-underline">
+                Open Wallet
+              </Link>{" "}
+              to pay from your own.
+            </p>
+          )}
           <div className="mt-4 flex flex-wrap gap-3">
             <button onClick={runExecute} disabled={!approvalBox || executing} className="btn-primary min-w-56 !justify-center">
               {executing ? (
@@ -1128,25 +1156,36 @@ export default function TerminalClient({
               {answerParagraphs(answer.answer.result).map((p, i) => (
                 <p key={i} className="text-[15px] leading-relaxed text-ink">{p}</p>
               ))}
+              {answerParagraphs(answer.answer.result).length === 0 && !paperList(answer.answer.result) && (
+                <p className="text-[14px] leading-relaxed text-ink-soft">
+                  The miner returned a structured result. Open Technical details below to inspect it.
+                </p>
+              )}
               {(() => {
                 const parsed = paperList(answer.answer.result);
                 if (!parsed) return null;
                 return (
                   <div className="mt-4 space-y-2">
                     {parsed.total != null && (
-                      <p className="text-[12px] text-ink-faint">{parsed.total} results</p>
+                      <p className="text-[12px] text-ink-faint">
+                        {parsed.total.toLocaleString()} matches · showing {Math.min(parsed.papers.length, 8)} of {parsed.papers.length}
+                      </p>
                     )}
-                    {parsed.papers.map((p, i) => (
-                      <div key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-                        <p className="text-[13.5px] leading-snug text-ink">{p.title}</p>
-                        {p.venue && <p className="mt-0.5 text-[11.5px] text-ink-faint">{p.venue}</p>}
-                        {p.doi && (
-                          <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" className="mt-1 block text-[12px] text-teal">
-                            {p.doi}
-                          </a>
-                        )}
-                      </div>
+                    {parsed.papers.slice(0, 8).map((p, i) => (
+                      <PaperCard key={i} paper={p} />
                     ))}
+                    {parsed.papers.length > 8 && (
+                      <details>
+                        <summary className="cursor-pointer text-[11.5px] text-ink-faint transition-colors hover:text-ink-soft">
+                          Show the other {parsed.papers.length - 8}
+                        </summary>
+                        <div className="mt-2 space-y-2">
+                          {parsed.papers.slice(8).map((p, i) => (
+                            <PaperCard key={i} paper={p} />
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 );
               })()}
