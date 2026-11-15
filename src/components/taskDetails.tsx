@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, ClipboardList, Receipt } from "lucide-react";
 import type { TaskRecord } from "@/lib/engine/types";
+import { activityTitle } from "@/lib/terminal/activity";
 import {
   ActivityLog,
   Disclose,
@@ -200,7 +201,9 @@ export default function TaskDetails({ id }: { id: string }) {
         </span>
       </div>
 
-      <h1 className="mt-4 text-[19px] font-semibold leading-snug tracking-tight text-ink">{task.goal}</h1>
+      <h1 className="mt-4 text-[19px] font-semibold leading-snug tracking-tight text-ink">
+        {task.jobType === "terminal_request" ? activityTitle(task) : task.goal}
+      </h1>
       <p className="mt-1.5 break-all tabular text-[11px] text-ink-faint">task {task.id}</p>
 
       <ApproveReject task={task} onAction={(_, action) => act(action)} busy={activating} actionError={actionError} />

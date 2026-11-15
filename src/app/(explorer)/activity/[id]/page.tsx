@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { activityOffer, activityTitle, payerOf } from "@/lib/terminal/activity";
+
 /** Try to extract a brief + structured papers from a raw outcome string. */
 function parseOutcome(summary: string): { brief: string | null; papers: Array<{ title: string; doi?: string }> | null; total: number | null; raw: string } {
   try {
@@ -7,9 +9,27 @@ function parseOutcome(summary: string): { brief: string | null; papers: Array<{ 
     const brief = typeof o.brief === "string" ? o.brief : null;
     const titles = Array.isArray(o.paper_titles) ? o.paper_titles.filter((t): t is string => typeof t === "string") : [];
     const dois = Array.isArray(o.dois) ? o.dois.filter((d): d is string => typeof d === "string") : [];
-    const papers = titles.length > 0 ? titles.map((title, i) => ({ title, doi: dois[i] })) : null;
-    const total = typeof o.total_matches === "number" ? o.total_matches : null;
-    return { brief, papers, total, raw: summary };
+    const papers: Array<{ title: string; doi?: string }> = titles.map((title, i) => ({ title, doi: dois[i] }));
+
+    // Crossref answers arrive as message.items, the same shape the terminal
+    // renders. Without this the detail page dumped the whole payload as text.
+    const message = o.message && typeof o.message === "object" ? (o.message as Record<string, unknown>) : null;
+    const items = message && Array.isArray(message.items) ? message.items : [];
+    for (const raw of items) {
+      if (!raw || typeof raw !== "object") continue;
+      const item = raw as Record<string, unknown>;
+      const rawTitle = Array.isArray(item.title) ? item.title[0] : item.title;
+      if (typeof rawTitle !== "string" || rawTitle.trim().length === 0) continue;
+      papers.push({ title: rawTitle.trim(), doi: typeof item.DOI === "string" ? item.DOI : undefined });
+    }
+
+    const total =
+      typeof message?.["total-results"] === "number"
+        ? (message["total-results"] as number)
+        : typeof o.total_matches === "number"
+          ? o.total_matches
+          : null;
+    return { brief, papers: papers.length > 0 ? papers : null, total, raw: summary };
   } catch {
     return { brief: null, papers: null, total: null, raw: summary };
   }
@@ -76,6 +96,8 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
   // request body, the user-approved offer). Render those instead of the
   // planner-criteria block, which only an engine run has.
   const terminal = task.jobType === "terminal_request" ? task.terminal ?? null : null;
+  const offer = activityOffer(task);
+  const payer = payerOf(task);
   const entries = task.spend.entries ?? [];
   const intent = task.criteria.goalIntent ? INTENT_LABEL[task.criteria.goalIntent] ?? task.criteria.goalIntent : null;
   const primarySource = task.criteria.primarySource ?? null;
@@ -90,7 +112,7 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
       </Link>
 
       <p className="x-tag mt-4">ACTIVITY RECORD · {task.jobType === "protocol_watch" ? "WATCH RUN" : task.jobType === "terminal_request" ? "TERMINAL ASK" : "TASK"}</p>
-      <h1 className="x-display-1 mt-3 max-w-[70ch] text-ink">{task.goal}</h1>
+      <h1 className="x-display-1 mt-3 max-w-[70ch] text-ink">{activityTitle(task)}</h1>
       <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-soft">
         <StatusChip state={task.state} />
         <span>{fmtTime(task.createdAt)}</span>
@@ -112,13 +134,13 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
                 <Row k="Intent" v={terminal.intent ?? "not stated by the response"} />
                 <Row k="Miner" v={terminal.miner ?? "not stated by the response"} />
                 {terminal.endpointPath && <Row k="Paid endpoint" v={terminal.endpointPath} mono />}
-                {terminal.offer && (
+                {offer && (
                   <Row
                     k="Approved offer"
-                    v={`${(Number(terminal.offer.amount) / 1_000_000).toFixed(2)} USDC to ${terminal.offer.payTo} on ${terminal.offer.network} (${terminal.offer.asset})`}
+                    v={`${(Number(offer.amount) / 1_000_000).toFixed(2)} USDC to ${offer.payTo} on ${offer.network} (${offer.asset})`}
                   />
                 )}
-                {terminal.payerAddress && <Row k="Payer (public address)" v={terminal.payerAddress} mono />}
+                {payer && <Row k="Payer (public address)" v={payer} mono />}
                 {typeof terminal.durationMs === "number" && <Row k="Duration" v={`${terminal.durationMs} ms`} />}
                 {terminal.timestamp && <Row k="Node timestamp" v={terminal.timestamp} />}
               </>
@@ -152,20 +174,27 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
                 {parsed.papers && (
                   <div className="mt-3">
                     {parsed.total != null && (
-                      <p className="mb-2 text-[11.5px] text-ink-faint">{parsed.total.toLocaleString()} matches · showing {parsed.papers.length}</p>
+                      <p className="mb-2 text-[11.5px] text-ink-faint">
+                        {parsed.total.toLocaleString()} matches · showing {Math.min(parsed.papers.length, 12)} of {parsed.papers.length}
+                      </p>
                     )}
                     <ul className="space-y-2">
-                      {parsed.papers.map((p, i) => (
-                        <li key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-                          <p className="text-[13px] leading-snug text-ink">{p.title}</p>
-                          {p.doi && (
-                            <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2">
-                              Open on DOI · {p.doi}
-                            </a>
-                          )}
-                        </li>
+                      {parsed.papers.slice(0, 12).map((p, i) => (
+                        <PaperRow key={i} paper={p} />
                       ))}
                     </ul>
+                    {parsed.papers.length > 12 && (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-[11.5px] text-ink-faint hover:text-ink-soft">
+                          Show the other {parsed.papers.length - 12}
+                        </summary>
+                        <ul className="mt-2 space-y-2">
+                          {parsed.papers.slice(12).map((p, i) => (
+                            <PaperRow key={i} paper={p} />
+                          ))}
+                        </ul>
+                      </details>
+                    )}
                   </div>
                 )}
                 {!parsed.brief && !parsed.papers && (
@@ -226,12 +255,12 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
                       <td className="py-2.5 pr-4 tabular text-ink">{money(e.amountUsdCents)}</td>
                       <td className="py-2.5 pr-4 text-ink-soft">USDC</td>
                       <td className="tabular py-2.5 pr-4 text-ink-soft">
-                        {terminal?.offer?.network ?? "testnet"}
+                        {offer?.network ?? "testnet"}
                       </td>
                       <td className="py-2.5 pr-4">
-                        {txHref(e.txHash, terminal?.offer?.network) ? (
+                        {txHref(e.txHash, offer?.network) ? (
                           <a
-                            href={txHref(e.txHash, terminal?.offer?.network) as string}
+                            href={txHref(e.txHash, offer?.network) as string}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-blue hover:underline underline-offset-2"
@@ -310,6 +339,24 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
         </Link>
       </div>
     </div>
+  );
+}
+
+function PaperRow({ paper }: { paper: { title: string; doi?: string } }) {
+  return (
+    <li className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+      <p className="text-[13px] leading-snug text-ink">{paper.title}</p>
+      {paper.doi && (
+        <a
+          href={`https://doi.org/${paper.doi}`}
+          target="_blank"
+          rel="noreferrer"
+          className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2"
+        >
+          Open on DOI · {paper.doi}
+        </a>
+      )}
+    </li>
   );
 }
 

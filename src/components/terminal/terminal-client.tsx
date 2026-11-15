@@ -26,11 +26,6 @@ export interface TerminalIntentSummary {
   description: string;
 }
 
-export interface TerminalWalletState {
-  configured: boolean;
-  address: string | null;
-}
-
 interface IntentParam {
   name: string;
   type: string;
@@ -275,13 +270,11 @@ function plainRefusal(code: string | null, message: string | null): string | nul
 
 export default function TerminalClient({
   intents,
-  wallet,
   initialIntent,
   initialMiner,
   nodeUrl,
 }: {
   intents: TerminalIntentSummary[];
-  wallet: TerminalWalletState;
   initialIntent?: string;
   initialMiner?: string;
   nodeUrl: string;
@@ -452,6 +445,7 @@ export default function TerminalClient({
     setApprovalBox(false);
     setVerifyStatus(null);
     setAnswer(null);
+    setActivitySaved(null);
     setPreviewStatus(null);
     setNodeVerdict(null);
     setPreviewHttp(null);
@@ -496,6 +490,15 @@ export default function TerminalClient({
 
   const runExecute = useCallback(async () => {
     if (!challenge || !approvedOffer) return;
+    if (!signerWallet) {
+      setApprovalBox(false);
+      setFailure({
+        heading: "Connect a wallet to pay",
+        detail: "This terminal pays from your wallet, never from the server. Open Wallet to create the free in-app wallet or connect one, then approve this same offer again.",
+      });
+      setStage("preview");
+      return;
+    }
     setApprovalBox(false);
     setExecuting(true);
     setStage("executing");
@@ -562,6 +565,7 @@ export default function TerminalClient({
             signal: controller.signal,
           });
           const result = await done.json();
+          setActivitySaved(result.activity ?? null);
           const signalHash = typeof result.body?.signal_hash === "string" ? result.body.signal_hash : null;
           if (result.status === 200 && signalHash) {
             const nodeBody =
@@ -604,49 +608,6 @@ export default function TerminalClient({
           setFailure({ heading: "Payment from your wallet failed", detail: msg.slice(0, 300) });
           return;
         }
-      }
-      // No Privy wallet: fall through to server path.
-
-      const res = await fetch("/api/terminal/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      const body = (await res.json()) as Record<string, unknown>;
-      setActivitySaved((body.activity as { id?: string; saved: boolean; detail?: string } | undefined) ?? null);
-      if (body.status === "answered") {
-        setAnswer({
-          answer: body.answer as AnswerInfo,
-          signalHash: body.signalHash as string,
-          receipt: body.receipt as ReceiptInfo,
-          settlement: (body.settlement as string | null) ?? null,
-        });
-        setChallenge(null);
-        setStage("result");
-        pushLog("Answer delivered with a receipt. Run verification before trusting it.", "good");
-      } else if (body.status === "refused") {
-        const freshOffer = (body.fresh as { offer?: Offer } | undefined)?.offer ?? null;
-        const detail = String(body.detail ?? "The live offer drifted from the approved one.");
-        setFailure({ heading: "Refused — nothing was signed", detail, node: body.node ?? null });
-        if (freshOffer) {
-          setChallenge({ offer: freshOffer, payment: { ...challenge.payment, ...freshOffer, amountUsdCents: Number(freshOffer.amount) / 10000 } });
-        }
-        pushLog(detail, "warn");
-        setStage("preview");
-      } else if (body.status === "payment_rejected") {
-        setFailure({ heading: "Payment rejected", detail: String(body.detail ?? "") });
-        pushLog("The signed payment did not verify; per the x402 flow nothing settled and the request was not re-sent.", "bad");
-      } else if (body.status === "failed") {
-        setFailure({ heading: `Request failed (HTTP ${body.httpStatus ?? "?"})`, detail: String(body.detail ?? "") });
-        pushLog(`Paid request failed after settlement may have begun. ${String(body.detail ?? "")}`, "bad");
-      } else if (body.status === "integrity") {
-        setFailure({ heading: "Unaccountable response", detail: String(body.detail ?? "") });
-        pushLog("The response cannot be reconciled against the network; it is NOT treated as a confirmed answer.", "bad");
-      } else {
-        setFailure({ heading: "Execution did not start", detail: String(body.detail ?? "unknown"), node: body.node ?? null });
-        pushLog(`Execution did not start: ${String(body.detail ?? "unknown")}`, "bad");
-        setStage("preview");
       }
     } catch (err) {
       const aborted = err instanceof DOMException && err.name === "AbortError";
@@ -938,8 +899,12 @@ export default function TerminalClient({
               </span>
             </p>
           )}
-          {!wallet.configured && (
-            <p className="mt-3 text-[11.5px] text-amber">Without a payer wallet configured on this deployment, previews still validate, but execution cannot sign.</p>
+          {!signerWallet && (
+            <p className="mt-3 text-[11.5px] leading-relaxed text-amber">
+              Previewing is free. To pay, {" "}
+              <Link href="/funds" className="underline offset-2 hover:no-underline">open Wallet</Link>{" "}
+              and create the in-app wallet (or connect one).
+            </p>
           )}
         </section>
 
@@ -1036,8 +1001,8 @@ export default function TerminalClient({
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="shrink-0 text-ink-faint">Payer</dt>
-                  <dd className="tabular max-w-[70%] break-all text-right text-ink" title={signerWallet?.address ?? wallet.address ?? ""}>
-                    {signerWallet?.address ?? wallet.address ?? "not configured"}
+                  <dd className="tabular max-w-[70%] break-all text-right text-ink" title={signerWallet?.address ?? ""}>
+                    {signerWallet?.address ?? "not connected"}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">
@@ -1092,15 +1057,15 @@ export default function TerminalClient({
           )}
           {!signerWallet && (
             <p className="mt-3 max-w-[66ch] text-[11.5px] leading-relaxed text-amber">
-              No wallet is connected, so this payment is signed by the deployment&apos;s own test wallet.{" "}
+              Connect a wallet to pay.{" "}
               <Link href="/funds" className="underline offset-2 hover:no-underline">
                 Open Wallet
               </Link>{" "}
-              to pay from your own.
+              to create the free in-app wallet or connect an external one, then approve this offer again.
             </p>
           )}
           <div className="mt-4 flex flex-wrap gap-3">
-            <button onClick={runExecute} disabled={!approvalBox || executing} className="btn-primary min-w-56 !justify-center">
+            <button onClick={runExecute} disabled={!approvalBox || executing || !signerWallet} className="btn-primary min-w-56 !justify-center">
               {executing ? (
                 <><Loader2 size={14} className="animate-spin" aria-hidden /> Executing…</>
               ) : (
@@ -1120,7 +1085,7 @@ export default function TerminalClient({
           <p className="flex items-center gap-1.5 text-[13px] font-semibold text-risk"><XCircle size={14} aria-hidden /> {failure.heading}</p>
           <p className="mt-2 max-w-[72ch] text-[12.5px] leading-relaxed text-ink-soft">{failure.detail}</p>
           {failure.node !== null && failure.node !== undefined && <NodeVerdict verdict={failure.node} />}
-          {/wallet/i.test(failure.heading) && (
+          {/payment/i.test(failure.heading) && (
             <p className="mt-3 text-[12px] leading-relaxed text-ink-soft">
               A wallet payment is rejected when it has no test USDC. You can mint 10 free on the{" "}
               <Link href="/funds" className="text-amber underline offset-2 hover:underline">

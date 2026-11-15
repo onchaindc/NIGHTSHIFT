@@ -1,6 +1,5 @@
 import { fetchIntents } from "@/lib/explorer/network";
-import { paidCredentialsConfigured, telegraphNodeUrl } from "@/lib/telegraph/client";
-import { payerAddress } from "@/lib/terminal/ask";
+import { telegraphNodeUrl } from "@/lib/telegraph/client";
 import TerminalClient, { type TerminalIntentSummary } from "@/components/terminal/terminal-client";
 
 export const metadata = { title: "Terminal" };
@@ -29,7 +28,6 @@ export default async function TerminalPage({ searchParams }: { searchParams: Pro
   return (
     <TerminalClient
       intents={intents}
-      wallet={{ configured: paidCredentialsConfigured(), address: payerAddress() }}
       initialIntent={intent?.toUpperCase()}
       initialMiner={miner}
       nodeUrl={telegraphNodeUrl()}

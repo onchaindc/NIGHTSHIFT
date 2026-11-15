@@ -2,12 +2,10 @@ import { NextResponse } from "next/server";
 
 import {
   assembleAskBody,
-  payerAddress,
   probeAsk,
   type ApprovedOffer,
   type AskRequestSpec,
 } from "@/lib/terminal/ask";
-import { paidCredentialsConfigured } from "@/lib/telegraph/client";
 
 /**
  * POST /api/terminal/preview — the UNPAID pre-flight of the terminal.
@@ -58,8 +56,8 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ status: "invalid", detail: "Send application/json." }, { status: 400 });
   }
-  // Only used by /api/terminal/execute; a preview request that carries an
-  // offer (a stale approval) must not pay: strip it and answer as a fresh probe.
+  // A preview request never pays: any offer it carries is ignored and the
+  // node is asked for a fresh, unpaid challenge.
   const spec = specFromBody(parsedBody);
 
   const assembled = assembleAskBody(spec);
@@ -94,10 +92,6 @@ export async function POST(req: Request) {
           payTo: probe.approvedOffer.payTo,
           maxTimeoutSeconds: timeoutEntry?.maxTimeoutSeconds ?? null,
           resource: probe.challenge.resource ?? null,
-        },
-        payer: {
-          configured: paidCredentialsConfigured(),
-          address: payerAddress(),
         },
       });
     }

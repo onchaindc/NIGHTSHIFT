@@ -6,6 +6,7 @@ import { ReceiptText, Search, X } from "lucide-react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 
 import type { TaskRecord } from "@/lib/engine/types";
+import { activityPayer, activityTitle } from "@/lib/terminal/activity";
 import { isTestRun, money, StatusChip, timeOf } from "@/components/taskParts";
 
 /**
@@ -14,7 +15,6 @@ import { isTestRun, money, StatusChip, timeOf } from "@/components/taskParts";
  */
 
 type StatusFilter = "all" | "completed" | "failed" | "running" | "awaiting" | "rejected" | "test";
-type IntentFilter = "all" | "information" | "preparation" | "execution";
 type DateFilter = "all" | "24h" | "7d" | "30d";
 
 const STATUS_FILTERS: Array<{ id: StatusFilter; label: string }> = [
@@ -26,12 +26,6 @@ const STATUS_FILTERS: Array<{ id: StatusFilter; label: string }> = [
   { id: "rejected", label: "Rejected" },
   { id: "test", label: "Test runs" },
 ];
-
-const INTENT_LABELS: Record<Exclude<IntentFilter, "all">, string> = {
-  information: "Information",
-  preparation: "Preparation",
-  execution: "Execution",
-};
 
 const DATE_FILTERS: Array<{ id: DateFilter; label: string; ms: number }> = [
   { id: "all", label: "All time", ms: 0 },
@@ -64,8 +58,7 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
   const { wallets } = useWallets();
   const [tasks, setTasks] = useState<TaskRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [status, setStatus] = useState<StatusFilter>("completed");
-  const [intent, setIntent] = useState<IntentFilter>("all");
+  const [status, setStatus] = useState<StatusFilter>("all");
   const [date, setDate] = useState<DateFilter>("all");
   const [query, setQuery] = useState("");
   const busy = useRef(false);
@@ -107,7 +100,7 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
   const mine = useMemo(() => {
     if (!ready || !authenticated || myAddresses.size === 0) return [];
     return (tasks ?? []).filter((t) => {
-      const payer = normalizeAddr(t.terminal?.payerAddress);
+      const payer = activityPayer(t);
       return payer && myAddresses.has(payer);
     });
   }, [tasks, ready, authenticated, myAddresses]);
@@ -130,19 +123,16 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
   const q = query.trim().toLowerCase();
   const textMatches = (t: TaskRecord) =>
     q === "" ||
-    t.goal.toLowerCase().includes(q) ||
+    activityTitle(t).toLowerCase().includes(q) ||
     t.id.toLowerCase().includes(q) ||
     (t.result?.summary ?? "").toLowerCase().includes(q);
-  const intentMatches = (t: TaskRecord) => intent === "all" || (t.criteria.goalIntent ?? "?") === intent;
-
   const filtered = [...real, ...testRuns]
     .filter((t) => (status === "all" ? true : status === "test" ? isTestRun(t) : !isTestRun(t) && stateFor(t) === status))
-    .filter(intentMatches)
     .filter((t) => inWindow(t, date, now))
     .filter(textMatches)
     .sort((a, b) => b.createdAt - a.createdAt);
 
-  const looking = q !== "" || status !== "all" || intent !== "all" || date !== "all";
+  const looking = q !== "" || status !== "all" || date !== "all";
 
   const notLoggedIn = ready && !authenticated;
   const noWallet = ready && authenticated && myAddresses.size === 0;
@@ -152,7 +142,7 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
       <p className="x-tag">YOUR ACTIVITY</p>
       <h1 className="x-display-1 mt-3 text-ink">Your asks</h1>
       <p className="mt-2 max-w-[60ch] text-[13.5px] leading-relaxed text-ink-soft">
-        Only the Telegraph requests paid by a wallet you have connected. Explorer, Signals and the rest stay shared.
+        Only the Terminal asks signed by a wallet you have connected. Explorer, Signals and the rest stay shared.
       </p>
 
       {persistenceMode === "ephemeral" ? (
@@ -175,10 +165,10 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
       {noWallet && (
         <div className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-6 py-10 text-center">
           <p className="mx-auto max-w-md text-[13.5px] leading-relaxed text-ink-soft">
-            You are logged in but no wallet is connected yet. Open Funds to create an in-app wallet or connect an external one.
+            You are logged in but no wallet is connected yet. Open Wallet to create an in-app wallet or connect an external one.
           </p>
           <Link href="/funds" className="btn-quiet mt-5 !min-h-9">
-            Open Funds
+            Open Wallet
           </Link>
         </div>
       )}
@@ -216,16 +206,6 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
             </div>
             <div className="flex flex-wrap gap-4">
               <FilterGroup label="Status" value={status} options={STATUS_FILTERS.map((s) => ({ id: s.id, label: s.label, count: countFor(s.id) }))} onChange={(v) => setStatus(v as StatusFilter)} />
-              <FilterGroup
-                label="Intent"
-                value={intent}
-                options={(["all", "information", "preparation", "execution"] as const).map((id) => ({
-                  id,
-                  label: id === "all" ? "All intents" : INTENT_LABELS[id],
-                  count: mine.filter((t) => t.criteria.goalIntent === id).length,
-                }))}
-                onChange={(v) => setIntent(v as IntentFilter)}
-              />
               <FilterGroup label="Window" value={date} options={DATE_FILTERS.map((d) => ({ id: d.id, label: d.label, count: 0 }))} onChange={(v) => setDate(v as DateFilter)} />
             </div>
           </div>
@@ -248,7 +228,7 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
           {tasks !== null && !loadFailed && total === 0 && (
             <div className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-6 py-12 text-center">
               <p className="mx-auto max-w-md text-[13.5px] leading-relaxed text-ink-soft">
-                No paid asks from your connected wallet yet. Open the Terminal to make one.
+                No asks from your connected wallet yet. Open the Terminal to make one.
               </p>
               <Link href="/terminal" className="btn-quiet mt-5 !min-h-9">
                 Open the Terminal
@@ -274,8 +254,8 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
                 >
                   <StatusChip state={t.state} />
                   <span className="min-w-0">
-                    <span className={`${isTestRun(t) ? "text-ink-soft" : "text-ink"} block truncate text-[13.5px] transition group-hover:text-amber`}>
-                        {t.terminal?.intent ? t.terminal.intent.replace(/_/g, " ") : t.goal.replace(/^Terminal ask \(/, "").replace(/\).*$/, "")}
+                                          <span className={`${isTestRun(t) ? "text-ink-soft" : "text-ink"} block truncate text-[13.5px] transition group-hover:text-amber`}>
+                        {activityTitle(t)}
                       </span>
                     <span className="block text-[11px] text-ink-faint">
                       {t.spend.spentUsdCents > 0 ? `$${(t.spend.spentUsdCents / 100).toFixed(2)}` : "free"} · {t.terminal?.miner ?? "answered"}
