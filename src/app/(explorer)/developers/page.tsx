@@ -398,9 +398,13 @@ export default function DevelopersPage() {
               <Api method="POST" path="/api/terminal/preview" access="public">
                 Unpaid pre-flight of an assembled ask; returns the live 402 offer without signing.
               </Api>
-              <Api method="POST" path="/api/terminal/execute" access="approval-pinned">
-                Signs only when the request carries approved plus the exact offer; the live challenge is re-checked
-                against pinned fields before anything is signed.
+              <Api method="POST" path="/api/terminal/challenge" access="public">
+                Returns the live x402 typed data so the connected wallet signs the exact offer in the browser. No
+                server key is used.
+              </Api>
+              <Api method="POST" path="/api/terminal/complete" access="wallet-signed">
+                Forwards a wallet-signed payment, records the ask (and failed attempts) in Activity, and returns the
+                answer with its receipt.
               </Api>
               <Api method="POST" path="/api/terminal/verify" access="public">
                 The verification read: signal lookup plus independent hash re-derivation.

@@ -213,6 +213,16 @@ export async function recordTerminalOutcome(
     ];
     const task = baseRecord({ id: `terminal-attempt-${randomUUID()}`, state: "failed", goal, ts, error: `${heading}: ${detail}` });
     task.events = events;
+    // A failed attempt still belongs to the wallet that signed it, so it can
+    // appear in that wallet's history. No receipt or spend is claimed.
+    task.terminal = {
+      intent: spec.intent ?? null,
+      miner: spec.minerId ?? null,
+      endpointPath: "urlPath" in outcome ? outcome.urlPath : undefined,
+      request: ("requestSent" in outcome ? outcome.requestSent : undefined) ?? requestBody,
+      ...("offer" in outcome && outcome.offer ? { offer: outcome.offer } : {}),
+      ...(payerAddress ? { payerAddress } : {}),
+    };
     // spend stays zero: nothing is claimed as paid without an actual receipt.
     await saveTask(task);
     return { id: task.id, saved: true };
