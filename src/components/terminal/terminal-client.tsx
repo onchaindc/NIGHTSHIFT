@@ -105,10 +105,38 @@ interface ReceiptInfo {
 
 type PipelineStage = "compose" | "preview" | "executing" | "result";
 
+type Paper = { title: string; doi?: string; venue?: string };
+
 /** Structured papers when the result looks like an academic search. */
-function paperList(result: unknown): { papers: Array<{ title: string; doi?: string }>; total: number | null } | null {
+function paperList(result: unknown): { papers: Paper[]; total: number | null } | null {
   if (!result || typeof result !== "object") return null;
   const o = result as Record<string, unknown>;
+
+  // Crossref works search: { message: { items: [{ title, DOI, container-title }] } }
+  if (o.message && typeof o.message === "object") {
+    const m = o.message as Record<string, unknown>;
+    const items = Array.isArray(m.items) ? m.items : [];
+    const papers: Paper[] = [];
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const it = item as Record<string, unknown>;
+      const rawTitle = Array.isArray(it.title) ? it.title[0] : it.title;
+      const title = typeof rawTitle === "string" ? rawTitle.trim() : "";
+      if (!title) continue;
+      const rawVenue = Array.isArray(it["container-title"]) ? it["container-title"][0] : it["container-title"];
+      papers.push({
+        title,
+        doi: typeof it.DOI === "string" ? it.DOI : undefined,
+        venue: typeof rawVenue === "string" ? rawVenue : undefined,
+      });
+    }
+    if (papers.length > 0) {
+      const total = typeof m["total-results"] === "number" ? m["total-results"] : papers.length;
+      return { papers, total };
+    }
+  }
+
+  // Telegraph-shaped result: titles and DOIs in parallel arrays.
   const titles = Array.isArray(o.paper_titles) ? o.paper_titles.filter((t): t is string => typeof t === "string") : [];
   const dois = Array.isArray(o.dois) ? o.dois.filter((d): d is string => typeof d === "string") : [];
   if (titles.length === 0) return null;
@@ -471,6 +499,7 @@ export default function TerminalClient({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ urlPath, body: payload }),
+            signal: controller.signal,
           });
           const ch = await chRes.json();
           if (!ch.typedData || !ch.offer) {
@@ -501,13 +530,30 @@ export default function TerminalClient({
           const done = await fetch("/api/terminal/complete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ urlPath, body: payload, paymentSignature: payment }),
+            body: JSON.stringify({
+              urlPath,
+              body: payload,
+              paymentSignature: payment,
+              payer: privyWallet.address,
+            }),
+            signal: controller.signal,
           });
           const result = await done.json();
           const signalHash = typeof result.body?.signal_hash === "string" ? result.body.signal_hash : null;
           if (result.status === 200 && signalHash) {
+            const nodeBody =
+              result.body && typeof result.body === "object"
+                ? (result.body as Record<string, unknown>)
+                : null;
+            // The envelope holds the miner's payload under `result`; showing the
+            // envelope itself is how node-level prose used to masquerade as the answer.
+            const minerResult = nodeBody && "result" in nodeBody ? nodeBody.result : result.body;
             setAnswer({
-              answer: { result: result.body, minerName: undefined },
+              answer: {
+                result: minerResult,
+                minerName: typeof nodeBody?.miner_name === "string" ? nodeBody.miner_name : undefined,
+                minerId: typeof nodeBody?.miner_id === "string" ? nodeBody.miner_id : undefined,
+              },
               signalHash,
               receipt: {
                 receipt_hash: result.receipt ?? "",
@@ -875,6 +921,7 @@ export default function TerminalClient({
         </section>
 
         {/* ---------------- verdict / price ---------------- */}
+        {!answer && (
         <section className="rounded-lg border border-edge bg-panel p-5">
           <p className="x-label">What the network said</p>
 
@@ -993,6 +1040,7 @@ export default function TerminalClient({
             </div>
           )}
         </section>
+        )}
       </div>
 
       {/* ---------------- approval + execute ---------------- */}
@@ -1032,6 +1080,15 @@ export default function TerminalClient({
           <p className="flex items-center gap-1.5 text-[13px] font-semibold text-risk"><XCircle size={14} aria-hidden /> {failure.heading}</p>
           <p className="mt-2 max-w-[72ch] text-[12.5px] leading-relaxed text-ink-soft">{failure.detail}</p>
           {failure.node !== null && failure.node !== undefined && <NodeVerdict verdict={failure.node} />}
+          {/wallet/i.test(failure.heading) && (
+            <p className="mt-3 text-[12px] leading-relaxed text-ink-soft">
+              A wallet payment is rejected when it has no test USDC. You can mint 10 free on the{" "}
+              <Link href="/funds" className="text-amber underline offset-2 hover:underline">
+                Wallet page
+              </Link>{" "}
+              — the faucet covers the gas — then try the same ask again.
+            </p>
+          )}
           <button onClick={() => { setFailure(null); setStage("compose"); }} className="btn-quiet mt-4">Start again</button>
         </section>
       )}
@@ -1081,7 +1138,8 @@ export default function TerminalClient({
                     )}
                     {parsed.papers.map((p, i) => (
                       <div key={i} className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-                        <p className="text-[13.5px] text-ink">{p.title}</p>
+                        <p className="text-[13.5px] leading-snug text-ink">{p.title}</p>
+                        {p.venue && <p className="mt-0.5 text-[11.5px] text-ink-faint">{p.venue}</p>}
                         {p.doi && (
                           <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer" className="mt-1 block text-[12px] text-teal">
                             {p.doi}

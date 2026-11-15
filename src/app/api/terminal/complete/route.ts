@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { telegraphNodeUrl, decodeChallenge, extractReceipt } from "@/lib/telegraph/client";
 import { recordTerminalOutcome } from "@/lib/terminal/store";
-import type { ExecuteOutcome } from "@/lib/terminal/ask";
+import type { AskRequestSpec, ExecuteOutcome } from "@/lib/terminal/ask";
 
 /** POST /api/terminal/complete — send a signed payment, record activity, return the answer. */
 export const maxDuration = 60;
@@ -53,11 +53,28 @@ export async function POST(req: Request) {
   if (res.status === 200 && signalHash && receipt) {
     // Record activity so it shows in the user's history.
     try {
+      const payload = (input.body ?? {}) as Record<string, unknown>;
+      const pin = typeof payload.miner === "string" ? payload.miner : undefined;
+      const spec: AskRequestSpec =
+        typeof payload.intent === "string" && payload.params && typeof payload.params === "object"
+          ? { intent: payload.intent, params: payload.params as Record<string, unknown>, minerId: pin }
+          : typeof payload.query === "string"
+            ? { query: payload.query, minerId: pin }
+            : { rawBody: payload, minerId: pin };
+      const approved = payload.offer as
+        | { network?: string; asset?: string; payTo?: string; amount?: string }
+        | undefined;
       const outcome: ExecuteOutcome = {
         kind: "answered",
         urlPath,
         requestSent: input.body,
-        offer: { scheme: "exact", network: "eip155:11155111", asset: "", payTo: "", amount: receipt.amount_uusdc ?? "0" },
+        offer: {
+          scheme: "exact",
+          network: approved?.network ?? "eip155:11155111",
+          asset: approved?.asset ?? "",
+          payTo: approved?.payTo ?? "",
+          amount: receipt.amount_uusdc ?? approved?.amount ?? "0",
+        },
         result: (parsed as { result?: unknown }).result ?? parsed,
         signalHash,
         receipt,
@@ -65,7 +82,7 @@ export async function POST(req: Request) {
         minerName: (parsed as { miner_name?: string }).miner_name,
         minerId: (parsed as { miner_id?: string }).miner_id,
       };
-      await recordTerminalOutcome(outcome, { query: "" } as never, input.payer);
+      await recordTerminalOutcome(outcome, spec, input.payer);
     } catch {
       /* recording is best-effort */
     }
