@@ -2,7 +2,7 @@
 
 import { usePrivy, useWallets, useConnectWallet, useCreateWallet, useSendTransaction } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
-import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins } from "lucide-react";
+import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins, RefreshCw } from "lucide-react";
 
 const SEPOLIA_RPCS = [
   "https://ethereum-sepolia-rpc.publicnode.com",
@@ -12,7 +12,6 @@ const SEPOLIA_RPCS = [
 const SEPOLIA_CHAIN_ID = 11155111;
 const CIRCLE_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const TELEGRAPH_USDC = "0xcc194e1a843B658526D0D5C431f670028582Ae17";
-const MINT_AMOUNT = 10_000_000n;
 
 async function rpc(method: string, params: unknown[]): Promise<string | null> {
   for (const url of SEPOLIA_RPCS) {
@@ -21,6 +20,7 @@ async function rpc(method: string, params: unknown[]): Promise<string | null> {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: AbortSignal.timeout(8000),
       });
       const data = await res.json();
       if (data.result) return data.result as string;
@@ -31,17 +31,20 @@ async function rpc(method: string, params: unknown[]): Promise<string | null> {
   return null;
 }
 
-async function fetchEthBalance(address: string): Promise<string> {
+async function fetchEthBalance(address: string): Promise<string | null> {
   const result = await rpc("eth_getBalance", [address, "latest"]);
-  if (!result) return "0";
+  // null means "could not read", not "zero": showing 0 for a failed read is
+  // what made a funded wallet look empty.
+  if (!result) return null;
   const eth = Number(BigInt(result)) / 1e18;
   return eth.toFixed(6).replace(/\.?0+$/, "") || "0";
 }
 
-async function fetchTokenBalance(address: string, token: string): Promise<string> {
+async function fetchTokenBalance(address: string, token: string): Promise<string | null> {
   const data = `0x70a08231${address.replace(/^0x/i, "").toLowerCase().padStart(64, "0")}`;
   const result = await rpc("eth_call", [{ to: token, data }, "latest"]);
-  if (!result || result === "0x") return "0";
+  if (!result) return null;
+  if (result === "0x") return "0";
   const raw = BigInt(result);
   const val = Number(raw) / 1e6;
   return val.toFixed(2).replace(/\.?0+$/, "") || "0";
@@ -49,12 +52,6 @@ async function fetchTokenBalance(address: string, token: string): Promise<string
 
 function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
-function mintCalldata(to: string, amount: bigint): `0x${string}` {
-  const addr = to.replace(/^0x/i, "").toLowerCase().padStart(64, "0");
-  const amt = amount.toString(16).padStart(64, "0");
-  return `0x40c10f19${addr}${amt}` as `0x${string}`;
 }
 
 function WalletCard({
@@ -67,6 +64,7 @@ function WalletCard({
   onWithdraw,
   onMint,
   minting,
+  onRefresh,
 }: {
   label: string;
   address: string;
@@ -77,6 +75,7 @@ function WalletCard({
   onWithdraw?: () => void;
   onMint?: () => void;
   minting?: boolean;
+  onRefresh?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -93,8 +92,21 @@ function WalletCard({
           <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">{label}</p>
           <p className="mt-1 tabular text-[12.5px] text-ink-soft">{shortAddr(address)}</p>
         </div>
-        <div className="grid h-9 w-9 place-items-center rounded-full bg-teal/10 text-teal">
-          <Wallet size={16} strokeWidth={1.8} />
+        <div className="flex items-center gap-1.5">
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              aria-label="Refresh balances"
+              title="Refresh balances"
+              className="grid h-8 w-8 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
+            >
+              <RefreshCw size={13} strokeWidth={1.8} />
+            </button>
+          )}
+          <div className="grid h-9 w-9 place-items-center rounded-full bg-teal/10 text-teal">
+            <Wallet size={16} strokeWidth={1.8} />
+          </div>
         </div>
       </div>
 
@@ -118,7 +130,10 @@ function WalletCard({
           <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">ETH</p>
         </div>
       </div>
-      <p className="mt-2 text-[11px] text-ink-faint">Sepolia · asks are paid in Telegraph USDC</p>
+      <p className="mt-2 text-[11px] text-ink-faint">
+        Sepolia · asks are paid in Telegraph USDC
+        {onMint ? " · the test mint is free, no gas needed" : ""}
+      </p>
 
       <div className="mt-5 flex flex-wrap gap-2">
         <button
@@ -267,11 +282,11 @@ export default function FundsPage() {
   const { wallets } = useWallets();
   const { connectWallet } = useConnectWallet();
   const { createWallet } = useCreateWallet();
-  const { sendTransaction } = useSendTransaction();
   const [creating, setCreating] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [minting, setMinting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [balances, setBalances] = useState<Record<string, Balances>>({});
   const [showDeposit, setShowDeposit] = useState<string | null>(null);
   const [showWithdraw, setShowWithdraw] = useState<string | null>(null);
@@ -314,17 +329,25 @@ export default function FundsPage() {
   const handleMint = async () => {
     if (!embedded) return;
     setError(null);
+    setNotice(null);
     setMinting(true);
     try {
-      await sendTransaction(
-        {
-          to: TELEGRAPH_USDC as `0x${string}`,
-          data: mintCalldata(embedded.address, MINT_AMOUNT),
-          chainId: SEPOLIA_CHAIN_ID,
-        },
-        { address: embedded.address },
-      );
-      setTimeout(refreshBalances, 4000);
+      // The faucet mints from the server key, so the new wallet needs no ETH.
+      const res = await fetch("/api/wallet/mint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: embedded.address }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (res.status === 409) {
+        setNotice(data.error ?? "This wallet already holds test USDC.");
+        void refreshBalances();
+        return;
+      }
+      if (!res.ok) throw new Error(data.error ?? "Mint failed");
+      setNotice("10 test USDC minted — balances update in a moment.");
+      setTimeout(refreshBalances, 3000);
+      setTimeout(refreshBalances, 8000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Mint failed");
     } finally {
@@ -416,6 +439,7 @@ export default function FundsPage() {
               onWithdraw={() => setShowWithdraw(embedded.address)}
               onMint={handleMint}
               minting={minting}
+              onRefresh={refreshBalances}
             />
           )}
           {external && (
@@ -425,6 +449,7 @@ export default function FundsPage() {
               ethBalance={balances[external.address]?.eth ?? null}
               circleUsdc={balances[external.address]?.circle ?? null}
               telegraphUsdc={balances[external.address]?.telegraph ?? null}
+              onRefresh={refreshBalances}
             />
           )}
         </div>
@@ -471,6 +496,9 @@ export default function FundsPage() {
 
       {error && (
         <p className="mt-4 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">{error}</p>
+      )}
+      {notice && (
+        <p className="mt-4 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-[12.5px] text-teal">{notice}</p>
       )}
 
       {showDeposit && (
