@@ -300,7 +300,8 @@ export default function TerminalClient({
   const [minerId, setMinerId] = useState<string | null>(null); // null = auto-route
   const { wallets } = useWallets();
   const { signTypedData } = useSignTypedData();
-  const privyWallet = wallets.find((w) => w.walletClientType === "privy");
+  // The in-app wallet is the smooth path; a connected external wallet signs too.
+  const signerWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0] ?? null;
 
   // Advanced state
   const [rawJson, setRawJson] = useState("");
@@ -511,7 +512,7 @@ export default function TerminalClient({
       payload.offer = approvedOffer;
 
       // Sign with Privy in-app wallet (the one with Telegraph USDC).
-      if (privyWallet && challenge) {
+      if (signerWallet && challenge) {
         try {
           const urlPath = minerId ? `/engine/v1/ask/${encodeURIComponent(minerId)}` : "/engine/v1/ask";
           const chRes = await fetch("/api/terminal/challenge", {
@@ -525,8 +526,11 @@ export default function TerminalClient({
             setFailure({ heading: "Could not get payment challenge", detail: ch.error ?? "unknown" });
             return;
           }
-          ch.typedData.message.from = privyWallet.address;
-          const { signature } = await signTypedData(ch.typedData, { address: privyWallet.address, uiOptions: { showWalletUIs: false } });
+          ch.typedData.message.from = signerWallet.address;
+          const { signature } = await signTypedData(ch.typedData, {
+            address: signerWallet.address,
+            uiOptions: { showWalletUIs: false },
+          });
           const accepted = ch.challenge?.accepts?.find((a: { scheme?: string; network?: string }) =>
             a.scheme === "exact" && a.network === ch.offer.network
           );
@@ -535,7 +539,7 @@ export default function TerminalClient({
             payload: {
               signature,
               authorization: {
-                from: privyWallet.address,
+                from: signerWallet.address,
                 to: ch.typedData.message.to,
                 value: ch.typedData.message.value,
                 validAfter: ch.typedData.message.validAfter,
@@ -553,7 +557,7 @@ export default function TerminalClient({
               urlPath,
               body: payload,
               paymentSignature: payment,
-              payer: privyWallet.address,
+              payer: signerWallet.address,
             }),
             signal: controller.signal,
           });
@@ -577,7 +581,7 @@ export default function TerminalClient({
               receipt: {
                 receipt_hash: result.receipt ?? "",
                 rail: "x402",
-                payer: privyWallet.address,
+                payer: signerWallet.address,
                 miner: challenge.payment.payTo,
                 intent: "",
                 amount_uusdc: challenge.payment.amount,
@@ -657,7 +661,7 @@ export default function TerminalClient({
       clearTimeout(deadline);
       setExecuting(false);
     }
-  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, privyWallet, signTypedData]);
+  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, signerWallet, signTypedData]);
 
   /* ---- verify ------------------------------------------------------- */
 
@@ -1032,8 +1036,8 @@ export default function TerminalClient({
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="shrink-0 text-ink-faint">Payer</dt>
-                  <dd className="tabular max-w-[70%] break-all text-right text-ink" title={wallet.address ?? ""}>
-                    {wallet.address ?? "not configured"}
+                  <dd className="tabular max-w-[70%] break-all text-right text-ink" title={signerWallet?.address ?? wallet.address ?? ""}>
+                    {signerWallet?.address ?? wallet.address ?? "not configured"}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">
@@ -1078,7 +1082,15 @@ export default function TerminalClient({
               <span className="max-w-[36ch]">I approve paying this exact amount for this exact request.</span>
             </label>
           </div>
-          {!privyWallet && (
+          {signerWallet && (
+            <p className="mt-2 text-[11.5px] text-ink-faint">
+              Paying from {signerWallet.walletClientType === "privy" ? "your in-app wallet" : "your connected wallet"}{" "}
+              <span className="tabular">
+                {signerWallet.address.slice(0, 6)}…{signerWallet.address.slice(-4)}
+              </span>
+            </p>
+          )}
+          {!signerWallet && (
             <p className="mt-3 max-w-[66ch] text-[11.5px] leading-relaxed text-amber">
               No wallet is connected, so this payment is signed by the deployment&apos;s own test wallet.{" "}
               <Link href="/funds" className="underline offset-2 hover:no-underline">
