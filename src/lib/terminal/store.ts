@@ -215,12 +215,19 @@ export async function recordTerminalOutcome(
     task.events = events;
     // A failed attempt still belongs to the wallet that signed it, so it can
     // appear in that wallet's history. No receipt or spend is claimed.
+    // These fields are only declared on the answered variant, which returned
+    // above; a cast keeps them readable without pretending the union has them.
+    const carried = outcome as {
+      urlPath?: string;
+      requestSent?: unknown;
+      offer?: { scheme: string; network: string; asset: string; payTo: string; amount: string };
+    };
     task.terminal = {
       intent: spec.intent ?? null,
       miner: spec.minerId ?? null,
-      endpointPath: "urlPath" in outcome ? outcome.urlPath : undefined,
-      request: ("requestSent" in outcome ? outcome.requestSent : undefined) ?? requestBody,
-      ...("offer" in outcome && outcome.offer ? { offer: outcome.offer } : {}),
+      endpointPath: carried.urlPath,
+      request: carried.requestSent ?? requestBody,
+      ...(carried.offer ? { offer: carried.offer } : {}),
       ...(payerAddress ? { payerAddress } : {}),
     };
     // spend stays zero: nothing is claimed as paid without an actual receipt.
