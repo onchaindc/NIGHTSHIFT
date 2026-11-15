@@ -23,9 +23,10 @@ function parseOutcome(summary: string): { brief: string | null; papers: Array<{ 
       papers.push({ title: rawTitle.trim(), doi: typeof item.DOI === "string" ? item.DOI : undefined });
     }
 
+    const totalValue = message?.["total-results"];
     const total =
-      typeof message?.["total-results"] === "number"
-        ? (message["total-results"] as number)
+      typeof totalValue === "number"
+        ? totalValue
         : typeof o.total_matches === "number"
           ? o.total_matches
           : null;
