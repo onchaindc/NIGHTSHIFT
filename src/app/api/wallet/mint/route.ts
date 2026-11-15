@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createPublicClient, createWalletClient, http, isAddress, parseAbi } from "viem";
+import { createPublicClient, createWalletClient, getAddress, http, isAddress, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 
@@ -35,10 +35,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const address = body.address?.trim();
-  if (!address || !isAddress(address)) {
+  const input = body.address?.trim();
+  // Accept any hex address, not only one with a valid EIP-55 checksum.
+  if (!input || !isAddress(input, { strict: false })) {
     return NextResponse.json({ error: "A valid wallet address is required." }, { status: 400 });
   }
+  const address = getAddress(input);
 
   const key = process.env.TELEGRAPH_EVM_PRIVATE_KEY;
   if (!paidCredentialsConfigured() || !key) {
