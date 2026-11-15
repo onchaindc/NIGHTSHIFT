@@ -144,6 +144,12 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
       <p className="mt-2 max-w-[60ch] text-[13.5px] leading-relaxed text-ink-soft">
         Only the Terminal asks signed by a wallet you have connected. Explorer, Signals and the rest stay shared.
       </p>
+      {myAddresses.size > 0 && (
+        <p className="tabular mt-1.5 text-[11.5px] text-ink-faint">
+          Connected payer{myAddresses.size === 1 ? "" : "s"}:{" "}
+          {[...myAddresses].map((a) => `${a.slice(0, 6)}…${a.slice(-4)}`).join(" · ")}
+        </p>
+      )}
 
       {persistenceMode === "ephemeral" ? (
         <p className="mt-3 max-w-[70ch] rounded-lg border border-amber/40 bg-amber/5 px-4 py-3 text-[13px] leading-relaxed text-amber">
