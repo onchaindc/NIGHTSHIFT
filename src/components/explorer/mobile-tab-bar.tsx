@@ -5,9 +5,8 @@ import { usePathname } from "next/navigation";
 import { Code2, Compass, Radar, ReceiptText, Wallet, type LucideIcon } from "lucide-react";
 
 /**
- * The phone's map. The old header stacked the areas and the Explorer tabs on top
- * of the page; this puts the areas within thumb reach and lets the header
- * scroll away, so only one bar ever costs vertical space.
+ * The phone's map. The areas live within thumb reach at the bottom while the
+ * header stays pinned to the top for wayfinding and the global Ask action.
  */
 type Item = { href: string; label: string; icon: LucideIcon; activeFor?: string[] };
 

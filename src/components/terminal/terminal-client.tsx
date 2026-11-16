@@ -15,7 +15,7 @@
  * actually is.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Loader2, Search, Terminal as TerminalIcon, XCircle } from "lucide-react";
 import { useWallets, useSignTypedData } from "@privy-io/react-auth";
@@ -226,8 +226,54 @@ export default function TerminalClient({
   const [activitySaved, setActivitySaved] = useState<{ id?: string; saved: boolean; detail?: string } | null>(null);
   const [log, setLog] = useState<Array<{ ts: number; text: string; tone: "info" | "warn" | "bad" | "good" }>>([]);
 
+  // The flow is one long page on phones. Keep a handle on each meaningful
+  // destination so a state change can bring the next action into view instead
+  // of making the person hunt for it below the fold.
+  const composeRef = useRef<HTMLElement>(null);
+  const priceRef = useRef<HTMLElement>(null);
+  const payRef = useRef<HTMLElement>(null);
+  const executingRef = useRef<HTMLElement>(null);
+  const failureRef = useRef<HTMLElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+
+  const scrollToTarget = useCallback((target: HTMLElement | null) => {
+    if (!target || typeof window === "undefined") return;
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+    target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  }, []);
+
+  const resetToCompose = useCallback(
+    (clearAttempt = false) => {
+      setStage("compose");
+      setChallenge(null);
+      setApprovedOffer(null);
+      setApprovalBox(false);
+      setPreviewStatus(null);
+      setNodeVerdict(null);
+      setPreviewHttp(null);
+      setComposeError(null);
+      setFailure(null);
+      setBodyPlan(null);
+      if (clearAttempt) {
+        setAnswer(null);
+        setActivitySaved(null);
+        setVerifyStatus(null);
+      }
+      window.requestAnimationFrame(() => scrollToTarget(composeRef.current));
+    },
+    [scrollToTarget],
+  );
+
   const pushLog = useCallback((text: string, tone: "info" | "warn" | "bad" | "good" = "info") => {
-    setLog((l) => [...l.slice(-40), { ts: Date.now(), text, tone }]);
+    setLog((l) => {
+      // Execution can retry the same hand-off; keep one copy of adjacent
+      // duplicates without hiding a later, different step.
+      const last = l[l.length - 1];
+      if (last && last.text === text && last.tone === tone) {
+        return [...l.slice(0, -1), { ...last, ts: Date.now() }];
+      }
+      return [...l.slice(-40), { ts: Date.now(), text, tone }];
+    });
   }, []);
 
   /* ---- intent detail loading -------------------------------------- */
@@ -283,6 +329,33 @@ export default function TerminalClient({
       alive = false;
     };
   }, [mode, selectedIntent, pushLog]);
+
+  // Move the person with the flow: price → approval → processing → answer.
+  useEffect(() => {
+    if (failure) {
+      scrollToTarget(failureRef.current);
+      return;
+    }
+    if (answer) {
+      scrollToTarget(resultRef.current);
+      return;
+    }
+    if (stage === "executing") {
+      scrollToTarget(executingRef.current);
+      return;
+    }
+    if (challenge) {
+      scrollToTarget(payRef.current);
+      return;
+    }
+    if (stage === "preview" && previewStatus === null) {
+      scrollToTarget(priceRef.current);
+      return;
+    }
+    if (previewStatus === "refused" || previewStatus === "unavailable") {
+      scrollToTarget(priceRef.current);
+    }
+  }, [answer, challenge, failure, previewStatus, scrollToTarget, stage]);
 
   /* ---- compose helpers --------------------------------------------- */
 
@@ -571,9 +644,21 @@ export default function TerminalClient({
     composed.body === null && composed.error && (selectedIntent !== null || rawJson.trim().length > 0)
       ? composed.error
       : null;
+  const questionSummary = useMemo(() => {
+    if (mode === "advanced") return rawJson.trim() ? "Advanced JSON request" : "Your question";
+    const parts: string[] = [];
+    if (selectedIntent) parts.push(humanIntent(selectedIntent));
+    for (const [key, value] of Object.entries(paramValues)) {
+      const trimmed = value.trim();
+      if (trimmed) parts.push(`${humanIntent(key)}: ${trimmed}`);
+    }
+    if (queryText.trim()) parts.push(queryText.trim());
+    return parts.join(" · ") || "Your question";
+  }, [mode, paramValues, queryText, rawJson, selectedIntent]);
+  const previewLoading = stage === "preview" && previewStatus === null;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-10 pb-32 sm:px-6 sm:pb-10">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="x-tag">ASK A QUESTION · PAY PER ANSWER</p>
@@ -586,20 +671,31 @@ export default function TerminalClient({
 
       </div>
 
-      <ol className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-faint">
-        {([["compose", "Write"], ["preview", "Price"], ["executing", "Pay"], ["result", "Answer"]] as const).map(([s, label], i) => (
-          <li key={s} className="flex items-center gap-2">
-            <span className={`tabular rounded-full px-2 py-0.5 ${stage === s ? "bg-amber-soft text-amber-deep" : stage === "result" && s === "result" ? "text-teal" : ""}`}>
-              {i + 1}. {label}
-            </span>
-            {i < 3 && <ChevronRight size={12} aria-hidden />}
-          </li>
-        ))}
+      <ol className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-full border border-edge bg-panel/60 px-3 py-2 text-[11.5px] text-ink-faint">
+        {([["compose", "Write"], ["preview", "Price"], ["executing", "Pay"], ["result", "Answer"]] as const).map(([s, label], i) => {
+          const active = stage === s;
+          const done = ["compose", "preview", "executing", "result"].indexOf(stage) > i;
+          return (
+            <li key={s} className="flex items-center gap-2">
+              <span
+                aria-current={active ? "step" : undefined}
+                className={`tabular rounded-full px-2 py-0.5 ${active ? "bg-amber-soft text-amber-deep" : done ? "text-teal" : ""}`}
+              >
+                {i + 1}. {label}
+              </span>
+              {i < 3 && <ChevronRight size={12} aria-hidden />}
+            </li>
+          );
+        })}
       </ol>
 
+      {!answer && !failure && stage !== "executing" && (
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* ---------------- compose ---------------- */}
-        <section className="rounded-lg border border-edge bg-panel p-5">
+        <section
+          ref={composeRef}
+          className={`scroll-mt-24 rounded-lg border border-edge bg-panel p-5 ${stage === "compose" ? "" : "hidden"}`}
+        >
           <div className="flex items-center justify-between gap-3">
             <p className="x-label">Your question</p>
             <button
@@ -814,13 +910,25 @@ export default function TerminalClient({
 
         {/* ---------------- verdict / price ---------------- */}
         {!answer && (
-        <section className="rounded-lg border border-edge bg-panel p-5">
-          <p className="x-label">What the network said</p>
+        <section ref={priceRef} className="scroll-mt-24 rounded-lg border border-edge bg-panel p-5">
+          <p className="x-label">{challenge ? "Your price" : "What the network said"}</p>
 
-          {previewStatus === null && !failure && (
+          {stage === "compose" && previewStatus === null && !failure && (
             <div className="mt-4 rounded-lg border border-dashed border-edge bg-panel-2 p-6 text-[12.5px] leading-relaxed text-ink-faint">
               Write your question and see the price. The check is free: the network confirms it can answer before any
               payment exists, and you approve the exact amount afterwards.
+            </div>
+          )}
+
+          {stage === "preview" && previewStatus === null && !failure && (
+            <div aria-live="polite" className="mt-4 flex items-start gap-2.5 rounded-lg border border-edge bg-panel-2 p-4">
+              <Loader2 size={15} className="mt-0.5 shrink-0 animate-spin text-teal" aria-hidden />
+              <div>
+                <p className="text-[13px] font-medium text-ink">Checking the network for a price</p>
+                <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">
+                  This check is free. No payment is made until you approve the exact offer.
+                </p>
+              </div>
             </div>
           )}
 
@@ -939,15 +1047,50 @@ export default function TerminalClient({
           )}
         </section>
         )}
+
+        {stage !== "compose" && (
+          <section className="order-first scroll-mt-24 rounded-lg border border-edge bg-panel p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="x-label">Your question</p>
+                <p className="mt-2 line-clamp-2 text-[14px] font-medium leading-relaxed text-ink">
+                  {questionSummary}
+                </p>
+                <p className="mt-1 text-[11.5px] text-ink-faint">
+                  {minerId ? `Pinned to ${minerId}` : "Automatic routing"}
+                  {" · "}
+                  {previewLoading
+                    ? "Checking the network for a price…"
+                    : previewStatus === "challenge"
+                      ? "Review and approve the price"
+                      : "Nothing has been charged"}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={previewLoading}
+                onClick={() => resetToCompose(false)}
+                className={`btn-quiet shrink-0 !min-h-8 !px-3 !text-[11.5px] ${previewLoading ? "opacity-50" : ""}`}
+              >
+                Edit
+              </button>
+            </div>
+          </section>
+        )}
       </div>
+      )}
 
       {/* ---------------- approval + execute ---------------- */}
-      {challenge && !failure && (
-        <section className="mt-6 rounded-lg border border-amber/50 bg-panel p-5">
+      {challenge && !failure && stage !== "executing" && (
+        <section ref={payRef} className="scroll-mt-24 mt-6 rounded-2xl border border-amber/50 bg-panel p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-[62ch]">
               <p className="x-label">Approve the payment</p>
-              <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
+              <p className="mt-2 text-[13px] font-medium leading-relaxed text-ink">
+                Pay <span className="tabular text-ink">${(challenge.payment.amountUsdCents / 100).toFixed(2)}</span>{" "}
+                in {challenge.payment.assetName ?? "USDC"} on {chainName(challenge.payment.network)}.
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">
                 One payment for one answer. The price is checked again at the moment of signing; if it has changed, the
                 payment is refused and you are charged nothing.
               </p>
@@ -982,16 +1125,43 @@ export default function TerminalClient({
                 <>Pay ${(challenge.payment.amountUsdCents / 100).toFixed(2)} and send</>
               )}
             </button>
-            <button onClick={() => { setChallenge(null); setPreviewStatus(null); setApprovalBox(false); setStage("compose"); }} className="btn-quiet" disabled={executing}>
+            <button onClick={() => resetToCompose(false)} className="btn-quiet" disabled={executing}>
               Cancel — pay nothing
             </button>
           </div>
         </section>
       )}
 
+      {/* ---------------- processing ---------------- */}
+      {stage === "executing" && !answer && !failure && (
+        <section
+          ref={executingRef}
+          aria-live="polite"
+          className="scroll-mt-24 mt-6 rounded-2xl border border-teal/30 bg-panel p-5 sm:p-6"
+        >
+          <div className="flex items-center gap-2 text-teal">
+            <Loader2 size={16} className="animate-spin" aria-hidden />
+            <p className="text-[13px] font-medium">Paying and waiting for the answer</p>
+          </div>
+          <p className="mt-3 max-w-[68ch] text-[12.5px] leading-relaxed text-ink-soft">
+            Your approval is in. The network is processing the paid request, so keep this page open. This can take up to
+            70 seconds.
+          </p>
+          {challenge && (
+            <p className="mt-2 text-[11.5px] text-ink-faint">
+              Paying <span className="tabular">${(challenge.payment.amountUsdCents / 100).toFixed(2)}</span>{" "}
+              in {challenge.payment.assetName ?? "USDC"} on {chainName(challenge.payment.network)}.
+            </p>
+          )}
+          <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
+            No answer yet? Check Activity before retrying: a settled payment may still produce a recorded answer.
+          </p>
+        </section>
+      )}
+
       {/* ---------------- failure ---------------- */}
       {failure && (
-        <section className="mt-6 rounded-lg border border-risk/50 bg-panel p-5">
+        <section ref={failureRef} className="scroll-mt-24 mt-6 rounded-2xl border border-risk/50 bg-panel p-5 sm:p-6">
           <p className="flex items-center gap-1.5 text-[13px] font-semibold text-risk"><XCircle size={14} aria-hidden /> {failure.heading}</p>
           <p className="mt-2 max-w-[72ch] text-[12.5px] leading-relaxed text-ink-soft">{failure.detail}</p>
           {failure.node !== null && failure.node !== undefined && <NodeVerdict verdict={failure.node} />}
@@ -1004,37 +1174,15 @@ export default function TerminalClient({
               — the faucet covers the gas — then try the same ask again.
             </p>
           )}
-          <button onClick={() => { setFailure(null); setStage("compose"); }} className="btn-quiet mt-4">Start again</button>
+          <button onClick={() => resetToCompose(true)} className="btn-quiet mt-4">Start again</button>
         </section>
-      )}
-
-      {/* ---------------- activity record status (Phase 5b) ---------------- */}
-      {activitySaved && (
-        <p className="mt-4 max-w-[74ch] text-[12px] leading-relaxed">
-          {activitySaved.saved && activitySaved.id ? (
-            <>
-              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-teal align-middle" />
-              This attempt is recorded as durable activity:{" "}
-              <Link href={`/activity/${activitySaved.id}`} className="text-amber underline offset-2 hover:underline">
-                open it in the Activity centre
-              </Link>
-              .
-            </>
-          ) : (
-            <>
-              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-risk align-middle" />
-              This attempt could <strong className="text-ink">not</strong> be saved to the activity store
-              {activitySaved.detail ? ` (${activitySaved.detail})` : ""}. It stays visible in this session only — it is recorded nowhere else.
-            </>
-          )}
-        </p>
       )}
 
       {/* ---------------- result ---------------- */}
       {answer && (
-        <div className="mt-8 space-y-4">
+        <div ref={resultRef} className="scroll-mt-24 mt-6 space-y-4">
           {/* Main answer — the spotlight */}
-          <section className="rounded-2xl border border-teal/30 bg-panel p-5 sm:p-6">
+          <section aria-live="polite" className="rounded-2xl border border-teal/30 bg-panel p-5 sm:p-6">
             <div className="flex items-center gap-2 text-teal">
               <CheckCircle2 size={16} />
               <span className="text-[13px] font-medium">Answer</span>
@@ -1042,12 +1190,21 @@ export default function TerminalClient({
             <div className="mt-4">
               <ResultView result={answer.answer.result} />
             </div>
-            <p className="mt-4 text-[11px] text-ink-faint">
-              {answer.answer.minerName || answer.answer.minerId ? (
-                <>Answered by {answer.answer.minerName ?? answer.answer.minerId}. {" "}</>
-              ) : null}
-              Paid {(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC
-            </p>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[11px] text-ink-faint">
+                {answer.answer.minerName || answer.answer.minerId ? (
+                  <>Answered by {answer.answer.minerName ?? answer.answer.minerId}. {" "}</>
+                ) : null}
+                Paid {(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC
+              </p>
+              <button
+                type="button"
+                onClick={() => resetToCompose(true)}
+                className="btn-quiet !min-h-8 !px-3 !text-[11.5px]"
+              >
+                Ask another question
+              </button>
+            </div>
           </section>
 
           {/* Receipt — collapsed, no overflow */}
@@ -1093,35 +1250,62 @@ export default function TerminalClient({
         </div>
       )}
 
+      {/* ---------------- activity record status (Phase 5b) ---------------- */}
+      {activitySaved && (
+        <p className="mt-4 max-w-[74ch] text-[12px] leading-relaxed">
+          {activitySaved.saved && activitySaved.id ? (
+            <>
+              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-teal align-middle" />
+              This attempt is recorded as durable activity:{" "}
+              <Link href={`/activity/${activitySaved.id}`} className="text-amber underline offset-2 hover:underline">
+                open it in the Activity centre
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-risk align-middle" />
+              This attempt could <strong className="text-ink">not</strong> be saved to the activity store
+              {activitySaved.detail ? ` (${activitySaved.detail})` : ""}. It stays visible in this session only — it is recorded nowhere else.
+            </>
+          )}
+        </p>
+      )}
+
       {/* ---------------- log ---------------- */}
       {log.length > 0 && (
-        <section className="mt-6 rounded-lg border border-edge bg-panel p-5">
-          <p className="x-label">What happened</p>
-          <ol className="mt-4 space-y-3.5">
-            {log.map((l, i) => (
-              <li key={`${l.ts}-${i}`} className="flex gap-3">
-                <span
-                  aria-hidden
-                  className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${
-                    l.tone === "good"
-                      ? "bg-teal"
-                      : l.tone === "bad"
-                        ? "bg-risk"
-                        : l.tone === "warn"
-                          ? "bg-amber"
-                          : "bg-edge-strong"
-                  }`}
-                />
-                <div className="min-w-0">
-                  <p className="text-[12.5px] leading-relaxed text-ink-soft">{l.text}</p>
-                  <p className="tabular mt-0.5 text-[10px] text-ink-faint">
-                    {new Date(l.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <details open={!answer} className="mt-6 rounded-xl border border-edge bg-panel">
+          <summary className="cursor-pointer px-5 py-4 text-[13px] font-medium text-ink-soft">
+            What happened{" "}
+            <span className="text-[11px] font-normal text-ink-faint">{log.length} steps</span>
+          </summary>
+          <div className="border-t border-edge px-5 py-4">
+            <ol className="space-y-3.5">
+              {log.map((l, i) => (
+                <li key={`${l.ts}-${i}`} className="flex gap-3">
+                  <span
+                    aria-hidden
+                    className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${
+                      l.tone === "good"
+                        ? "bg-teal"
+                        : l.tone === "bad"
+                          ? "bg-risk"
+                          : l.tone === "warn"
+                            ? "bg-amber"
+                            : "bg-edge-strong"
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] leading-relaxed text-ink-soft">{l.text}</p>
+                    <p className="tabular mt-0.5 text-[10px] text-ink-faint">
+                      {new Date(l.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </details>
       )}
 
       <div className="mt-8 flex flex-wrap gap-3 text-[12px]">
