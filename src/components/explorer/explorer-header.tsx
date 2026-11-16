@@ -53,10 +53,16 @@ export function ExplorerHeader() {
           <ThemeToggle />
           <Link
             href="/terminal"
-            className="btn-primary !min-h-9 !px-4 !text-[12.5px]"
+            aria-label="Ask the network"
+            className="group inline-flex min-h-9 items-center gap-2 rounded-full bg-ink px-4 text-[12.5px] font-semibold text-night shadow-[0_1px_2px_rgba(22,24,29,0.18)] ring-1 ring-ink/10 transition-all duration-200 hover:-translate-y-px hover:shadow-[0_4px_14px_-4px_rgba(22,24,29,0.4)] active:translate-y-0"
           >
+            <span aria-hidden className="size-1.5 rounded-full bg-teal transition-colors group-hover:bg-amber" />
             Ask
-            <ArrowRight size={13} aria-hidden />
+            <ArrowRight
+              size={13}
+              aria-hidden
+              className="transition-transform duration-200 group-hover:translate-x-0.5"
+            />
           </Link>
         </div>
       </div>

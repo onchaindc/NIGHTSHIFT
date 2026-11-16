@@ -121,6 +121,9 @@ export function daemonWsUrl(): string {
 
 const daemona = () => `${telegraphNodeUrl()}/daemon`;
 
+/** Recording lookup is by the signal's permanent hash only. */
+const HASH_RE = /^0x[0-9a-f]{64}$/i;
+
 async function getJson<T>(url: string): Promise<Outcome<T>> {
   try {
     const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
@@ -163,6 +166,25 @@ export async function fetchSignals(o: FeedOpts & { limit?: number; offset?: numb
   return out;
 }
 
+/**
+ * The feed endpoint has no hash lookup, so check the newest page for a row
+ * whose engine recording has already rotated out. Older feed history is not
+ * scanned: the Daemon stores hundreds of thousands of signals, and a detail
+ * page must not page through all of them to answer one click.
+ */
+export async function fetchDaemonSignalByHash(hash: string): Promise<Outcome<DaemonSignal | null>> {
+  if (!HASH_RE.test(hash)) {
+    return { status: "unavailable", detail: "not a signal hash (expected 0x… 64 hex characters)" };
+  }
+  const out = await getJson<DaemonSignalPage>(
+    `${daemona()}/api/questions?limit=100&sort=recent&order=desc`,
+  );
+  if (out.status !== "ok") return out;
+  const needle = hash.toLowerCase();
+  const found = out.payload.results.find((row) => row.signal_hash?.toLowerCase() === needle) ?? null;
+  return { status: "ok", payload: found };
+}
+
 export async function fetchSignalCategories(): Promise<Outcome<DaemonCategories>> {
   const out = await getJson<DaemonCategories>(`${daemona()}/api/categories`);
   if (out.status === "ok" && !Array.isArray(out.payload.categories)) {
@@ -170,9 +192,6 @@ export async function fetchSignalCategories(): Promise<Outcome<DaemonCategories>
   }
   return out;
 }
-
-/** Recording lookup is by the signal's permanent hash only. */
-const HASH_RE = /^0x[0-9a-f]{64}$/i;
 
 export async function fetchSignalRecording(hash: string): Promise<Outcome<SignalRecording>> {
   if (!HASH_RE.test(hash)) {

@@ -9,6 +9,19 @@ export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 60;
 
+type MinerSort = "served" | "new" | "recent";
+
+const SORTS: Array<{ key: MinerSort; label: string }> = [
+  { key: "served", label: "Most served" },
+  { key: "new", label: "Newest" },
+  { key: "recent", label: "Recently scored" },
+];
+
+function timeValue(value?: string): number {
+  const parsed = value ? Date.parse(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function match(miner: NetworkMiner, q: string): boolean {
   const needle = q.toLowerCase();
   if (!needle) return true;
@@ -22,9 +35,10 @@ function match(miner: NetworkMiner, q: string): boolean {
 export default async function MinersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; intent?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; intent?: string; page?: string; sort?: string }>;
 }) {
-  const { q = "", intent = "", page = "1" } = await searchParams;
+  const { q = "", intent = "", page = "1", sort = "served" } = await searchParams;
+  const sortKey: MinerSort = sort === "new" || sort === "recent" ? sort : "served";
   const [fetched, intents] = await Promise.all([fetchMiners(), fetchIntents()]);
 
   if (fetched.status !== "ok") {
@@ -70,7 +84,15 @@ export default async function MinersPage({
   if (qTrim) {
     pool = pool.filter((m) => match(m, qTrim));
   }
-  pool = [...pool].sort((a, b) => (b.total_requests_served ?? 0) - (a.total_requests_served ?? 0));
+  pool = [...pool].sort((a, b) => {
+    if (sortKey === "new") {
+      return timeValue(b.registered_at) - timeValue(a.registered_at) || a.name.localeCompare(b.name);
+    }
+    if (sortKey === "recent") {
+      return timeValue(b.last_scored_at) - timeValue(a.last_scored_at) || a.name.localeCompare(b.name);
+    }
+    return (b.total_requests_served ?? 0) - (a.total_requests_served ?? 0) || a.name.localeCompare(b.name);
+  });
 
   const total = pool.length;
   const pageN = Math.max(1, parseInt(page, 10) || 1);
@@ -80,12 +102,24 @@ export default async function MinersPage({
   const topIntents = [...intents.payload].sort((a, b) => b.miner_count - a.miner_count).slice(0, 12);
   const friendly = (s: string) => s.toLowerCase().replaceAll("_general", "").replaceAll(/_/g, " ");
 
+  const sortHref = (next: MinerSort) => ({
+    pathname: "/miners",
+    query: Object.fromEntries(
+      Object.entries({ q: qTrim, intent: intentSlug, sort: next === "served" ? undefined : next }).filter(
+        ([, v]) => v !== undefined && v !== "",
+      ),
+    ) as Record<string, string>,
+  });
+
   const pageHref = (n: number) => ({
     pathname: "/miners",
     query: Object.fromEntries(
-      Object.entries({ q: qTrim, intent: intentSlug, page: n > 1 ? String(n) : undefined }).filter(
-        ([, v]) => v !== undefined,
-      ),
+      Object.entries({
+        q: qTrim,
+        intent: intentSlug,
+        sort: sortKey === "served" ? undefined : sortKey,
+        page: n > 1 ? String(n) : undefined,
+      }).filter(([, v]) => v !== undefined && v !== ""),
     ) as Record<string, string>,
   });
 
@@ -94,17 +128,49 @@ export default async function MinersPage({
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="x-eyebrow">{fetched.payload.length.toLocaleString()} miners registered</p>
-          <h1 className="x-display-1 mt-3 text-ink">{total.toLocaleString()} miners on the network</h1>
+          <h1 className="x-display-1 mt-3 text-ink">
+            {total.toLocaleString()} {total === 1 ? "miner" : "miners"} on the network
+          </h1>
           <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-ink-soft">
             Every entry is a registry record: an independent service with declared endpoints, schemas, supported
-            intents and price. Ordered by reported requests served, where a miner reports it.
+            intents and price.{" "}
+            {sortKey === "new"
+              ? "Ordered by registration time, newest first."
+              : sortKey === "recent"
+                ? "Ordered by the network's most recent evaluator score."
+                : "Ordered by reported requests served, where a miner reports it."}
           </p>
           <p className="mt-2 max-w-[64ch] text-[12.5px] leading-relaxed text-ink-faint">
             When asking a question, automatic routing is the recommended path. Pinning a specific miner is advanced and can fail if the service advertises an intent but cannot accept the request form.
           </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="x-label mr-1">Order</span>
+            {SORTS.map((option) => (
+              <Link
+                key={option.key}
+                href={sortHref(option.key)}
+                className={`rounded-full border px-3 py-1.5 text-[11.5px] font-medium transition-colors ${
+                  sortKey === option.key
+                    ? "border-teal bg-teal/5 text-teal"
+                    : "border-edge bg-panel text-ink-soft hover:border-teal hover:text-teal"
+                }`}
+              >
+                {option.label}
+              </Link>
+            ))}
+            <p className="mt-1 w-full text-[11px] leading-relaxed text-ink-faint">
+              Newest is registration time; Recently scored is the network&apos;s last evaluator update. For the latest
+              delivered answers, open{" "}
+              <Link href="/signals" className="text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal">
+                Signals
+              </Link>
+              .
+            </p>
+          </div>
         </div>
         <form action="/miners" method="GET" className="flex items-center gap-2">
           {intentSlug && <input type="hidden" name="intent" value={intentSlug} />}
+          {sortKey !== "served" && <input type="hidden" name="sort" value={sortKey} />}
           <input
             type="search"
             name="q"
@@ -130,7 +196,13 @@ export default async function MinersPage({
             {topIntents.map((i) => (
               <Link
                 key={i.intent_name ?? i.intent_id}
-                href={{ pathname: "/miners", query: { intent: i.intent_name ?? i.intent_id } }}
+                href={{
+                  pathname: "/miners",
+                  query: {
+                    intent: i.intent_name ?? i.intent_id,
+                    ...(sortKey !== "served" ? { sort: sortKey } : {}),
+                  },
+                }}
                 className="shrink-0 snap-start rounded-full border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-teal hover:text-teal"
               >
                 {friendly(i.intent_name ?? i.intent_id)}
@@ -174,7 +246,7 @@ export default async function MinersPage({
                otherwise, and one long miner name widens the whole column past
                the viewport (the mobile overflow). */
             <li key={m.slug ?? m.id} className="rise-in-item min-w-0">
-              <ParticipantCard participant={m} />
+              <ParticipantCard participant={m} showDates={sortKey !== "served"} />
             </li>
           ))}
         </ul>
