@@ -22,6 +22,7 @@ type Paper = { title: string; doi?: string; venue?: string };
 type RecordItem = { title: string; subtitle?: string; url?: string };
 
 type PrimitiveField = { key: string; label: string; value: string | number | boolean };
+type StringListField = { key: string; label: string; items: string[] };
 
 const FACT_KEYS = new Set(["claim", "verdict", "reasoning", "explanation", "analysis"]);
 const TEXT_KEYS = ["answer", "brief", "summary", "text", "content", "result"] as const;
@@ -226,6 +227,18 @@ function fieldsOf(value: unknown): PrimitiveField[] {
   return fields;
 }
 
+function stringListFieldsOf(value: unknown): StringListField[] {
+  if (!isRecord(value)) return [];
+  const lists: StringListField[] = [];
+  for (const [key, raw] of Object.entries(value)) {
+    if (!Array.isArray(raw) || raw.length === 0) continue;
+    const items = stringList(raw);
+    if (items.length !== raw.length) continue;
+    lists.push({ key, label: fieldLabel(key), items });
+  }
+  return lists;
+}
+
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\/\S+$/i.test(value);
 }
@@ -400,13 +413,55 @@ function FieldValue({ field }: { field: PrimitiveField }): ReactNode {
   return <span className="whitespace-pre-wrap text-[12.5px] text-ink">{value}</span>;
 }
 
+function StringList({ items }: { items: string[] }) {
+  return (
+    <ul className="mt-2 space-y-1.5">
+      {items.map((item, index) => (
+        <li
+          key={`${item}-${index}`}
+          className="flex gap-2.5 text-[12.5px] leading-relaxed text-ink-soft"
+        >
+          <span aria-hidden className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-edge-strong" />
+          {isHttpUrl(item) ? (
+            <a
+              href={item}
+              target="_blank"
+              rel="noreferrer"
+              title={item}
+              className="min-w-0 break-words text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal"
+            >
+              {sourceLabel(item)}
+            </a>
+          ) : (
+            <span className="min-w-0">{shortText(item)}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function GenericView({ value }: { value: unknown }) {
   if (typeof value === "number" || typeof value === "boolean") {
     return <p className="tabular text-[15px] leading-relaxed text-ink">{String(value)}</p>;
   }
 
   const paragraphs = paragraphsOf(value);
-  const fields = fieldsOf(value);
+  const listFields: StringListField[] = Array.isArray(value)
+    ? (() => {
+        const items = stringList(value);
+        return items.length === value.length && items.length > 0
+          ? [{ key: "items", label: "Items", items }]
+          : [];
+      })()
+    : stringListFieldsOf(value);
+  const listKeys = new Set(listFields.map((field) => field.key));
+  const paragraphValues = new Set(paragraphs.map((paragraph) => paragraph.trim()));
+  const fields = fieldsOf(value).filter(
+    (field) =>
+      !listKeys.has(field.key) &&
+      !(typeof field.value === "string" && paragraphValues.has(field.value.trim())),
+  );
 
   // Arrays of records deserve their titles; a bare "4 items" hides the useful
   // part of news/search responses.
@@ -422,7 +477,7 @@ function GenericView({ value }: { value: unknown }) {
     }
   }
 
-  if (paragraphs.length === 0 && fields.length === 0 && recordLists.length === 0) {
+  if (paragraphs.length === 0 && fields.length === 0 && listFields.length === 0 && recordLists.length === 0) {
     return (
       <p className="text-[13px] leading-relaxed text-ink-soft">
         The miner returned a structured result with no readable text fields. The full payload is in Technical details.
@@ -454,6 +509,23 @@ function GenericView({ value }: { value: unknown }) {
           ))}
         </dl>
       ) : null}
+
+      {listFields.map((list) => (
+        <div key={list.key}>
+          <p className="x-label">
+            {list.label} · {list.items.length}
+          </p>
+          <StringList items={list.items.slice(0, 8)} />
+          {list.items.length > 8 ? (
+            <details className="mt-1.5">
+              <summary className="cursor-pointer text-[11px] text-ink-faint hover:text-ink-soft">
+                Show the other {list.items.length - 8}
+              </summary>
+              <StringList items={list.items.slice(8)} />
+            </details>
+          ) : null}
+        </div>
+      ))}
 
       {recordLists.map((list) => (
         <div key={list.key}>

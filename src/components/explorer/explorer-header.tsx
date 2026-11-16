@@ -37,9 +37,9 @@ export function ExplorerHeader() {
   const inExplorer = EXPLORER_PATHS.some((p) => pathname.startsWith(p));
 
   return (
-    /* Sticky only where there is room for it. On a phone the bar scrolls away
-       and the persistent map is the bottom tab bar, so the page keeps its height. */
-    <header className="z-40 border-b border-edge bg-night/90 backdrop-blur-md sm:sticky sm:top-0">
+    /* Keep the wayfinding and the Ask action available on every screen. The
+       mobile tab bar owns the bottom edge; the header owns the top. */
+    <header className="sticky top-0 z-40 border-b border-edge bg-night/90 backdrop-blur-md">
       <div className="mx-auto grid h-14 max-w-6xl grid-cols-[1fr_auto] items-center gap-4 px-4 sm:grid-cols-[1fr_auto_1fr] sm:px-6">
         <div className="justify-self-start">
           <Wordmark />
