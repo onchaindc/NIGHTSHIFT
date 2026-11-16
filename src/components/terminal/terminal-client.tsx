@@ -20,6 +20,8 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Loader2, Search, Terminal as TerminalIcon, XCircle } from "lucide-react";
 import { useWallets, useSignTypedData } from "@privy-io/react-auth";
 
+import { ResultView } from "@/components/result-view";
+
 export interface TerminalIntentSummary {
   intent: string;
   minerCount: number;
@@ -99,102 +101,6 @@ interface ReceiptInfo {
 }
 
 type PipelineStage = "compose" | "preview" | "executing" | "result";
-
-type Paper = { title: string; doi?: string; venue?: string };
-
-/** Structured papers when the result looks like an academic search. */
-function paperList(result: unknown): { papers: Paper[]; total: number | null } | null {
-  if (!result || typeof result !== "object") return null;
-  const o = result as Record<string, unknown>;
-
-  // Crossref works search: { message: { items: [{ title, DOI, container-title }] } }
-  if (o.message && typeof o.message === "object") {
-    const m = o.message as Record<string, unknown>;
-    const items = Array.isArray(m.items) ? m.items : [];
-    const papers: Paper[] = [];
-    for (const item of items) {
-      if (!item || typeof item !== "object") continue;
-      const it = item as Record<string, unknown>;
-      const rawTitle = Array.isArray(it.title) ? it.title[0] : it.title;
-      const title = typeof rawTitle === "string" ? rawTitle.trim() : "";
-      if (!title) continue;
-      const rawVenue = Array.isArray(it["container-title"]) ? it["container-title"][0] : it["container-title"];
-      papers.push({
-        title,
-        doi: typeof it.DOI === "string" ? it.DOI : undefined,
-        venue: typeof rawVenue === "string" ? rawVenue : undefined,
-      });
-    }
-    if (papers.length > 0) {
-      const total = typeof m["total-results"] === "number" ? m["total-results"] : papers.length;
-      return { papers, total };
-    }
-  }
-
-  // Telegraph-shaped result: titles and DOIs in parallel arrays.
-  const titles = Array.isArray(o.paper_titles) ? o.paper_titles.filter((t): t is string => typeof t === "string") : [];
-  const dois = Array.isArray(o.dois) ? o.dois.filter((d): d is string => typeof d === "string") : [];
-  if (titles.length === 0) return null;
-  const total = typeof o.total_matches === "number" ? o.total_matches : null;
-  return { papers: titles.map((title, i) => ({ title, doi: dois[i] })), total };
-}
-
-function PaperCard({ paper }: { paper: Paper }) {
-  return (
-    <div className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-      <p className="text-[13.5px] leading-snug text-ink">{paper.title}</p>
-      {paper.venue && <p className="mt-0.5 text-[11.5px] text-ink-faint">{paper.venue}</p>}
-      {paper.doi && (
-        <a
-          href={`https://doi.org/${paper.doi}`}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-1 block text-[12px] text-teal underline decoration-teal/30 underline-offset-2"
-        >
-          {paper.doi}
-        </a>
-      )}
-    </div>
-  );
-}
-
-/** The answer's own words, when the provider returns a labelled text field.
-    Long answers arrive as one string; they read as prose only once split. */
-function answerParagraphs(result: unknown): string[] {
-  const split = (text: string) =>
-    text
-      .trim()
-      .split(/\n{2,}/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-
-  if (typeof result === "string") return split(result);
-  if (!result || typeof result !== "object") return [];
-
-  const o = result as Record<string, unknown>;
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const push = (value: string) => {
-    for (const paragraph of split(value)) {
-      if (paragraph.length > 1 && !seen.has(paragraph)) {
-        seen.add(paragraph);
-        out.push(paragraph);
-      }
-    }
-  };
-
-  for (const key of ["answer", "brief", "summary", "text", "content", "result"]) {
-    const v = o[key];
-    if (typeof v === "string") push(v);
-  }
-  if (out.length === 0) {
-    const longest = Object.values(o)
-      .filter((v): v is string => typeof v === "string" && v.trim().length > 40)
-      .sort((a, b) => b.length - a.length)[0];
-    if (longest) push(longest);
-  }
-  return out;
-}
 
 /** `ACADEMIC_SEARCH_GENERAL` reads as a database key; the list should read as a choice. */
 function humanIntent(raw: string): string {
@@ -356,7 +262,7 @@ export default function TerminalClient({
             setMinerId(match.minerId);
             pushLog(`Pinned to ${match.name} (${initialMiner}). Automatic routing is still available if this service cannot take the question.`, "info");
           } else {
-            pushLog(`Requested service ${initialMiner} is not available for this question. Using automatic routing.`, "warn");
+            pushLog(`Requested service ${initialMiner} is not listed for this question, so automatic routing is active instead.`, "warn");
           }
         }
         const fields = (body.params ?? []).length;
@@ -665,8 +571,6 @@ export default function TerminalClient({
     composed.body === null && composed.error && (selectedIntent !== null || rawJson.trim().length > 0)
       ? composed.error
       : null;
-  // The network's way of saying "this provider's form does not take this question".
-  const isNoCompatibleMiner = JSON.stringify(nodeVerdict ?? "").includes("no_compatible_miner");
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
@@ -936,16 +840,22 @@ export default function TerminalClient({
                 <XCircle size={13} aria-hidden className="text-risk" /> That request did not go through
               </p>
               <NodeVerdict verdict={nodeVerdict} />
-              {isNoCompatibleMiner && (
-                <button
-                  onClick={() => {
-                    setMinerId(null);
-                    void runPreview(null);
-                  }}
-                  className="btn-primary mt-3 !min-h-9 !text-[12.5px]"
-                >
-                  Try automatic routing <ArrowRight size={12} aria-hidden />
-                </button>
+              {minerId !== null && (
+                <div className="mt-3 rounded-lg border border-amber/30 bg-amber-soft/50 px-3 py-2.5">
+                  <p className="text-[12px] leading-relaxed text-ink-soft">
+                    This preview was pinned to <span className="font-medium text-ink">{minerId}</span>. A direct ask
+                    has no fallback, so the same question can fail even when other services can answer it.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setMinerId(null);
+                      void runPreview(null);
+                    }}
+                    className="btn-primary mt-2.5 !min-h-9 !text-[12.5px]"
+                  >
+                    Try automatic routing <ArrowRight size={12} aria-hidden />
+                  </button>
+                </div>
               )}
               <p className="mt-3 text-[11.5px] text-ink-faint">Nothing was charged.</p>
             </div>
@@ -1129,45 +1039,13 @@ export default function TerminalClient({
               <CheckCircle2 size={16} />
               <span className="text-[13px] font-medium">Answer</span>
             </div>
-            <div className="mt-4 space-y-3">
-              {answerParagraphs(answer.answer.result).map((p, i) => (
-                <p key={i} className="text-[15px] leading-relaxed text-ink">{p}</p>
-              ))}
-              {answerParagraphs(answer.answer.result).length === 0 && !paperList(answer.answer.result) && (
-                <p className="text-[14px] leading-relaxed text-ink-soft">
-                  The miner returned a structured result. Open Technical details below to inspect it.
-                </p>
-              )}
-              {(() => {
-                const parsed = paperList(answer.answer.result);
-                if (!parsed) return null;
-                return (
-                  <div className="mt-4 space-y-2">
-                    {parsed.total != null && (
-                      <p className="text-[12px] text-ink-faint">
-                        {parsed.total.toLocaleString()} matches · showing {Math.min(parsed.papers.length, 8)} of {parsed.papers.length}
-                      </p>
-                    )}
-                    {parsed.papers.slice(0, 8).map((p, i) => (
-                      <PaperCard key={i} paper={p} />
-                    ))}
-                    {parsed.papers.length > 8 && (
-                      <details>
-                        <summary className="cursor-pointer text-[11.5px] text-ink-faint transition-colors hover:text-ink-soft">
-                          Show the other {parsed.papers.length - 8}
-                        </summary>
-                        <div className="mt-2 space-y-2">
-                          {parsed.papers.slice(8).map((p, i) => (
-                            <PaperCard key={i} paper={p} />
-                          ))}
-                        </div>
-                      </details>
-                    )}
-                  </div>
-                );
-              })()}
+            <div className="mt-4">
+              <ResultView result={answer.answer.result} />
             </div>
             <p className="mt-4 text-[11px] text-ink-faint">
+              {answer.answer.minerName || answer.answer.minerId ? (
+                <>Answered by {answer.answer.minerName ?? answer.answer.minerId}. {" "}</>
+              ) : null}
               Paid {(Number(answer.receipt.amount_uusdc) / 1_000_000).toFixed(2)} USDC
             </p>
           </section>
@@ -1209,7 +1087,7 @@ export default function TerminalClient({
               Technical details
             </summary>
             <pre className="max-h-60 overflow-auto border-t border-edge px-4 py-3 text-[11px] leading-relaxed text-ink-soft">
-              {JSON.stringify(answer.answer.result ?? {}, null, 2).slice(0, 2000)}
+              {JSON.stringify(answer.answer.result ?? {}, null, 2)}
             </pre>
           </details>
         </div>

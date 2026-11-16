@@ -6,7 +6,14 @@ function micro(usdc?: number) {
   return usdc === undefined ? undefined : `$${(usdc / 1_000_000).toFixed(2)}`;
 }
 
-export function ParticipantCard({ participant }: { participant: NetworkMiner }) {
+function shortDate(iso?: string): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+export function ParticipantCard({ participant, showDates = false }: { participant: NetworkMiner; showDates?: boolean }) {
   const price = micro(participant.min_price_usdc);
   const intents = participant.supported_intents ?? [];
   return (
@@ -43,6 +50,12 @@ export function ParticipantCard({ participant }: { participant: NetworkMiner }) 
           <p className="tabular shrink-0 text-[11px] text-ink-faint">{participant.total_requests_served.toLocaleString()} served</p>
         )}
       </div>
+      {showDates && (participant.registered_at || participant.last_scored_at) && (
+        <p className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-edge/60 pt-2 text-[10.5px] text-ink-faint">
+          {participant.registered_at && <span>Registered {shortDate(participant.registered_at)}</span>}
+          {participant.last_scored_at && <span>Last scored {shortDate(participant.last_scored_at)}</span>}
+        </p>
+      )}
     </Link>
   );
 }

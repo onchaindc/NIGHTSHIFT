@@ -1,43 +1,7 @@
 import Link from "next/link";
 
+import { ResultView, resultFromSummary } from "@/components/result-view";
 import { activityOffer, activityTitle, payerOf } from "@/lib/terminal/activity";
-
-/** Try to extract a brief + structured papers from a raw outcome string. */
-function parseOutcome(summary: string): { brief: string | null; papers: Array<{ title: string; doi?: string }> | null; total: number | null; raw: string } {
-  try {
-    const o = JSON.parse(summary) as Record<string, unknown>;
-    const brief = typeof o.brief === "string" ? o.brief : null;
-    const titles = Array.isArray(o.paper_titles) ? o.paper_titles.filter((t): t is string => typeof t === "string") : [];
-    const dois = Array.isArray(o.dois) ? o.dois.filter((d): d is string => typeof d === "string") : [];
-    const papers: Array<{ title: string; doi?: string }> = titles.map((title, i) => ({ title, doi: dois[i] }));
-
-    // Crossref answers arrive as message.items, the same shape the terminal
-    // renders. Without this the detail page dumped the whole payload as text.
-    const message = o.message && typeof o.message === "object" ? (o.message as Record<string, unknown>) : null;
-    const items = message && Array.isArray(message.items) ? message.items : [];
-    for (const raw of items) {
-      if (!raw || typeof raw !== "object") continue;
-      const item = raw as Record<string, unknown>;
-      const rawTitle = Array.isArray(item.title) ? item.title[0] : item.title;
-      if (typeof rawTitle !== "string" || rawTitle.trim().length === 0) continue;
-      papers.push({ title: rawTitle.trim(), doi: typeof item.DOI === "string" ? item.DOI : undefined });
-    }
-
-    const totalValue = message?.["total-results"];
-    const total =
-      typeof totalValue === "number"
-        ? totalValue
-        : typeof o.total_matches === "number"
-          ? o.total_matches
-          : null;
-    return { brief, papers: papers.length > 0 ? papers : null, total, raw: summary };
-  } catch {
-    return { brief: null, papers: null, total: null, raw: summary };
-  }
-}
-
-
-
 import { getTask } from "@/lib/engine/store";
 import { reconcileLedger } from "@/lib/engine/ledger";
 import { EvidenceList, StatusChip } from "@/components/taskParts";
@@ -167,47 +131,20 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
         {/* Execution outcome */}
         <section className="rounded-lg border border-edge bg-panel p-5">
           <p className="x-label">EXECUTION OUTCOME</p>
-          {task.result ? (() => {
-            const parsed = parseOutcome(task.result.summary);
-            return (
-              <div className="mt-3">
-                {parsed.brief && <p className="text-[14px] leading-relaxed text-ink">{parsed.brief}</p>}
-                {parsed.papers && (
-                  <div className="mt-3">
-                    {parsed.total != null && (
-                      <p className="mb-2 text-[11.5px] text-ink-faint">
-                        {parsed.total.toLocaleString()} matches · showing {Math.min(parsed.papers.length, 12)} of {parsed.papers.length}
-                      </p>
-                    )}
-                    <ul className="space-y-2">
-                      {parsed.papers.slice(0, 12).map((p, i) => (
-                        <PaperRow key={i} paper={p} />
-                      ))}
-                    </ul>
-                    {parsed.papers.length > 12 && (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-[11.5px] text-ink-faint hover:text-ink-soft">
-                          Show the other {parsed.papers.length - 12}
-                        </summary>
-                        <ul className="mt-2 space-y-2">
-                          {parsed.papers.slice(12).map((p, i) => (
-                            <PaperRow key={i} paper={p} />
-                          ))}
-                        </ul>
-                      </details>
-                    )}
-                  </div>
-                )}
-                {!parsed.brief && !parsed.papers && (
-                  <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink">{parsed.raw}</p>
-                )}
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-[11.5px] text-ink-faint">Technical details</summary>
-                  <pre className="mt-2 max-h-60 overflow-auto rounded-lg border border-edge bg-panel-2 p-2 font-mono text-[11px] leading-relaxed text-ink-soft">{parsed.raw}</pre>
-                </details>
-              </div>
-            );
-          })() : task.error ? (
+          {task.result ? (
+            <div className="mt-3">
+              <ResultView result={resultFromSummary(task.result.summary)} />
+              <details className="mt-4 rounded-lg border border-edge bg-panel-2">
+                <summary className="cursor-pointer px-3.5 py-2.5 text-[11.5px] text-ink-faint transition-colors hover:text-ink-soft">
+                  Technical details
+                  <span className="ml-2 text-ink-faint">
+                    raw payload · {task.result.summary.length.toLocaleString()} characters
+                  </span>
+                </summary>
+                <pre className="max-h-80 overflow-auto border-t border-edge px-3.5 py-3 font-mono text-[11px] leading-relaxed text-ink-soft">{task.result.summary}</pre>
+              </details>
+            </div>
+          ) : task.error ? (
             <p className="mt-3 whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink">{task.error}</p>
           ) : task.state === "awaiting_approval" ? (
             <p className="mt-3 text-[13.5px] text-ink-soft">Waiting for explicit approval of the plan; nothing has been paid.</p>
@@ -340,24 +277,6 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
         </Link>
       </div>
     </div>
-  );
-}
-
-function PaperRow({ paper }: { paper: { title: string; doi?: string } }) {
-  return (
-    <li className="rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-      <p className="text-[13px] leading-snug text-ink">{paper.title}</p>
-      {paper.doi && (
-        <a
-          href={`https://doi.org/${paper.doi}`}
-          target="_blank"
-          rel="noreferrer"
-          className="tabular mt-1 block text-[11.5px] text-teal underline decoration-teal/30 underline-offset-2"
-        >
-          Open on DOI · {paper.doi}
-        </a>
-      )}
-    </li>
   );
 }
 
