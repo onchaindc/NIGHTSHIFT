@@ -296,7 +296,7 @@ export default function DevelopersPage() {
             <P>
               Two facts from the{" "}
               <Doc href="https://docs.telegraphprotocol.com/docs/using/engine-ask">official docs</Doc>{" "}
-              worth keeping on a sticky note: miner IDs care not stable over time — always read them from discovery,
+              worth keeping on a sticky note: miner IDs are not stable over time — always read them from discovery,
               never hardcode them; and the 402 challenge header is authoritative — the body only carries a bare price
               summary that cannot be signed.
             </P>

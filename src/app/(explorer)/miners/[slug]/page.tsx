@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { fetchMiners, type NetworkMiner } from "@/lib/explorer/network";
 
@@ -66,12 +66,21 @@ export default async function MinerDetailPage({ params }: { params: Promise<{ sl
             <h1 className="x-display-1 mt-3 text-ink">{miner.name}</h1>
             <p className="tabular mt-2 text-[12px] text-ink-faint">{miner.slug}</p>
           </div>
-          {price && (
-            <div className="rounded-lg border border-edge bg-panel px-5 py-3 text-right">
-              <p className="x-label">Min price</p>
-              <p className="tabular mt-1 text-[17px] font-semibold text-teal">{price}</p>
-            </div>
-          )}
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            {price && (
+              <div className="rounded-lg border border-edge bg-panel px-5 py-3 text-right">
+                <p className="x-label">Min price</p>
+                <p className="tabular mt-1 text-[17px] font-semibold text-teal">{price}</p>
+              </div>
+            )}
+            <Link
+              href={`/terminal?miner=${encodeURIComponent(miner.slug ?? miner.id)}`}
+              className="btn-primary !min-h-9 !px-4"
+            >
+              Ask this miner
+              <ArrowRight size={13} aria-hidden />
+            </Link>
+          </div>
         </div>
         {miner.description && (
           <div className="mt-6 max-w-[72ch] text-[13.5px] leading-relaxed text-ink-soft">
@@ -195,15 +204,21 @@ export default async function MinerDetailPage({ params }: { params: Promise<{ sl
       )}
 
       {/* Terminal hook */}
-      <section className="mt-12 rounded-lg border border-amber/40 bg-amber-soft/40 p-6">
-        <p className="x-tag">OPEN IN THE INTERACTIVE TERMINAL</p>
-        <p className="mt-3 max-w-[68ch] text-[13.5px] leading-relaxed text-ink-soft">
-          Ask this miner in the terminal: it pins the request to {miner.name}, shows the x402 price before anything
-          is signed, and returns the answer with its receipt. Open it prefilled:{" "}
-          <Link href={`/terminal?miner=${encodeURIComponent(miner.slug ?? miner.id)}`} className="text-amber underline decoration-amber/40 underline-offset-4 hover:text-amber-soft">
-            /terminal?miner={miner.slug ?? miner.id}
-          </Link>
-        </p>
+      <section className="mt-12 flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-amber/40 bg-amber-soft/40 p-6">
+        <div className="min-w-0 max-w-[68ch]">
+          <p className="x-tag">OPEN IN THE INTERACTIVE TERMINAL</p>
+          <p className="mt-3 text-[13.5px] leading-relaxed text-ink-soft">
+            Ask this miner directly: the Terminal pins the request to {miner.name}, shows the x402 price before anything
+            is signed, and returns the answer with its receipt.
+          </p>
+        </div>
+        <Link
+          href={`/terminal?miner=${encodeURIComponent(miner.slug ?? miner.id)}`}
+          className="btn-primary !min-h-10 !px-4"
+        >
+          Open Terminal
+          <ArrowRight size={13} aria-hidden />
+        </Link>
       </section>
     </article>
   );

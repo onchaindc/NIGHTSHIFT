@@ -112,12 +112,14 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
   const spentReal = real.reduce((acc, t) => acc + t.spend.spentUsdCents, 0);
   const receiptCount = real.reduce((acc, t) => acc + (t.spend.entries?.length ?? 0), 0);
   const outcomeText =
-    [
-      `${real.filter((t) => t.state === "completed").length} completed`,
-      `${real.filter((t) => stateFor(t) === "failed").length} failed/blocked`,
-      `${real.filter((t) => stateFor(t) === "running").length} in progress`,
-      `${real.filter((t) => stateFor(t) === "awaiting").length} awaiting approval`,
-    ].join(" · ") || "nothing recorded yet";
+    real.length === 0
+      ? "nothing recorded yet"
+      : [
+          `${real.filter((t) => t.state === "completed").length} completed`,
+          `${real.filter((t) => stateFor(t) === "failed").length} failed/blocked`,
+          `${real.filter((t) => stateFor(t) === "running").length} in progress`,
+          `${real.filter((t) => stateFor(t) === "awaiting").length} awaiting approval`,
+        ].join(" · ");
 
   const now = Date.now();
   const q = query.trim().toLowerCase();
@@ -134,6 +136,7 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
 
   const looking = q !== "" || status !== "all" || date !== "all";
 
+  const authPending = !ready;
   const notLoggedIn = ready && !authenticated;
   const noWallet = ready && authenticated && myAddresses.size === 0;
 
@@ -157,6 +160,12 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
         </p>
       ) : null}
 
+      {authPending && (
+        <p aria-live="polite" className="mt-8 text-[13px] text-ink-faint">
+          Connecting to your wallet…
+        </p>
+      )}
+
       {notLoggedIn && (
         <div className="mt-8 rounded-lg border border-dashed border-edge bg-panel/40 px-6 py-10 text-center">
           <p className="mx-auto max-w-md text-[13.5px] leading-relaxed text-ink-soft">
@@ -179,7 +188,7 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
         </div>
       )}
 
-      {!notLoggedIn && !noWallet && (
+      {ready && !notLoggedIn && !noWallet && (
         <>
           <section className="mt-8 flex flex-wrap gap-x-10 gap-y-4 border-y border-edge py-5" aria-label="Activity overview">
             <Stat label="YOUR REQUESTS" value={real.length.toLocaleString()} />
@@ -210,9 +219,22 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <FilterGroup label="Status" value={status} options={STATUS_FILTERS.map((s) => ({ id: s.id, label: s.label, count: countFor(s.id) }))} onChange={(v) => setStatus(v as StatusFilter)} />
               <FilterGroup label="Window" value={date} options={DATE_FILTERS.map((d) => ({ id: d.id, label: d.label, count: 0 }))} onChange={(v) => setDate(v as DateFilter)} />
+              {looking && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus("all");
+                    setDate("all");
+                    setQuery("");
+                  }}
+                  className="text-[11.5px] text-amber underline decoration-amber/40 underline-offset-4 transition-colors hover:text-amber-soft"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           </div>
 
