@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { telegraphNodeUrl, decodeChallenge, extractReceipt } from "@/lib/telegraph/client";
 import { recordTerminalOutcome } from "@/lib/terminal/store";
 import { payerFromSettlement } from "@/lib/terminal/activity";
+import { normalizeAskPath } from "@/lib/terminal/paths";
 import type { AskRequestSpec, ExecuteOutcome } from "@/lib/terminal/ask";
 
 /** POST /api/terminal/complete — send a signed payment, record activity, return the answer. */
@@ -50,8 +51,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const urlPath = input.urlPath ?? "/engine/v1/ask";
-  if (!urlPath.startsWith("/engine/v1/ask")) {
+  const urlPath = normalizeAskPath(input.urlPath ?? "/engine/v1/ask");
+  if (!urlPath) {
     return NextResponse.json({ error: "only /engine/v1/ask paths are allowed" }, { status: 400 });
   }
   if (!input.paymentSignature) {
@@ -105,7 +106,7 @@ export async function POST(req: Request) {
 
   // The signed proof is authoritative; the client's value is only a fallback
   // for responses that arrive without one.
-  const payer = claimedPayer ?? payerFromSettlement(paymentResponse) ?? undefined;
+  const payer = payerFromSettlement(paymentResponse) ?? claimedPayer ?? undefined;
 
   if (res.status === 200 && signalHash) {
     if (receipt) {

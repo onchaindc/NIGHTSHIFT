@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { fetchIntents, fetchMiners } from "@/lib/explorer/network";
 import { ParticipantCard } from "@/components/explorer/participant-card";
@@ -102,15 +102,21 @@ export default async function IntentDetailPage({ params }: { params: Promise<{ i
       </section>
 
       {/* Terminal hook */}
-      <section className="mt-12 rounded-lg border border-amber/40 bg-amber-soft/40 p-6">
-        <p className="x-tag">OPEN IN THE INTERACTIVE TERMINAL</p>
-        <p className="mt-3 max-w-[68ch] text-[13.5px] leading-relaxed text-ink-soft">
-          The terminal accepts a question of this kind: choose a supporting miner, review the x402 price, approve it,
-          and get the answer with its receipt. Open it prefilled:{" "}
-          <Link href={`/terminal?intent=${encodeURIComponent(name)}`} className="text-amber underline decoration-amber/40 underline-offset-4 hover:text-amber-soft">
-            /terminal?intent={name}
-          </Link>
-        </p>
+      <section className="mt-12 flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-amber/40 bg-amber-soft/40 p-6">
+        <div className="min-w-0 max-w-[68ch]">
+          <p className="x-tag">OPEN IN THE INTERACTIVE TERMINAL</p>
+          <p className="mt-3 text-[13.5px] leading-relaxed text-ink-soft">
+            Ask a question of this kind: choose a supporting miner, review the x402 price, approve it, and get the
+            answer with its receipt.
+          </p>
+        </div>
+        <Link
+          href={`/terminal?intent=${encodeURIComponent(name)}`}
+          className="btn-primary !min-h-10 !px-4"
+        >
+          Ask this kind of question
+          <ArrowRight size={13} aria-hidden />
+        </Link>
       </section>
     </article>
   );

@@ -22,6 +22,12 @@ function timeValue(value?: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function resultRange(shown: number, total: number, start: number): string {
+  if (total === 0) return "NO MINERS";
+  if (shown === 0) return `0 OF ${total.toLocaleString()}`;
+  return `SHOWING ${start + 1}–${Math.min(start + shown, total)} OF ${total.toLocaleString()}`;
+}
+
 function match(miner: NetworkMiner, q: string): boolean {
   const needle = q.toLowerCase();
   if (!needle) return true;
@@ -95,33 +101,39 @@ export default async function MinersPage({
   });
 
   const total = pool.length;
-  const pageN = Math.max(1, parseInt(page, 10) || 1);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageN = Math.min(totalPages, Math.max(1, parseInt(page, 10) || 1));
   const startIdx = (pageN - 1) * PAGE_SIZE;
   const slice = pool.slice(startIdx, startIdx + PAGE_SIZE);
 
   const topIntents = [...intents.payload].sort((a, b) => b.miner_count - a.miner_count).slice(0, 12);
   const friendly = (s: string) => s.toLowerCase().replaceAll("_general", "").replaceAll(/_/g, " ");
 
-  const sortHref = (next: MinerSort) => ({
-    pathname: "/miners",
-    query: Object.fromEntries(
-      Object.entries({ q: qTrim, intent: intentSlug, sort: next === "served" ? undefined : next }).filter(
-        ([, v]) => v !== undefined && v !== "",
-      ),
-    ) as Record<string, string>,
-  });
+  function minersHref(params: {
+    nextQ?: string;
+    nextIntent?: string;
+    nextSort?: MinerSort;
+    page?: number;
+    hash?: string;
+  }): string {
+    const query = new URLSearchParams();
+    if (params.nextQ) query.set("q", params.nextQ);
+    if (params.nextIntent) query.set("intent", params.nextIntent);
+    if (params.nextSort && params.nextSort !== "served") query.set("sort", params.nextSort);
+    if (params.page && params.page > 1) query.set("page", String(params.page));
+    const qs = query.toString();
+    return `/miners${qs ? `?${qs}` : ""}${params.hash ?? ""}`;
+  }
 
-  const pageHref = (n: number) => ({
-    pathname: "/miners",
-    query: Object.fromEntries(
-      Object.entries({
-        q: qTrim,
-        intent: intentSlug,
-        sort: sortKey === "served" ? undefined : sortKey,
-        page: n > 1 ? String(n) : undefined,
-      }).filter(([, v]) => v !== undefined && v !== ""),
-    ) as Record<string, string>,
-  });
+  // A real navigation, not a client-side mutation: the catalog is server-sorted,
+  // and the result anchor makes the change land where the user can see it.
+  const sortHref = (next: MinerSort) =>
+    minersHref({ nextQ: qTrim, nextIntent: intentSlug, nextSort: next, hash: "#miner-results" });
+
+  const pageHref = (n: number) =>
+    minersHref({ nextQ: qTrim, nextIntent: intentSlug, nextSort: sortKey, page: n, hash: "#miner-results" });
+
+  const activeSort = SORTS.find((option) => option.key === sortKey)?.label ?? "Most served";
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
@@ -146,9 +158,10 @@ export default async function MinersPage({
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <span className="x-label mr-1">Order</span>
             {SORTS.map((option) => (
-              <Link
+              <a
                 key={option.key}
                 href={sortHref(option.key)}
+                aria-current={sortKey === option.key ? "page" : undefined}
                 className={`rounded-full border px-3 py-1.5 text-[11.5px] font-medium transition-colors ${
                   sortKey === option.key
                     ? "border-teal bg-teal/5 text-teal"
@@ -156,7 +169,7 @@ export default async function MinersPage({
                 }`}
               >
                 {option.label}
-              </Link>
+              </a>
             ))}
             <p className="mt-1 w-full text-[11px] leading-relaxed text-ink-faint">
               Newest is registration time; Recently scored is the network&apos;s last evaluator update. For the latest
@@ -196,13 +209,12 @@ export default async function MinersPage({
             {topIntents.map((i) => (
               <Link
                 key={i.intent_name ?? i.intent_id}
-                href={{
-                  pathname: "/miners",
-                  query: {
-                    intent: i.intent_name ?? i.intent_id,
-                    ...(sortKey !== "served" ? { sort: sortKey } : {}),
-                  },
-                }}
+                href={minersHref({
+                  nextQ: qTrim,
+                  nextIntent: i.intent_name ?? i.intent_id,
+                  nextSort: sortKey,
+                  hash: "#miner-results",
+                })}
                 className="shrink-0 snap-start rounded-full border border-edge bg-panel px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-teal hover:text-teal"
               >
                 {friendly(i.intent_name ?? i.intent_id)}
@@ -217,7 +229,10 @@ export default async function MinersPage({
           <span className="rounded-full border border-teal bg-teal/5 px-3 py-1.5 text-[12px] font-medium text-teal">
             Intent: {intentSlug}
           </span>
-          <Link href="/miners" className="text-[12px] text-amber underline decoration-amber/40 underline-offset-4 hover:text-amber-soft">
+          <Link
+            href={minersHref({ nextQ: qTrim, nextSort: sortKey, hash: "#miner-results" })}
+            className="text-[12px] text-amber underline decoration-amber/40 underline-offset-4 hover:text-amber-soft"
+          >
             Clear intent filter
           </Link>
         </div>
@@ -232,48 +247,62 @@ export default async function MinersPage({
       )}
 
       {/* Results */}
-      {slice.length === 0 ? (
-        <div className="mt-12 rounded-lg border border-edge bg-panel p-8">
-          <p className="x-tag">NO MATCHES</p>
-          <p className="mt-3 text-[14px] text-ink-soft">
-            No miner in the registry matches this search. Try a broader query or clear the filters.
+      <div id="miner-results" className="mt-8 scroll-mt-24">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-y border-edge py-2.5">
+          <p className="x-label">
+            {resultRange(slice.length, total, startIdx)} · {activeSort.toUpperCase()}
+          </p>
+          <p className="text-[11px] text-ink-faint">
+            {sortKey === "served"
+              ? "Ranked by reported requests served"
+              : sortKey === "new"
+                ? "Registration time, newest first"
+                : "Most recent evaluator score first"}
           </p>
         </div>
-      ) : (
-        <ul className="mt-8 grid gap-4 lg:grid-cols-2">
-          {slice.map((m) => (
-            /* min-w-0: a truncating title inside a grid item keeps min-width:auto
-               otherwise, and one long miner name widens the whole column past
-               the viewport (the mobile overflow). */
-            <li key={m.slug ?? m.id} className="rise-in-item min-w-0">
-              <ParticipantCard participant={m} showDates={sortKey !== "served"} />
-            </li>
-          ))}
-        </ul>
-      )}
 
-      {/* Pagination */}
-      {total > PAGE_SIZE && (
-        <nav aria-label="Pagination" className="mt-10 flex items-center justify-between border-t border-edge pt-6">
-          {startIdx > 0 ? (
-            <Link href={pageHref(pageN - 1)} className="btn-quiet !min-h-9">
-              Previous
-            </Link>
-          ) : (
-            <span />
-          )}
-          <p className="x-label">
-            PAGE {pageN} · SHOWING {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, total)} OF {total.toLocaleString()}
-          </p>
-          {startIdx + PAGE_SIZE < total ? (
-            <Link href={pageHref(pageN + 1)} className="btn-quiet !min-h-9">
-              Next
-            </Link>
-          ) : (
-            <span />
-          )}
-        </nav>
-      )}
+        {slice.length === 0 ? (
+          <div className="mt-6 rounded-lg border border-edge bg-panel p-8">
+            <p className="x-tag">NO MATCHES</p>
+            <p className="mt-3 text-[14px] text-ink-soft">
+              No miner in the registry matches this search. Try a broader query or clear the filters.
+            </p>
+          </div>
+        ) : (
+          <ul className="mt-4 grid gap-4 lg:grid-cols-2">
+            {slice.map((m) => (
+              /* min-w-0: a truncating title inside a grid item keeps min-width:auto
+                 otherwise, and one long miner name widens the whole column past
+                 the viewport (the mobile overflow). */
+              <li key={m.slug ?? m.id} className="rise-in-item min-w-0">
+                <ParticipantCard participant={m} showDates={sortKey !== "served"} />
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {total > PAGE_SIZE && (
+          <nav aria-label="Pagination" className="mt-10 flex items-center justify-between border-t border-edge pt-6">
+            {startIdx > 0 ? (
+              <a href={pageHref(pageN - 1)} className="btn-quiet !min-h-9">
+                Previous
+              </a>
+            ) : (
+              <span />
+            )}
+            <p className="x-label">
+              PAGE {pageN} · SHOWING {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, total)} OF {total.toLocaleString()}
+            </p>
+            {startIdx + PAGE_SIZE < total ? (
+              <a href={pageHref(pageN + 1)} className="btn-quiet !min-h-9">
+                Next
+              </a>
+            ) : (
+              <span />
+            )}
+          </nav>
+        )}
+      </div>
     </div>
   );
 }

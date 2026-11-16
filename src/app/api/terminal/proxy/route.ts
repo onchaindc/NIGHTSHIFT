@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { telegraphNodeUrl } from "@/lib/telegraph/client";
+import { normalizeAskPath } from "@/lib/terminal/paths";
 
 /**
  * POST /api/terminal/proxy
@@ -22,8 +23,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const urlPath = body.urlPath ?? "/engine/v1/ask";
-  if (!urlPath.startsWith("/engine/v1/ask")) {
+  const urlPath = normalizeAskPath(body.urlPath ?? "/engine/v1/ask");
+  if (!urlPath) {
     return NextResponse.json({ error: "only /engine/v1/ask paths are allowed" }, { status: 400 });
   }
 
