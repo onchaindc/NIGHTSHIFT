@@ -56,9 +56,15 @@ export function activityTitle(task: TaskRecord): string {
   const query =
     typeof params?.query === "string"
       ? params.query
-      : typeof request?.query === "string"
-        ? request.query
-        : "";
+      : typeof params?.claim === "string"
+        ? params.claim
+        : typeof params?.question === "string"
+          ? params.question
+          : typeof params?.topic === "string"
+            ? params.topic
+            : typeof request?.query === "string"
+              ? request.query
+              : "";
 
   if (goal && !/^Terminal ask \(/i.test(goal)) return goal;
   if (query.trim()) return query.trim();
