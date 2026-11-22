@@ -10,10 +10,9 @@
  *      x402Version, accepts[].{scheme, network, asset, amount (6-decimal USDC
  *      units), payTo, maxTimeoutSeconds, extra {name, version}}. The response
  *      BODY is only a human summary (a bare price, no asset or amount) and must
- *      never be the basis of a payment. The live challenge is currently
- *      eip155:84532 (Base Sepolia) with Circle USDC; the accepted network and
- *      asset are always read from the challenge, never assumed. Neither is
- *      necessarily one of the x402 library's built-in default assets.
+ *      never be the basis of a payment. Network eip155:11155111 (Ethereum
+ *      Sepolia); the asset is the Telegraph test token, which is NOT one of
+ *      the x402 library's built-in default assets.
  *   3. Pay & retry: sign the challenge with the x402 client library
  *      (@x402/fetch + @x402/evm, EIP-712 exact scheme) and retry the identical
  *      request with PAYMENT-SIGNATURE. The node verifies via its facilitator
@@ -39,7 +38,6 @@ import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { ExactEvmScheme } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
 import type { TelegraphAnswer, TelegraphReceipt } from "@/lib/engine/types";
-import { rpcForChainId } from "@/lib/chain/rpc";
 
 export const DEFAULT_NODE_URL = "https://devnode.telegraphprotocol.com";
 
@@ -298,13 +296,12 @@ export async function diagnosePaymentRejection(payer: string, challenge: Telegra
 }
 
 async function tokenBalanceViaPublicRpc(payer: string, asset: string, network: string): Promise<string | null> {
-  // The live challenge is Base Sepolia now; Ethereum Sepolia remains supported
-  // for older receipts/tests. Unknown chains must not be guessed.
-  const rpcUrl = rpcForChainId(network) ||
-    (network === "eip155:11155111" ? process.env.TELEGRAPH_PUBLIC_RPC_URL : undefined);
-  if (!rpcUrl) return null;
+  if (network !== "eip155:11155111") {
+    return null; // public RPC snippet below is Sepolia-configured by the docs
+  }
   // balanceOf(address) — public reads only; no key material is read or logged.
   const data = `0x70a08231${payer.replace(/^0x/i, "").toLowerCase().padStart(64, "0")}`;
+  const rpcUrl = process.env.TELEGRAPH_PUBLIC_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
   const res = await fetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -362,7 +359,7 @@ export async function askAuto(opts: AskOptions): Promise<TelegraphAnswer> {
   // Step 2: paid attempt — the SDK handles the 402 challenge/signature/retry.
   if (!paidCredentialsConfigured()) {
     throw new TelegraphBlockedError(
-      "Telegraph paid inference is not configured: the task would require an X402 payment. Set TELEGRAPH_EVM_PRIVATE_KEY to a wallet on the challenge's chain (the live challenge is Base Sepolia, eip155:84532) holding the network's test token, to enable real purchases.",
+      "Telegraph paid inference is not configured: the task would require an X402 payment. Set TELEGRAPH_EVM_PRIVATE_KEY to a wallet on the challenge's chain (Ethereum Sepolia, eip155:11155111 on the current network) holding the network's test token, to enable real purchases.",
       missingPaidCredentials(),
     );
   }
