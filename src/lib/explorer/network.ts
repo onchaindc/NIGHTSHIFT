@@ -118,13 +118,45 @@ async function getJson<T>(url: string, opts: { next: { revalidate: number } }): 
 }
 
 export async function fetchMiners(): Promise<Outcome<NetworkMiner[]>> {
-  const out = await getJson<NetworkMiner[]>(`${NODE()}/api/miners`, LONG_TTL);
-  if (out.status === "ok") {
-    if (!Array.isArray(out.payload)) return { status: "unavailable", detail: "miner catalog returned a non-array body" };
-    const miners = out.payload.filter((m) => m && m.kind === "miner");
-    return { status: "ok", payload: miners };
+  // The catalog is large and changes independently of the intent registry. It
+  // must never come from Next's data cache: an empty response cached during a
+  // node deploy used to render as a real "0 miners" catalog for 15 minutes.
+  // Retry once with an explicit no-store read before declaring it unavailable.
+  let detail = "the miner catalog could not be read";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${NODE()}/api/miners`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        detail = `node answered HTTP ${res.status} for /api/miners`;
+        continue;
+      }
+      const payload = (await res.json()) as unknown;
+      if (!Array.isArray(payload)) {
+        detail = "miner catalog returned a non-array body";
+        continue;
+      }
+      // /api/miners is the miner registry. Keep a compatibility path for a
+      // record without `kind`; filtering strictly to kind==="miner" turned a
+      // shape change into a silent empty catalog.
+      const miners = payload.filter((m): m is NetworkMiner => {
+        if (!m || typeof m !== "object") return false;
+        const miner = m as NetworkMiner;
+        return miner.kind === "miner" || !("kind" in miner);
+      });
+      if (miners.length === 0) {
+        detail = "the node returned an empty miner catalog";
+        continue;
+      }
+      return { status: "ok", payload: miners };
+    } catch (err) {
+      detail = err instanceof Error ? err.message.slice(0, 160) : String(err).slice(0, 160);
+    }
   }
-  return out;
+  return { status: "unavailable", detail };
 }
 
 export async function fetchValidators(): Promise<Outcome<NetworkValidator[]>> {

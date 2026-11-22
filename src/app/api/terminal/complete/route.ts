@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { telegraphNodeUrl, decodeChallenge, extractReceipt } from "@/lib/telegraph/client";
+import { telegraphNodeUrl, decodeChallenge, extractReceipt, diagnosePaymentRejection } from "@/lib/telegraph/client";
 import { recordTerminalOutcome } from "@/lib/terminal/store";
 import { payerFromSettlement } from "@/lib/terminal/activity";
 import { normalizeAskPath } from "@/lib/terminal/paths";
@@ -159,10 +159,18 @@ export async function POST(req: Request) {
     parsed && typeof parsed === "object" && typeof (parsed as { error?: unknown }).error === "string"
       ? (parsed as { error: string }).error
       : null;
-  const detail =
+  // A bare 402 is indistinguishable from "no payment sent". Read the payer's
+  // public balance on the challenge's own chain and name the actual gap.
+  const freshChallenge = res.status === 402 ? decodeChallenge(res.headers.get("payment-required")) : null;
+  const fundingNote =
+    res.status === 402 && claimedPayer
+      ? await diagnosePaymentRejection(claimedPayer, freshChallenge)
+      : null;
+  const baseDetail =
     res.status === 402
       ? nodeError ?? "The signed payment did not verify. Nothing was re-sent or charged."
       : `The node answered HTTP ${res.status}${nodeError ? `: ${nodeError}` : ""}.`;
+  const detail = fundingNote ? `${baseDetail} ${fundingNote}` : baseDetail;
 
   const outcome: ExecuteOutcome =
     res.status === 402
@@ -176,7 +184,7 @@ export async function POST(req: Request) {
     paymentResponse,
     receipt: res.headers.get("x-telegraph-receipt"),
     ...(res.status === 402
-      ? { challenge: decodeChallenge(res.headers.get("payment-required")), error: detail }
+      ? { challenge: freshChallenge, error: detail }
       : { error: detail }),
     activity: activityRef(activity),
   });
