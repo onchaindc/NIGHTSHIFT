@@ -2,19 +2,24 @@
 
 import { usePrivy, useWallets, useConnectWallet, useCreateWallet, useSendTransaction } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
-import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins, RefreshCw } from "lucide-react";
+import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins, RefreshCw, ExternalLink } from "lucide-react";
 
-const SEPOLIA_RPCS = [
+// The live Telegraph x402 challenge is Base Sepolia (eip155:84532). Keep the
+// Ethereum Sepolia reads only for the legacy test balances this app used to
+// show; those tokens cannot pay a Base Sepolia challenge.
+const BASE_SEPOLIA_RPCS = ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"];
+const ETHEREUM_SEPOLIA_RPCS = [
   "https://ethereum-sepolia-rpc.publicnode.com",
   "https://rpc.sepolia.org",
   "https://eth-sepolia.api.onfinality.io/public",
 ];
-const SEPOLIA_CHAIN_ID = 11155111;
-const CIRCLE_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
-const TELEGRAPH_USDC = "0xcc194e1a843B658526D0D5C431f670028582Ae17";
+const BASE_SEPOLIA_CHAIN_ID = 84532;
+const BASE_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const LEGACY_CIRCLE_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
+const LEGACY_TELEGRAPH_USDC = "0xcc194e1a843B658526D0D5C431f670028582Ae17";
 
-async function rpc(method: string, params: unknown[]): Promise<string | null> {
-  for (const url of SEPOLIA_RPCS) {
+async function rpc(method: string, params: unknown[], urls: string[] = BASE_SEPOLIA_RPCS): Promise<string | null> {
+  for (const url of urls) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -31,8 +36,8 @@ async function rpc(method: string, params: unknown[]): Promise<string | null> {
   return null;
 }
 
-async function fetchEthBalance(address: string): Promise<string | null> {
-  const result = await rpc("eth_getBalance", [address, "latest"]);
+async function fetchEthBalance(address: string, urls: string[] = BASE_SEPOLIA_RPCS): Promise<string | null> {
+  const result = await rpc("eth_getBalance", [address, "latest"], urls);
   // null means "could not read", not "zero": showing 0 for a failed read is
   // what made a funded wallet look empty.
   if (!result) return null;
@@ -40,9 +45,9 @@ async function fetchEthBalance(address: string): Promise<string | null> {
   return eth.toFixed(6).replace(/\.?0+$/, "") || "0";
 }
 
-async function fetchTokenBalance(address: string, token: string): Promise<string | null> {
+async function fetchTokenBalance(address: string, token: string, urls: string[] = BASE_SEPOLIA_RPCS): Promise<string | null> {
   const data = `0x70a08231${address.replace(/^0x/i, "").toLowerCase().padStart(64, "0")}`;
-  const result = await rpc("eth_call", [{ to: token, data }, "latest"]);
+  const result = await rpc("eth_call", [{ to: token, data }, "latest"], urls);
   if (!result) return null;
   if (result === "0x") return "0";
   const raw = BigInt(result);
@@ -59,22 +64,18 @@ function WalletCard({
   address,
   ethBalance,
   circleUsdc,
-  telegraphUsdc,
+  faucetHref,
   onDeposit,
   onWithdraw,
-  onMint,
-  minting,
   onRefresh,
 }: {
   label: string;
   address: string;
   ethBalance: string | null;
   circleUsdc: string | null;
-  telegraphUsdc: string | null;
+  faucetHref?: string;
   onDeposit?: () => void;
   onWithdraw?: () => void;
-  onMint?: () => void;
-  minting?: boolean;
   onRefresh?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -118,12 +119,6 @@ function WalletCard({
           <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">USDC (Circle)</p>
         </div>
         <div>
-          <p className="text-[18px] font-medium tabular leading-none text-ink">
-            {telegraphUsdc === null ? "…" : telegraphUsdc}
-          </p>
-          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">Telegraph USDC</p>
-        </div>
-        <div>
           <p className="text-[18px] font-medium tabular leading-none text-ink-soft">
             {ethBalance === null ? "…" : ethBalance}
           </p>
@@ -131,8 +126,7 @@ function WalletCard({
         </div>
       </div>
       <p className="mt-2 text-[11px] text-ink-faint">
-        Sepolia · asks are paid in Telegraph USDC
-        {onMint ? " · the test mint is free, no gas needed" : ""}
+        Base Sepolia · asks are paid in Circle USDC · x402 settlement needs no gas from this wallet
       </p>
 
       <div className="mt-5 flex flex-wrap gap-2">
@@ -144,16 +138,17 @@ function WalletCard({
           {copied ? <Check size={13} className="text-teal" /> : <Copy size={13} />}
           {copied ? "Copied" : "Copy address"}
         </button>
-        {onMint && (
-          <button
-            type="button"
-            onClick={onMint}
-            disabled={minting}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[12px] text-teal transition-colors hover:bg-teal/15 disabled:opacity-50"
+        {faucetHref && (
+          <a
+            href={faucetHref}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[12px] text-teal transition-colors hover:bg-teal/15"
           >
             <Coins size={13} />
-            {minting ? "Minting…" : "Mint 10 test USDC"}
-          </button>
+            Get Base Sepolia USDC
+            <ExternalLink size={11} aria-hidden />
+          </a>
         )}
         {onDeposit && (
           <button
@@ -176,6 +171,11 @@ function WalletCard({
           </button>
         )}
       </div>
+      {faucetHref && (
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+          In the Circle faucet, select Base Sepolia and paste this wallet address.
+        </p>
+      )}
     </div>
   );
 }
@@ -212,7 +212,7 @@ function WithdrawModal({
     setSending(true);
     try {
       const result = await sendTransaction(
-        { to: to as `0x${string}`, value: wei, chainId: SEPOLIA_CHAIN_ID },
+        { to: to as `0x${string}`, value: wei, chainId: BASE_SEPOLIA_CHAIN_ID },
         { address: fromAddress },
       );
       setHash(result.hash);
@@ -233,7 +233,7 @@ function WithdrawModal({
             <X size={15} />
           </button>
         </div>
-        <p className="mt-1 text-[12px] text-ink-faint">Send Sepolia ETH from your in-app wallet.</p>
+        <p className="mt-1 text-[12px] text-ink-faint">Send Base Sepolia ETH from your in-app wallet.</p>
 
         <label className="mt-4 block">
           <span className="text-[11px] uppercase tracking-wider text-ink-faint">To address</span>
@@ -275,7 +275,12 @@ function WithdrawModal({
   );
 }
 
-type Balances = { eth: string | null; circle: string | null; telegraph: string | null };
+type Balances = {
+  eth: string | null;
+  circle: string | null;
+  legacyCircle: string | null;
+  legacyTelegraph: string | null;
+};
 
 export default function FundsPage() {
   const { ready, authenticated, login, logout } = usePrivy();
@@ -284,9 +289,7 @@ export default function FundsPage() {
   const { createWallet } = useCreateWallet();
   const [creating, setCreating] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [minting, setMinting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [balances, setBalances] = useState<Record<string, Balances>>({});
   const [showDeposit, setShowDeposit] = useState<string | null>(null);
   const [showWithdraw, setShowWithdraw] = useState<string | null>(null);
@@ -294,15 +297,21 @@ export default function FundsPage() {
   const embedded = wallets.find((w) => w.walletClientType === "privy");
   const external = wallets.find((w) => w.walletClientType !== "privy");
 
+  const readBalances = async (addr: string): Promise<Balances> => {
+    const [eth, circle, legacyCircle, legacyTelegraph] = await Promise.all([
+      fetchEthBalance(addr, BASE_SEPOLIA_RPCS),
+      fetchTokenBalance(addr, BASE_USDC, BASE_SEPOLIA_RPCS),
+      fetchTokenBalance(addr, LEGACY_CIRCLE_USDC, ETHEREUM_SEPOLIA_RPCS),
+      fetchTokenBalance(addr, LEGACY_TELEGRAPH_USDC, ETHEREUM_SEPOLIA_RPCS),
+    ]);
+    return { eth, circle, legacyCircle, legacyTelegraph };
+  };
+
   const refreshBalances = async () => {
     const addrs = [embedded?.address, external?.address].filter(Boolean) as string[];
     for (const addr of addrs) {
-      const [eth, circle, telegraph] = await Promise.all([
-        fetchEthBalance(addr),
-        fetchTokenBalance(addr, CIRCLE_USDC),
-        fetchTokenBalance(addr, TELEGRAPH_USDC),
-      ]);
-      setBalances((prev) => ({ ...prev, [addr]: { eth, circle, telegraph } }));
+      const next = await readBalances(addr);
+      setBalances((prev) => ({ ...prev, [addr]: next }));
     }
   };
 
@@ -313,47 +322,14 @@ export default function FundsPage() {
     (async () => {
       for (const addr of addrs) {
         if (cancelled) return;
-        const [eth, circle, telegraph] = await Promise.all([
-          fetchEthBalance(addr),
-          fetchTokenBalance(addr, CIRCLE_USDC),
-          fetchTokenBalance(addr, TELEGRAPH_USDC),
-        ]);
-        if (!cancelled) setBalances((prev) => ({ ...prev, [addr]: { eth, circle, telegraph } }));
+        const next = await readBalances(addr);
+        if (!cancelled) setBalances((prev) => ({ ...prev, [addr]: next }));
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [embedded?.address, external?.address]);
-
-  const handleMint = async () => {
-    if (!embedded) return;
-    setError(null);
-    setNotice(null);
-    setMinting(true);
-    try {
-      // The faucet mints from the server key, so the new wallet needs no ETH.
-      const res = await fetch("/api/wallet/mint", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: embedded.address }),
-      });
-      const data = (await res.json()) as { error?: string };
-      if (res.status === 409) {
-        setNotice(data.error ?? "This wallet already holds test USDC.");
-        void refreshBalances();
-        return;
-      }
-      if (!res.ok) throw new Error(data.error ?? "Mint failed");
-      setNotice("10 test USDC minted — balances update in a moment.");
-      setTimeout(refreshBalances, 3000);
-      setTimeout(refreshBalances, 8000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Mint failed");
-    } finally {
-      setMinting(false);
-    }
-  };
 
   const handleCreateInApp = async () => {
     setError(null);
@@ -405,6 +381,15 @@ export default function FundsPage() {
 
   const hasWallet = !!(embedded || external);
   const hasEmbedded = !!embedded;
+  const legacy = embedded ? balances[embedded.address] : undefined;
+  const legacyNote = legacy
+    ? [
+        Number(legacy.legacyCircle) > 0 ? `${legacy.legacyCircle} Circle USDC` : null,
+        Number(legacy.legacyTelegraph) > 0 ? `${legacy.legacyTelegraph} Telegraph USDC` : null,
+      ]
+        .filter(Boolean)
+        .join(" and ")
+    : "";
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
@@ -434,11 +419,9 @@ export default function FundsPage() {
               address={embedded.address}
               ethBalance={balances[embedded.address]?.eth ?? null}
               circleUsdc={balances[embedded.address]?.circle ?? null}
-              telegraphUsdc={balances[embedded.address]?.telegraph ?? null}
+              faucetHref="https://faucet.circle.com/"
               onDeposit={() => setShowDeposit(embedded.address)}
               onWithdraw={() => setShowWithdraw(embedded.address)}
-              onMint={handleMint}
-              minting={minting}
               onRefresh={refreshBalances}
             />
           )}
@@ -448,11 +431,18 @@ export default function FundsPage() {
               address={external.address}
               ethBalance={balances[external.address]?.eth ?? null}
               circleUsdc={balances[external.address]?.circle ?? null}
-              telegraphUsdc={balances[external.address]?.telegraph ?? null}
               onRefresh={refreshBalances}
             />
           )}
         </div>
+      )}
+
+      {legacyNote && (
+        <p className="mt-3 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-[12px] leading-relaxed text-ink-soft">
+          <span className="font-medium text-amber-deep">Ethereum Sepolia legacy balance:</span>{" "}
+          {legacyNote}. Current asks settle on Base Sepolia and cannot spend those tokens. Use{" "}
+          <span className="font-medium text-ink">Get Base Sepolia USDC</span> above.
+        </p>
       )}
 
       <div className={`mt-8 grid gap-4 ${hasEmbedded ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
@@ -497,9 +487,6 @@ export default function FundsPage() {
       {error && (
         <p className="mt-4 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">{error}</p>
       )}
-      {notice && (
-        <p className="mt-4 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-[12.5px] text-teal">{notice}</p>
-      )}
 
       {showDeposit && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-night/60 p-4 backdrop-blur-sm" onClick={() => setShowDeposit(null)}>
@@ -511,7 +498,8 @@ export default function FundsPage() {
               </button>
             </div>
             <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-              Send Sepolia ETH (for gas). Asks are paid in Telegraph USDC.
+              Send Base Sepolia USDC (Circle) to this address. x402 settlement is gasless for the payer, so no ETH is
+              required to ask.
             </p>
             <p className="mt-3 break-all rounded-lg bg-panel-2 px-3 py-2 tabular text-[12px] text-ink">{showDeposit}</p>
             <button
