@@ -159,18 +159,15 @@ export async function POST(req: Request) {
     });
   }
 
-  const nodeError =
-    parsed && typeof parsed === "object"
-      ? typeof (parsed as { error?: unknown }).error === "string"
-        ? (parsed as { error: string }).error
-        : typeof (parsed as { reason?: unknown }).reason === "string"
-          ? (parsed as { reason: string }).reason
-          : null
-      : null;
+  const nodeBody = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  const nodeError = typeof nodeBody?.error === "string" ? nodeBody.error : null;
+  // "payment required" is only the generic headline; `reason` is the node's
+  // actual refusal (insufficient escrow, spent nonce, signer mismatch, …).
+  const nodeReason = typeof nodeBody?.reason === "string" && nodeBody.reason.trim() ? nodeBody.reason.trim() : null;
   const detail =
     res.status === 402
-      ? nodeError ?? "The signed payment did not verify. Nothing was re-sent or charged."
-      : `The node answered HTTP ${res.status}${nodeError ? `: ${nodeError}` : ""}.`;
+      ? nodeReason ?? nodeError ?? "The signed payment did not verify. Nothing was re-sent or charged."
+      : `The node answered HTTP ${res.status}${nodeReason ?? nodeError ? `: ${nodeReason ?? nodeError}` : ""}.`;
 
   const outcome: ExecuteOutcome =
     res.status === 402

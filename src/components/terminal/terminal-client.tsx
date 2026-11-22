@@ -123,24 +123,25 @@ function chainName(network: string): string {
 const ESCROW_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
 const ESCROW_DEPOSIT_UUSDC = 100_000n; // 0.10 test USDC: ten $0.01 asks
 const ESCROW_DEPOSIT_ABI = [
-  { type: "function", name: "effectiveBalance", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "depositUSDC", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
 ] as const;
 const ERC20_APPROVE_ABI = [
   { type: "function", name: "approve", stateMutability: "nonpayable", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }] },
 ] as const;
 
-async function rpcCall(to: string, data: string): Promise<string | null> {
+/**
+ * Spendable escrow, from the node's own ledger. The chain holds deposits, but
+ * only the node joins them with what was already billed, so `available` — not
+ * a raw on-chain view — decides whether the next ask can be paid.
+ */
+async function escrowAvailable(nodeUrl: string, address: string): Promise<bigint | null> {
   try {
-    const res = await fetch(ESCROW_RPC, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] }),
+    const res = await fetch(`${nodeUrl}/v1/ledger/account/${encodeURIComponent(address)}`, {
       signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) return null;
-    const body = (await res.json()) as { result?: string };
-    return body.result && body.result !== "0x" ? body.result : null;
+    const body = (await res.json()) as { available?: unknown };
+    return typeof body.available === "string" && /^\d+$/.test(body.available) ? BigInt(body.available) : null;
   } catch {
     return null;
   }
@@ -543,7 +544,9 @@ export default function TerminalClient({
       setStage("preview");
       return;
     }
-    setApprovalBox(false);
+    // Keep the approval after a failed attempt: the offer is unchanged and
+    // re-checked for drift before signing, so the person can retry directly.
+    setFailure(null);
     setExecuting(true);
     setStage("executing");
     pushLog("Approval recorded for this exact offer. Executing the paid request…", "info");
@@ -722,20 +725,21 @@ export default function TerminalClient({
     setFundingEscrow(true);
     setEscrowNotice(null);
     try {
-      const chainId = Number(challenge.payment.network.replace(/^eip155:/, ""));
-      if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error("The escrow offer has no usable EVM chain.");
       const required = BigInt(challenge.payment.amount);
-      const depositAmount = ESCROW_DEPOSIT_UUSDC > required ? ESCROW_DEPOSIT_UUSDC : required;
-      const balanceData = encodeFunctionData({
-        abi: ESCROW_DEPOSIT_ABI,
-        functionName: "effectiveBalance",
-        args: [signerWallet.address as `0x${string}`],
-      });
-      const current = await rpcCall(challenge.payment.payTo, balanceData);
-      if (current && BigInt(current) >= required) {
-        setEscrowNotice("Your escrow already covers this ask. You can pay now.");
+      // The node's ledger is what decides spendability: it joins the on-chain
+      // deposit with anything already billed. A deposit that the node cannot
+      // see is not "funded", and saying so is what stranded this flow before.
+      const current = await escrowAvailable(nodeUrl, signerWallet.address);
+      if (current !== null && current >= required) {
+        setEscrowNotice("Your escrow already covers this ask — paying it now.");
+        pushLog("Escrow already covers this ask. Signing the payment…", "info");
+        void runExecute();
         return;
       }
+
+      const chainId = Number(challenge.payment.network.replace(/^eip155:/, ""));
+      if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error("The escrow offer has no usable EVM chain.");
+      const depositAmount = ESCROW_DEPOSIT_UUSDC > required ? ESCROW_DEPOSIT_UUSDC : required;
 
       pushLog("Approving Telegraph USDC for the escrow contract…", "info");
       const approveData = encodeFunctionData({
@@ -760,8 +764,20 @@ export default function TerminalClient({
         { address: signerWallet.address },
       );
       await waitForTransaction(deposited.hash);
-      setEscrowNotice(`Escrow funded with ${Number(depositAmount) / 1_000_000} test USDC. You can pay now.`);
-      pushLog("Escrow funded. The ask can now be paid from your Ethereum Sepolia balance.", "good");
+
+      const after = await escrowAvailable(nodeUrl, signerWallet.address);
+      if (after !== null && after < required) {
+        setEscrowNotice(
+          `Deposit sent, but the node still reports ${Number(after) / 1_000_000} test USDC spendable — not enough for this ask.`,
+        );
+        pushLog("The deposit is mined, but the node's ledger does not cover this ask yet.", "warn");
+        return;
+      }
+      setEscrowNotice(`Escrow funded with ${Number(after ?? depositAmount) / 1_000_000} test USDC. Paying this ask now…`);
+      pushLog("Escrow funded. Signing the payment for this ask…", "good");
+      // Funding was the last consent step, and the offer being paid is the one
+      // already approved — runExecute re-checks it for drift before signing.
+      void runExecute();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setEscrowNotice(`Escrow funding failed: ${msg.slice(0, 240)}`);
@@ -769,7 +785,7 @@ export default function TerminalClient({
     } finally {
       setFundingEscrow(false);
     }
-  }, [challenge, signerWallet, sendTransaction, pushLog]);
+  }, [challenge, signerWallet, sendTransaction, pushLog, nodeUrl, runExecute]);
 
   /* ---- verify ------------------------------------------------------- */
 
@@ -824,6 +840,7 @@ export default function TerminalClient({
     return parts.join(" · ") || "Your question";
   }, [mode, paramValues, queryText, rawJson, selectedIntent]);
   const previewLoading = stage === "preview" && previewStatus === null;
+  const escrowTopUpUsdc = challenge ? Math.max(0.1, Number(challenge.payment.amount) / 1_000_000) : 0.1;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 pb-32 sm:px-6 sm:pb-10">
@@ -1249,7 +1266,7 @@ export default function TerminalClient({
       )}
 
       {/* ---------------- approval + execute ---------------- */}
-      {challenge && !failure && stage !== "executing" && (
+      {challenge && !answer && !executing && (
         <section ref={payRef} className="scroll-mt-24 mt-6 rounded-2xl border border-amber/50 bg-panel p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-[62ch]">
@@ -1289,7 +1306,7 @@ export default function TerminalClient({
                 disabled={fundingEscrow}
                 className="btn-quiet mt-2 !min-h-8 !px-3 !text-[11.5px]"
               >
-                {fundingEscrow ? "Funding escrow…" : "Fund escrow with 0.10 test USDC"}
+                {fundingEscrow ? "Funding escrow…" : `Fund escrow with ${escrowTopUpUsdc.toFixed(2)} test USDC`}
               </button>
               {escrowNotice && <p className="mt-1.5 text-[11px] leading-relaxed text-ink-soft">{escrowNotice}</p>}
             </div>
@@ -1366,12 +1383,29 @@ export default function TerminalClient({
                 disabled={fundingEscrow}
                 className="btn-quiet !min-h-8 !px-3 !text-[11.5px]"
               >
-                {fundingEscrow ? "Funding escrow…" : "Fund escrow with 0.10 test USDC"}
+                {fundingEscrow ? "Funding escrow…" : `Fund escrow with ${escrowTopUpUsdc.toFixed(2)} test USDC`}
               </button>
               {escrowNotice && <p className="mt-1.5 text-[11px] leading-relaxed text-ink-soft">{escrowNotice}</p>}
             </div>
           )}
-          <button onClick={() => resetToCompose(true)} className="btn-quiet mt-4">Start again</button>
+          {challenge && signerWallet && (
+            <>
+              <button
+                type="button"
+                onClick={() => void runExecute()}
+                className="btn-primary mt-3 !min-h-9 !px-4 !text-[12.5px]"
+              >
+                Try the payment again — ${(challenge.payment.amountUsdCents / 100).toFixed(2)}
+              </button>
+              <p className="mt-2 max-w-[68ch] text-[11.5px] leading-relaxed text-ink-faint">
+                The approved offer is unchanged. Retrying signs a fresh authorization for it, and the price and
+                recipient are checked again before anything is signed.
+              </p>
+            </>
+          )}
+          <div className="mt-4">
+            <button onClick={() => resetToCompose(true)} className="btn-quiet">Start again</button>
+          </div>
         </section>
       )}
 
