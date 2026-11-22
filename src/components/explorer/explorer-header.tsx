@@ -11,6 +11,7 @@ import { Wordmark } from "@/components/explorer/brand";
 /** The product's areas, in the order a newcomer needs them. */
 const AREAS = [
   { href: "/miners", label: "Explorer", activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
+  { href: "/counterparty", label: "Intel" },
   { href: "/signals", label: "Signals" },
   { href: "/activity", label: "Activity" },
   { href: "/funds", label: "Wallet" },
