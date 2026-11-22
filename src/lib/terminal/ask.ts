@@ -33,6 +33,7 @@ import { ExactEvmScheme } from "@x402/evm";
 import {
   decodeChallenge,
   diagnosePaymentRejection,
+  escrowEvmOffer,
   exactEvmOffer,
   extractReceipt,
   paidCredentialsConfigured,
@@ -40,6 +41,7 @@ import {
   telegraphNodeUrl,
   type TelegraphChallenge,
   type TelegraphChallengeAccept,
+  type TelegraphEscrowOffer,
 } from "@/lib/telegraph/client";
 import type { TelegraphReceipt } from "@/lib/engine/types";
 
@@ -50,6 +52,8 @@ export interface ApprovedOffer {
   asset: string;
   payTo: string;
   amount: string; // atomic 6-decimal USDC units, exactly as challenged
+  /** Present for the escrow rail; sign this template verbatim. */
+  escrowMessage?: string;
 }
 
 export type ProbeOutcome =
@@ -60,6 +64,8 @@ export type ProbeOutcome =
       approvedOffer: ApprovedOffer;
       /** The internally priced offer for the pay client's requirement selector. */
       pricedOffer: { network: string; asset: string; payTo: string; amountCents: number };
+      /** Present when the approved offer uses Telegraph escrow. */
+      escrow?: TelegraphEscrowOffer;
       referencedUrl: string;
     }
   | { kind: "rejected"; status: number; body: Record<string, unknown> | null; text: string }
@@ -116,7 +122,10 @@ function askPath(minerId?: string): string {
  * (docs: 400/404/429/503 arrive without any charge), and a valid body answers
  * with the live 402 challenge. Nothing is signed here — ever.
  */
-export async function probeAsk(spec: AskRequestSpec): Promise<ProbeOutcome> {
+export async function probeAsk(
+  spec: AskRequestSpec,
+  opts: { preferEscrow?: boolean } = {},
+): Promise<ProbeOutcome> {
   const assembled = assembleAskBody(spec);
   if ("error" in assembled) {
     return { kind: "rejected", status: 0, body: { error: assembled.error } as Record<string, unknown>, text: assembled.error };
@@ -135,7 +144,33 @@ export async function probeAsk(spec: AskRequestSpec): Promise<ProbeOutcome> {
       const challenge = decodeChallenge(res.headers.get("payment-required"));
       const accepted = challenge?.accepts?.find((a) => a.scheme === "exact" && a.network?.startsWith("eip155:"));
       const priced = exactEvmOffer(challenge);
-      if (!challenge || !priced || !accepted?.asset || !accepted.payTo || !accepted.amount || !/^\d+$/.test(accepted.amount)) {
+      const escrow = escrowEvmOffer(challenge);
+      if (!challenge) {
+        return { kind: "unavailable", detail: "The node challenged this request without a readable payment contract." };
+      }
+      if (opts.preferEscrow && escrow) {
+        return {
+          kind: "challenge",
+          challenge,
+          approvedOffer: {
+            scheme: escrow.scheme,
+            network: escrow.network,
+            asset: escrow.asset,
+            payTo: escrow.payTo,
+            amount: escrow.amount,
+            escrowMessage: escrow.message,
+          },
+          pricedOffer: {
+            network: escrow.network,
+            asset: escrow.asset,
+            payTo: escrow.payTo,
+            amountCents: Number(escrow.amount) / 10000,
+          },
+          escrow,
+          referencedUrl: `${node}${urlPath}`,
+        };
+      }
+      if (!priced || !accepted?.asset || !accepted.payTo || !accepted.amount || !/^\d+$/.test(accepted.amount)) {
         return {
           kind: "unavailable",
           detail: "The node challenged this request, but the challenge carries no complete signable exact-scheme EVM entry (needs asset, payTo and an atomic amount).",
@@ -146,6 +181,7 @@ export async function probeAsk(spec: AskRequestSpec): Promise<ProbeOutcome> {
         challenge,
         approvedOffer: { scheme: priced.scheme, network: priced.network, asset: accepted.asset, payTo: accepted.payTo, amount: accepted.amount },
         pricedOffer: { network: priced.network, asset: priced.asset!, payTo: priced.payTo!, amountCents: priced.amountCents },
+        escrow: escrow ?? undefined,
         referencedUrl: `${node}${urlPath}`,
       };
     }

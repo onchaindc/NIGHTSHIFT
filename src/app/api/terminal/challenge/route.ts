@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { telegraphNodeUrl, decodeChallenge, exactEvmOffer } from "@/lib/telegraph/client";
+import { telegraphNodeUrl, decodeChallenge, escrowEvmOffer, exactEvmOffer } from "@/lib/telegraph/client";
 import { normalizeAskPath } from "@/lib/terminal/paths";
 
 /** POST /api/terminal/challenge — return the live x402 challenge for client signing. */
@@ -30,8 +30,34 @@ export async function POST(req: Request) {
   }
 
   const challenge = decodeChallenge(res.headers.get("payment-required"));
+  if (!challenge) {
+    return NextResponse.json({ error: "challenge incomplete" }, { status: 502 });
+  }
+
+  // Use the escrow rail when the node offers it: it spends the Ethereum
+  // Sepolia test token already held by the wallet, instead of requiring a
+  // separate Base Sepolia USDC balance. The client signs a personal message
+  // and sends it in X-PAYMENT; no EIP-712 typed data is involved.
+  const escrow = escrowEvmOffer(challenge);
+  if (escrow) {
+    return NextResponse.json({
+      challenge,
+      escrow,
+      offer: {
+        scheme: escrow.scheme,
+        network: escrow.network,
+        asset: escrow.asset,
+        payTo: escrow.payTo,
+        amount: escrow.amount,
+      },
+      typedData: null,
+      nodeUrl: node,
+      urlPath,
+    });
+  }
+
   const offer = exactEvmOffer(challenge);
-  if (!challenge || !offer || !offer.asset || !offer.payTo) {
+  if (!offer || !offer.asset || !offer.payTo) {
     return NextResponse.json({ error: "challenge incomplete" }, { status: 502 });
   }
 
@@ -53,6 +79,8 @@ export async function POST(req: Request) {
   // The amount is copied exactly from the challenge rather than reconstructed
   // from a rounded cents value, and the domain follows the offered chain/token.
   const now = Math.floor(Date.now() / 1000);
+  const maxTimeout = Number(accepted?.maxTimeoutSeconds ?? 60);
+  const validFor = Number.isFinite(maxTimeout) && maxTimeout > 0 ? Math.min(maxTimeout, 300) : 60;
   const typedData = {
     domain: {
       name: domainName,
@@ -75,8 +103,11 @@ export async function POST(req: Request) {
       from: "", // filled by client
       to: offer.payTo,
       value: atomicAmount,
-      validAfter: String(now - 60),
-      validBefore: String(now + 300),
+      // The x402 exact reference uses validAfter 0 and a window no longer
+      // than the challenge's maxTimeoutSeconds. The previous 5-minute window
+      // was rejected by facilitators that enforce the advertised timeout.
+      validAfter: "0",
+      validBefore: String(now + validFor),
       nonce: `0x${randomBytes(32).toString("hex")}`,
     },
   };

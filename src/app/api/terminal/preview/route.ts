@@ -68,14 +68,22 @@ export async function POST(req: Request) {
     requestPreview = { path: assembled.urlPath, body: assembled.body };
   }
 
-  const probe = await probeAsk(spec);
+  // The Terminal pays from the user's wallet. Prefer the escrow rail when the
+  // node offers it so Ethereum Sepolia test USDC can pay without requiring a
+  // separate Base Sepolia balance.
+  const probe = await probeAsk(spec, { preferEscrow: true });
 
   switch (probe.kind) {
     case "challenge": {
-      const extra = (probe.challenge.accepts ?? []).find((a) => a.scheme === "exact" && a.network?.startsWith("eip155:"))?.extra as
-        | { name?: string; version?: string }
-        | undefined;
-      const timeoutEntry = (probe.challenge.accepts ?? []).find((a) => a.scheme === "exact" && a.network?.startsWith("eip155:"));
+      const extra =
+        probe.escrow
+          ? { name: "Telegraph USDC", version: undefined }
+          : ((probe.challenge.accepts ?? []).find((a) => a.scheme === "exact" && a.network?.startsWith("eip155:"))?.extra as
+              | { name?: string; version?: string }
+              | undefined);
+      const timeoutEntry = probe.escrow
+        ? undefined
+        : (probe.challenge.accepts ?? []).find((a) => a.scheme === "exact" && a.network?.startsWith("eip155:"));
       return NextResponse.json({
         status: "challenge",
         request: requestPreview,

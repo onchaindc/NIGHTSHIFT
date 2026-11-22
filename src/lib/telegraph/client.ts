@@ -18,7 +18,8 @@
  *      request with PAYMENT-SIGNATURE. The node verifies via its facilitator
  *      before calling the miner. The node may also offer scheme "escrow"
  *      (Telegraph escrow balance); the installed @x402/* client has no escrow
- *      scheme network client, so we explicitly select the exact scheme only.
+ *      scheme network client, so the Terminal implements that rail separately
+ *      by signing the challenge's extra.message and sending X-PAYMENT.
  *   4. On 200: the body carries `signal_hash` and cost; the response carries
  *      PAYMENT-RESPONSE (settlement proof) and X-TELEGRAPH-RECEIPT (base64 JSON
  *      receipt; key on `receipt_hash`, NOT `tx_hash`, which may be batched).
@@ -147,6 +148,19 @@ export interface TelegraphChallenge {
   accepts: TelegraphChallengeAccept[];
 }
 
+/** The Ethereum Sepolia test token accepted by Telegraph escrow. */
+export const TELEGRAPH_ESCROW_ASSET = "0xcc194e1a843B658526D0D5C431f670028582Ae17";
+
+/** One escrow option from the same x402 accepts array. */
+export interface TelegraphEscrowOffer {
+  scheme: "escrow";
+  network: string;
+  asset: string;
+  payTo: string;
+  amount: string; // atomic 6-decimal units, read from extra.message
+  message: string; // sign this template verbatim after filling placeholders
+}
+
 /** Decode the base64 PAYMENT-REQUIRED header. Returns null when unreadable. */
 export function decodeChallenge(headerValue: string | null): TelegraphChallenge | null {
   if (!headerValue) return null;
@@ -177,6 +191,29 @@ export function exactEvmOffer(a:
   }
   if (amountCents === null || !Number.isFinite(amountCents)) { return null; }
   return { scheme: evm.scheme, network: evm.network, asset: evm.asset, payTo: evm.payTo, amountCents };
+}
+
+/**
+ * The escrow entry is the rail that can spend the Ethereum Sepolia test
+ * token. Its amount is written into extra.message (the challenge's `price` is
+ * only a display string), and its asset is the documented test token rather
+ * than a field in the entry.
+ */
+export function escrowEvmOffer(a: TelegraphChallenge | null): TelegraphEscrowOffer | null {
+  const escrow = a?.accepts?.find((x) => x.scheme === "escrow" && x.network?.startsWith("eip155:"));
+  if (!escrow?.network || !escrow.payTo) return null;
+  const message = typeof escrow.extra?.message === "string" ? escrow.extra.message : null;
+  const amount = message?.match(/Amount:\s*(\d+)\s*uUSDC/i)?.[1] ?? escrow.amount;
+  if (!message || !amount || !/^\d+$/.test(amount)) return null;
+  if (escrow.network !== "eip155:11155111") return null;
+  return {
+    scheme: "escrow",
+    network: escrow.network,
+    asset: TELEGRAPH_ESCROW_ASSET,
+    payTo: escrow.payTo,
+    amount,
+    message,
+  };
 }
 
 interface AskResultBody {

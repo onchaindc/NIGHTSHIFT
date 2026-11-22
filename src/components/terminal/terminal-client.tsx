@@ -18,7 +18,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Loader2, Search, Terminal as TerminalIcon, XCircle } from "lucide-react";
-import { useWallets, useSignTypedData } from "@privy-io/react-auth";
+import { useWallets, useSignTypedData, useSignMessage, useSendTransaction } from "@privy-io/react-auth";
+import { encodeFunctionData } from "viem";
 
 import { ResultView } from "@/components/result-view";
 
@@ -119,6 +120,65 @@ function chainName(network: string): string {
   return names[network] ?? network;
 }
 
+const ESCROW_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
+const ESCROW_DEPOSIT_UUSDC = 100_000n; // 0.10 test USDC: ten $0.01 asks
+const ESCROW_DEPOSIT_ABI = [
+  { type: "function", name: "effectiveBalance", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "depositUSDC", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
+] as const;
+const ERC20_APPROVE_ABI = [
+  { type: "function", name: "approve", stateMutability: "nonpayable", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }] },
+] as const;
+
+async function rpcCall(to: string, data: string): Promise<string | null> {
+  try {
+    const res = await fetch(ESCROW_RPC, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { result?: string };
+    return body.result && body.result !== "0x" ? body.result : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForTransaction(hash: string): Promise<void> {
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    try {
+      const res = await fetch(ESCROW_RPC, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionReceipt", params: [hash] }),
+      });
+      const body = (await res.json()) as { result?: { status?: string } | null };
+      if (body.result?.status === "0x1") return;
+      if (body.result?.status === "0x0") throw new Error("The escrow transaction reverted.");
+    } catch (err) {
+      if (err instanceof Error && /reverted/i.test(err.message)) throw err;
+    }
+  }
+  throw new Error("The escrow transaction is still pending. Wait a moment, then try paying again.");
+}
+
+function escrowMessage(
+  template: string,
+  from: string,
+  nonce: string,
+  validAfter: string,
+  validBefore: string,
+): string {
+  return template
+    .replaceAll("{from}", from.toLowerCase())
+    .replaceAll("{nonce}", nonce)
+    .replaceAll("{validAfter}", validAfter)
+    .replaceAll("{validBefore}", validBefore);
+}
+
 /** What the network said, in a sentence; the protocol form stays available. */
 function NodeVerdict({ verdict }: { verdict: unknown }) {
   if (verdict == null) return null;
@@ -199,8 +259,12 @@ export default function TerminalClient({
   const [minerId, setMinerId] = useState<string | null>(null); // null = auto-route
   const { wallets } = useWallets();
   const { signTypedData } = useSignTypedData();
+  const { signMessage } = useSignMessage();
+  const { sendTransaction } = useSendTransaction();
   // The in-app wallet is the smooth path; a connected external wallet signs too.
   const signerWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0] ?? null;
+  const [fundingEscrow, setFundingEscrow] = useState(false);
+  const [escrowNotice, setEscrowNotice] = useState<string | null>(null);
 
   // Advanced state
   const [rawJson, setRawJson] = useState("");
@@ -254,6 +318,7 @@ export default function TerminalClient({
       setComposeError(null);
       setFailure(null);
       setBodyPlan(null);
+      setEscrowNotice(null);
       if (clearAttempt) {
         setAnswer(null);
         setActivitySaved(null);
@@ -504,41 +569,90 @@ export default function TerminalClient({
             signal: controller.signal,
           });
           const ch = await chRes.json();
-          if (!ch.typedData || !ch.offer) {
+          if (!ch.offer) {
             setFailure({ heading: "Could not get payment challenge", detail: ch.error ?? "unknown" });
             return;
           }
-          ch.typedData.message.from = signerWallet.address;
-          const { signature } = await signTypedData(ch.typedData, {
-            address: signerWallet.address,
-            uiOptions: { showWalletUIs: false },
-          });
-          const accepted = ch.challenge?.accepts?.find((a: { scheme?: string; network?: string }) =>
-            a.scheme === "exact" && a.network === ch.offer.network
+          // Never sign a challenge that changed after the user approved it.
+          const drift = (["scheme", "network", "asset", "payTo", "amount"] as const).find(
+            (key) => String(ch.offer[key] ?? "").toLowerCase() !== String(approvedOffer[key] ?? "").toLowerCase(),
           );
-          const payment = btoa(JSON.stringify({
-            x402Version: 2,
-            payload: {
-              signature,
-              authorization: {
-                from: signerWallet.address,
-                to: ch.typedData.message.to,
-                value: ch.typedData.message.value,
-                validAfter: ch.typedData.message.validAfter,
-                validBefore: ch.typedData.message.validBefore,
-                nonce: ch.typedData.message.nonce,
+          if (drift) {
+            setFailure({
+              heading: "The offer changed — nothing was signed",
+              detail: `The live offer no longer matches the one you approved (${drift} changed). Review the new price before paying.`,
+            });
+            return;
+          }
+          let payment: string;
+          let paymentHeaderName: "PAYMENT-SIGNATURE" | "X-PAYMENT" = "PAYMENT-SIGNATURE";
+          if (ch.escrow) {
+            // Escrow signs a human-readable authorization, not an EIP-3009
+            // transfer. The node reads it from X-PAYMENT, not the exact rail's
+            // PAYMENT-SIGNATURE header.
+            const escrow = ch.escrow as { network: string; payTo: string; amount: string; message: string };
+            const now = Math.floor(Date.now() / 1000);
+            const nonce = crypto.randomUUID();
+            const validAfter = String(now - 5);
+            const validBefore = String(now + 100);
+            const authorization = {
+              from: signerWallet.address.toLowerCase(),
+              to: escrow.payTo,
+              value: escrow.amount,
+              validAfter,
+              validBefore,
+              nonce,
+            };
+            const message = escrowMessage(escrow.message, authorization.from, nonce, validAfter, validBefore);
+            const { signature } = await signMessage(
+              { message },
+              { address: signerWallet.address, uiOptions: { showWalletUIs: false } },
+            );
+            payment = btoa(JSON.stringify({
+              x402Version: 2,
+              scheme: "escrow",
+              network: escrow.network,
+              payload: { signature, authorization },
+            }));
+            paymentHeaderName = "X-PAYMENT";
+          } else {
+            if (!ch.typedData) {
+              setFailure({ heading: "Could not get payment challenge", detail: "The exact payment typed data is missing." });
+              return;
+            }
+            ch.typedData.message.from = signerWallet.address;
+            const { signature } = await signTypedData(ch.typedData, {
+              address: signerWallet.address,
+              uiOptions: { showWalletUIs: false },
+            });
+            const accepted = ch.challenge?.accepts?.find((a: { scheme?: string; network?: string }) =>
+              a.scheme === "exact" && a.network === ch.offer.network
+            );
+            payment = btoa(JSON.stringify({
+              x402Version: 2,
+              payload: {
+                signature,
+                authorization: {
+                  from: signerWallet.address,
+                  to: ch.typedData.message.to,
+                  value: ch.typedData.message.value,
+                  validAfter: ch.typedData.message.validAfter,
+                  validBefore: ch.typedData.message.validBefore,
+                  nonce: ch.typedData.message.nonce,
+                },
               },
-            },
-            resource: ch.challenge?.resource,
-            accepted,
-          }));
+              resource: ch.challenge?.resource,
+              accepted,
+            }));
+          }
           const done = await fetch("/api/terminal/complete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               urlPath,
               body: payload,
-              paymentSignature: payment,
+              paymentHeader: payment,
+              paymentHeaderName,
               payer: signerWallet.address,
             }),
             signal: controller.signal,
@@ -563,7 +677,7 @@ export default function TerminalClient({
               signalHash,
               receipt: {
                 receipt_hash: result.receipt ?? "",
-                rail: "x402",
+                rail: challenge.payment.scheme === "escrow" ? "escrow" : "x402",
                 payer: signerWallet.address,
                 miner: challenge.payment.payTo,
                 intent: "",
@@ -601,7 +715,61 @@ export default function TerminalClient({
       clearTimeout(deadline);
       setExecuting(false);
     }
-  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, signerWallet, signTypedData]);
+  }, [challenge, approvedOffer, mode, rawJson, minerId, buildSpec, pushLog, signerWallet, signMessage, signTypedData]);
+
+  const handleFundEscrow = useCallback(async () => {
+    if (!challenge || challenge.payment.scheme !== "escrow" || !signerWallet) return;
+    setFundingEscrow(true);
+    setEscrowNotice(null);
+    try {
+      const chainId = Number(challenge.payment.network.replace(/^eip155:/, ""));
+      if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error("The escrow offer has no usable EVM chain.");
+      const required = BigInt(challenge.payment.amount);
+      const depositAmount = ESCROW_DEPOSIT_UUSDC > required ? ESCROW_DEPOSIT_UUSDC : required;
+      const balanceData = encodeFunctionData({
+        abi: ESCROW_DEPOSIT_ABI,
+        functionName: "effectiveBalance",
+        args: [signerWallet.address as `0x${string}`],
+      });
+      const current = await rpcCall(challenge.payment.payTo, balanceData);
+      if (current && BigInt(current) >= required) {
+        setEscrowNotice("Your escrow already covers this ask. You can pay now.");
+        return;
+      }
+
+      pushLog("Approving Telegraph USDC for the escrow contract…", "info");
+      const approveData = encodeFunctionData({
+        abi: ERC20_APPROVE_ABI,
+        functionName: "approve",
+        args: [challenge.payment.payTo as `0x${string}`, depositAmount],
+      });
+      const approved = await sendTransaction(
+        { to: challenge.payment.asset as `0x${string}`, data: approveData, chainId },
+        { address: signerWallet.address },
+      );
+      await waitForTransaction(approved.hash);
+
+      pushLog("Depositing test USDC into Telegraph escrow…", "info");
+      const depositData = encodeFunctionData({
+        abi: ESCROW_DEPOSIT_ABI,
+        functionName: "depositUSDC",
+        args: [depositAmount],
+      });
+      const deposited = await sendTransaction(
+        { to: challenge.payment.payTo as `0x${string}`, data: depositData, chainId },
+        { address: signerWallet.address },
+      );
+      await waitForTransaction(deposited.hash);
+      setEscrowNotice(`Escrow funded with ${Number(depositAmount) / 1_000_000} test USDC. You can pay now.`);
+      pushLog("Escrow funded. The ask can now be paid from your Ethereum Sepolia balance.", "good");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setEscrowNotice(`Escrow funding failed: ${msg.slice(0, 240)}`);
+      pushLog(`Escrow funding failed: ${msg}`, "bad");
+    } finally {
+      setFundingEscrow(false);
+    }
+  }, [challenge, signerWallet, sendTransaction, pushLog]);
 
   /* ---- verify ------------------------------------------------------- */
 
@@ -1108,6 +1276,24 @@ export default function TerminalClient({
               </span>
             </p>
           )}
+          {challenge.payment.scheme === "escrow" && signerWallet && (
+            <div className="mt-3 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2.5">
+              <p className="text-[11.5px] leading-relaxed text-ink-soft">
+                This ask is paid from your <span className="font-medium text-ink">Telegraph escrow</span> balance on{" "}
+                {chainName(challenge.payment.network)}. Your existing Telegraph USDC pays for it; if escrow is empty,
+                fund it once here.
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleFundEscrow()}
+                disabled={fundingEscrow}
+                className="btn-quiet mt-2 !min-h-8 !px-3 !text-[11.5px]"
+              >
+                {fundingEscrow ? "Funding escrow…" : "Fund escrow with 0.10 test USDC"}
+              </button>
+              {escrowNotice && <p className="mt-1.5 text-[11px] leading-relaxed text-ink-soft">{escrowNotice}</p>}
+            </div>
+          )}
           {!signerWallet && (
             <p className="mt-3 max-w-[66ch] text-[11.5px] leading-relaxed text-amber">
               Connect a wallet to pay.{" "}
@@ -1167,12 +1353,23 @@ export default function TerminalClient({
           {failure.node !== null && failure.node !== undefined && <NodeVerdict verdict={failure.node} />}
           {/payment/i.test(failure.heading) && (
             <p className="mt-3 text-[12px] leading-relaxed text-ink-soft">
-              A wallet payment is rejected when it has no test USDC. You can mint 10 free on the{" "}
-              <Link href="/funds" className="text-amber underline offset-2 hover:underline">
-                Wallet page
-              </Link>{" "}
-              — the faucet covers the gas — then try the same ask again.
+              {challenge?.payment.scheme === "escrow"
+                ? "This ask pays from Telegraph escrow. Fund escrow with your existing test USDC, then pay again — no Base Sepolia balance is needed."
+                : "A wallet payment is rejected when it has no test USDC for the offered rail. Check the Wallet page, then try the same ask again."}
             </p>
+          )}
+          {challenge?.payment.scheme === "escrow" && signerWallet && (
+            <div className="mt-3 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2.5">
+              <button
+                type="button"
+                onClick={() => void handleFundEscrow()}
+                disabled={fundingEscrow}
+                className="btn-quiet !min-h-8 !px-3 !text-[11.5px]"
+              >
+                {fundingEscrow ? "Funding escrow…" : "Fund escrow with 0.10 test USDC"}
+              </button>
+              {escrowNotice && <p className="mt-1.5 text-[11px] leading-relaxed text-ink-soft">{escrowNotice}</p>}
+            </div>
           )}
           <button onClick={() => resetToCompose(true)} className="btn-quiet mt-4">Start again</button>
         </section>

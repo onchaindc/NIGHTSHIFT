@@ -43,6 +43,8 @@ export async function POST(req: Request) {
     urlPath?: string;
     body?: unknown;
     paymentSignature?: string;
+    paymentHeader?: string;
+    paymentHeaderName?: string;
     payer?: string;
   };
   try {
@@ -55,9 +57,11 @@ export async function POST(req: Request) {
   if (!urlPath) {
     return NextResponse.json({ error: "only /engine/v1/ask paths are allowed" }, { status: 400 });
   }
-  if (!input.paymentSignature) {
+  const paymentHeader = input.paymentHeader ?? input.paymentSignature;
+  if (!paymentHeader) {
     return NextResponse.json({ error: "paymentSignature required" }, { status: 400 });
   }
+  const paymentHeaderName = input.paymentHeaderName === "X-PAYMENT" ? "X-PAYMENT" : "PAYMENT-SIGNATURE";
 
   const payload = (input.body ?? {}) as Record<string, unknown>;
   const spec = specFromPayload(payload);
@@ -70,7 +74,7 @@ export async function POST(req: Request) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "PAYMENT-SIGNATURE": input.paymentSignature,
+        [paymentHeaderName]: paymentHeader,
       },
       body: JSON.stringify(input.body ?? {}),
       signal: AbortSignal.timeout(55_000),
@@ -98,7 +102,7 @@ export async function POST(req: Request) {
   }
 
   const receipt = extractReceipt(res.headers);
-  const paymentResponse = res.headers.get("payment-response");
+  const paymentResponse = res.headers.get("payment-response") ?? res.headers.get("x-payment-response");
   const signalHash =
     parsed && typeof parsed === "object" && "signal_hash" in parsed
       ? String((parsed as { signal_hash?: string }).signal_hash ?? "")
@@ -111,14 +115,14 @@ export async function POST(req: Request) {
   if (res.status === 200 && signalHash) {
     if (receipt) {
       const approved = payload.offer as
-        | { network?: string; asset?: string; payTo?: string; amount?: string }
+        | { scheme?: string; network?: string; asset?: string; payTo?: string; amount?: string }
         | undefined;
       const outcome: ExecuteOutcome = {
         kind: "answered",
         urlPath,
         requestSent: input.body,
         offer: {
-          scheme: "exact",
+          scheme: approved?.scheme === "escrow" ? "escrow" : "exact",
           network: approved?.network ?? "eip155:11155111",
           asset: approved?.asset ?? "",
           payTo: approved?.payTo ?? "",
@@ -156,8 +160,12 @@ export async function POST(req: Request) {
   }
 
   const nodeError =
-    parsed && typeof parsed === "object" && typeof (parsed as { error?: unknown }).error === "string"
-      ? (parsed as { error: string }).error
+    parsed && typeof parsed === "object"
+      ? typeof (parsed as { error?: unknown }).error === "string"
+        ? (parsed as { error: string }).error
+        : typeof (parsed as { reason?: unknown }).reason === "string"
+          ? (parsed as { reason: string }).reason
+          : null
       : null;
   const detail =
     res.status === 402

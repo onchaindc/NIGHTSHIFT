@@ -107,7 +107,7 @@ export async function recordTerminalOutcome(
         ...(outcome.offer
           ? [ev(ts, "telegraph_challenge", `The network priced this ask; the user approved the exact offer before signing`, { offer: outcome.offer })]
           : []),
-        ev(ts, "action_started", `Signed EIP-712 exact-scheme payment and called ${outcome.urlPath}`, {
+        ev(ts, "action_started", `Signed ${outcome.offer.scheme === "escrow" ? "escrow authorization" : "EIP-712 exact-scheme payment"} and called ${outcome.urlPath}`, {
           endpoint: outcome.urlPath,
           minerId: outcome.minerId ?? String(receipt.miner ?? ""),
         }),
@@ -126,7 +126,7 @@ export async function recordTerminalOutcome(
         entries: [
           {
             ts,
-            description: "Terminal ask paid with x402 exact-scheme USDC",
+            description: `Terminal ask paid with ${outcome.offer.scheme === "escrow" ? "Telegraph escrow" : "x402 exact-scheme USDC"}`,
             amountUsdCents: cents,
             source: "telegraph",
             receiptHash: receipt.receipt_hash,
