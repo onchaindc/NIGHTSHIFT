@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { telegraphNodeUrl } from "@/lib/telegraph/client";
+import { telegraphNodeUrl, telegraphFetch } from "@/lib/telegraph/client";
 import { normalizeAskPath } from "@/lib/terminal/paths";
 
 /**
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
   let res: Response;
   try {
-    res = await fetch(`${node}${urlPath}`, {
+    res = await telegraphFetch(`${node}${urlPath}`, {
       method: "POST",
       headers,
       body: JSON.stringify(body.body ?? {}),

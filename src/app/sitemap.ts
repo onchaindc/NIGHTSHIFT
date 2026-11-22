@@ -6,6 +6,7 @@ const ROUTES: Array<{ path: string; priority: number }> = [
   { path: "", priority: 1 },
   { path: "/miners", priority: 0.9 },
   { path: "/terminal", priority: 0.9 },
+  { path: "/counterparty", priority: 0.9 },
   { path: "/intents", priority: 0.8 },
   { path: "/evaluators", priority: 0.8 },
   { path: "/validators", priority: 0.7 },
