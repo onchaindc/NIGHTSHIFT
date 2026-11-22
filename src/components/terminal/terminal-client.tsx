@@ -119,38 +119,6 @@ function chainName(network: string): string {
   return names[network] ?? network;
 }
 
-const PAYMENT_RPCS: Record<string, string> = {
-  "eip155:11155111": "https://ethereum-sepolia-rpc.publicnode.com",
-  "eip155:84532": "https://sepolia.base.org",
-};
-
-function formatUsdc(atomic: bigint): string {
-  const whole = atomic / 1_000_000n;
-  const fraction = (atomic % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
-  return fraction ? `${whole}.${fraction}` : whole.toString();
-}
-
-/** Public read only: never signs or changes state. Null means "could not read", not zero. */
-async function readUsdcBalance(network: string, asset: string, owner: string): Promise<bigint | null> {
-  const rpcUrl = PAYMENT_RPCS[network];
-  if (!rpcUrl || !/^0x[a-fA-F0-9]{40}$/.test(asset) || !/^0x[a-fA-F0-9]{40}$/.test(owner)) return null;
-  try {
-    const data = `0x70a08231${owner.replace(/^0x/i, "").toLowerCase().padStart(64, "0")}`;
-    const res = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: asset, data }, "latest"] }),
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (!res.ok) return null;
-    const body = (await res.json()) as { result?: string };
-    if (!body.result || body.result === "0x") return null;
-    return BigInt(body.result);
-  } catch {
-    return null;
-  }
-}
-
 /** What the network said, in a sentence; the protocol form stays available. */
 function NodeVerdict({ verdict }: { verdict: unknown }) {
   if (verdict == null) return null;
@@ -539,30 +507,6 @@ export default function TerminalClient({
           if (!ch.typedData || !ch.offer) {
             setFailure({ heading: "Could not get payment challenge", detail: ch.error ?? "unknown" });
             return;
-          }
-          // Check the payer's balance on the challenge's own chain before
-          // asking them to sign. A wallet funded on Ethereum Sepolia cannot
-          // pay a Base Sepolia offer, and the old copy blamed an empty wallet.
-          if (
-            typeof ch.offer.network === "string" &&
-            typeof ch.offer.asset === "string" &&
-            typeof ch.typedData.message?.value === "string"
-          ) {
-            try {
-              const required = BigInt(ch.typedData.message.value);
-              const balance = await readUsdcBalance(ch.offer.network, ch.offer.asset, signerWallet.address);
-              if (balance !== null && balance < required) {
-                const network = chainName(ch.offer.network);
-                setFailure({
-                  heading: "Payment blocked before signing",
-                  detail: `This offer needs ${formatUsdc(required)} USDC on ${network}. A public balance read shows ${formatUsdc(balance)} USDC there for this wallet. Test USDC on another chain cannot pay this offer. Open Wallet to see the ${network} balance and get test USDC on that network.`,
-                });
-                return;
-              }
-            } catch {
-              // A failed read must not block a valid payment; the server's
-              // signed-payment response remains the authority.
-            }
           }
           ch.typedData.message.from = signerWallet.address;
           const { signature } = await signTypedData(ch.typedData, {
@@ -1223,12 +1167,11 @@ export default function TerminalClient({
           {failure.node !== null && failure.node !== undefined && <NodeVerdict verdict={failure.node} />}
           {/payment/i.test(failure.heading) && (
             <p className="mt-3 text-[12px] leading-relaxed text-ink-soft">
-              The offer settles on {challenge ? chainName(challenge.payment.network) : "the network shown above"}. Test
-              USDC on a different network cannot pay it. The{" "}
+              A wallet payment is rejected when it has no test USDC. You can mint 10 free on the{" "}
               <Link href="/funds" className="text-amber underline offset-2 hover:underline">
                 Wallet page
               </Link>{" "}
-              shows the balance on the payment network and links to the correct Base Sepolia faucet.
+              — the faucet covers the gas — then try the same ask again.
             </p>
           )}
           <button onClick={() => resetToCompose(true)} className="btn-quiet mt-4">Start again</button>
