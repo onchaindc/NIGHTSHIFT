@@ -266,6 +266,8 @@ export default function TerminalClient({
   const signerWallet = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0] ?? null;
   const [fundingEscrow, setFundingEscrow] = useState(false);
   const [escrowNotice, setEscrowNotice] = useState<string | null>(null);
+  /** Whether the prepaid Telegraph balance already covers the offered ask. */
+  const [escrowCovered, setEscrowCovered] = useState<boolean | null>(null);
 
   // Advanced state
   const [rawJson, setRawJson] = useState("");
@@ -320,6 +322,7 @@ export default function TerminalClient({
       setFailure(null);
       setBodyPlan(null);
       setEscrowNotice(null);
+      setEscrowCovered(null);
       if (clearAttempt) {
         setAnswer(null);
         setActivitySaved(null);
@@ -511,6 +514,16 @@ export default function TerminalClient({
         setApprovedOffer(body.offer as Offer);
         setPreviewStatus("challenge");
         const p = body.payment as ChallengeInfo;
+        // Decide up front whether this can be a silent one-tap payment, so the
+        // funding UI only appears when the balance is genuinely short.
+        setEscrowCovered(null);
+        if (p.scheme === "escrow" && signerWallet) {
+          // Non-blocking: the price renders immediately, the balance chip settles
+          // when the node answers. Unknown stays quiet rather than flashing.
+          void escrowAvailable(nodeUrl, signerWallet.address).then((available) => {
+            setEscrowCovered(available !== null && /^\d+$/.test(p.amount) && available >= BigInt(p.amount));
+          });
+        }
         pushLog(`Price: $${(p.amountUsdCents / 100).toFixed(2)} in ${p.assetName ?? "USD Coin"} on ${chainName(p.network)}. Nothing is signed until you approve.`, "good");
       } else if (body.status === "refused") {
         setPreviewHttp(typeof body.httpStatus === "number" ? body.httpStatus : null);
@@ -529,7 +542,7 @@ export default function TerminalClient({
       setNodeVerdict(msg);
       pushLog(`Pre-flight failed: ${msg}`, "bad");
     }
-  }, [buildSpec, mode, minerId, pushLog]);
+  }, [buildSpec, mode, minerId, pushLog, nodeUrl, signerWallet]);
 
   /* ---- execute ------------------------------------------------------ */
 
@@ -707,7 +720,9 @@ export default function TerminalClient({
             pushLog("Answer delivered from your wallet. Run verification before trusting it.", "good");
             return;
           }
-          setFailure({ heading: "Payment from your wallet failed", detail: result.error ?? JSON.stringify(result.body ?? result).slice(0, 300) });
+          const failureDetail = result.error ?? JSON.stringify(result.body ?? result).slice(0, 300);
+          if (typeof failureDetail === "string" && /insufficient escrow/i.test(failureDetail)) setEscrowCovered(false);
+          setFailure({ heading: "Payment from your wallet failed", detail: failureDetail });
           return;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -741,7 +756,8 @@ export default function TerminalClient({
       // see is not "funded", and saying so is what stranded this flow before.
       const current = await escrowAvailable(nodeUrl, signerWallet.address);
       if (current !== null && current >= required) {
-        setEscrowNotice("Your escrow already covers this ask — paying it now.");
+        setEscrowCovered(true);
+        setEscrowNotice("Your Telegraph balance already covers this ask — paying it now.");
         pushLog("Escrow already covers this ask. Signing the payment…", "info");
         void runExecute();
         return;
@@ -783,8 +799,9 @@ export default function TerminalClient({
         pushLog("The deposit is mined, but the node's ledger does not cover this ask yet.", "warn");
         return;
       }
-      setEscrowNotice(`Escrow funded with ${Number(after ?? depositAmount) / 1_000_000} test USDC. Paying this ask now…`);
-      pushLog("Escrow funded. Signing the payment for this ask…", "good");
+      setEscrowCovered(true);
+      setEscrowNotice(`Added ${Number(after ?? depositAmount) / 1_000_000} test USDC. Paying this ask now…`);
+      pushLog("Balance topped up. Signing the payment for this ask…", "good");
       // Funding was the last consent step, and the offer being paid is the one
       // already approved — runExecute re-checks it for drift before signing.
       void runExecute();
@@ -1303,12 +1320,11 @@ export default function TerminalClient({
               </span>
             </p>
           )}
-          {challenge.payment.scheme === "escrow" && signerWallet && (
+          {challenge.payment.scheme === "escrow" && signerWallet && escrowCovered === false && (
             <div className="mt-3 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2.5">
               <p className="text-[11.5px] leading-relaxed text-ink-soft">
-                This ask is paid from your <span className="font-medium text-ink">Telegraph escrow</span> balance on{" "}
-                {chainName(challenge.payment.network)}. Your existing Telegraph USDC pays for it; if escrow is empty,
-                fund it once here.
+                Your Telegraph test USDC balance is short for this ask. Add it once and the payment goes through
+                immediately.
               </p>
               <button
                 type="button"
@@ -1316,10 +1332,15 @@ export default function TerminalClient({
                 disabled={fundingEscrow}
                 className="btn-quiet mt-2 !min-h-8 !px-3 !text-[11.5px]"
               >
-                {fundingEscrow ? "Funding escrow…" : `Fund escrow with ${escrowTopUpUsdc.toFixed(2)} test USDC`}
+                {fundingEscrow ? "Adding test USDC…" : `Add ${escrowTopUpUsdc.toFixed(2)} test USDC and pay`}
               </button>
               {escrowNotice && <p className="mt-1.5 text-[11px] leading-relaxed text-ink-soft">{escrowNotice}</p>}
             </div>
+          )}
+          {challenge.payment.scheme === "escrow" && signerWallet && escrowCovered === true && (
+            <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+              Pays from your prepaid Telegraph balance — no wallet prompt.
+            </p>
           )}
           {!signerWallet && (
             <p className="mt-3 max-w-[66ch] text-[11.5px] leading-relaxed text-amber">
@@ -1381,11 +1402,11 @@ export default function TerminalClient({
           {/payment/i.test(failure.heading) && (
             <p className="mt-3 text-[12px] leading-relaxed text-ink-soft">
               {challenge?.payment.scheme === "escrow"
-                ? "This ask pays from Telegraph escrow. Fund escrow with your existing test USDC, then pay again — no Base Sepolia balance is needed."
+                ? "This ask is paid from your prepaid Telegraph test USDC. Add it once, then pay again — no Base Sepolia balance is needed."
                 : "A wallet payment is rejected when it has no test USDC for the offered rail. Check the Wallet page, then try the same ask again."}
             </p>
           )}
-          {challenge?.payment.scheme === "escrow" && signerWallet && (
+          {challenge?.payment.scheme === "escrow" && signerWallet && escrowCovered !== true && (
             <div className="mt-3 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2.5">
               <button
                 type="button"
@@ -1393,7 +1414,7 @@ export default function TerminalClient({
                 disabled={fundingEscrow}
                 className="btn-quiet !min-h-8 !px-3 !text-[11.5px]"
               >
-                {fundingEscrow ? "Funding escrow…" : `Fund escrow with ${escrowTopUpUsdc.toFixed(2)} test USDC`}
+                {fundingEscrow ? "Adding test USDC…" : `Add ${escrowTopUpUsdc.toFixed(2)} test USDC and pay`}
               </button>
               {escrowNotice && <p className="mt-1.5 text-[11px] leading-relaxed text-ink-soft">{escrowNotice}</p>}
             </div>
