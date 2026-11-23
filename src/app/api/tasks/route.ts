@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { createTask, runTask, EngineError } from "@/lib/engine/engine";
 import { listTasks } from "@/lib/engine/store";
+import { requestAuthorized } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,8 +11,9 @@ export const maxDuration = 60;
 
 /**
  * GET /api/tasks - all tasks with their events (the UI renders these directly).
- * POST /api/tasks - submit a goal. Runs to completion synchronously in the
- * request; purchases are bounded by the task's spending limit.
+ * POST /api/tasks - submit a goal. Free goals stay public; any mode that can
+ * plan a purchase requires the operator bearer token and ALWAYS stops at the
+ * human approval gate (the caller cannot waive it).
  */
 export async function GET() {
   let tasks;
@@ -28,7 +30,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { goal?: unknown; spendLimitUsdCents?: unknown; requiresApproval?: unknown; mode?: unknown };
+  let body: { goal?: unknown; spendLimitUsdCents?: unknown; mode?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -48,13 +50,25 @@ export async function POST(req: NextRequest) {
       ? Math.round(body.spendLimitUsdCents)
       : undefined;
 
-  const requiresApproval = body.requiresApproval === true;
+  // A free goal can never become a purchase, so it stays open. "auto" and
+  // "paid" can plan paid steps and are operator-gated. Approval is never the
+  // caller's decision: anything that can spend waits for a human.
+  const isFree = mode === "free";
+  if (!isFree && !requestAuthorized(req)) {
+    return NextResponse.json(
+      {
+        error:
+          'authorization required: goals that can spend are gated behind a bearer token (NIGHTSHIFT_API_TOKEN); mode "free" stays open',
+      },
+      { status: 401 },
+    );
+  }
 
   try {
     const task = await createTask({
       goal,
       spendLimitUsdCents,
-      requiresApproval,
+      requiresApproval: !isFree,
       origin: { source: "web" },
       mode,
     });

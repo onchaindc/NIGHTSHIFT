@@ -20,17 +20,11 @@ export const maxDuration = 60;
  *   before anything is signed; the caller polls /api/tasks/:id for the report.
  *   mode "free": no purchase path is planned at all.
  *
- * Mutating requests are gated by the operator token (NIGHTSHIFT_API_TOKEN),
- * like every other spending-capable API; reads stay public.
+ * Free investigations spend nothing and stay public. Intel investigations can
+ * spend, so they are gated by the operator token (NIGHTSHIFT_API_TOKEN) and
+ * always wait at the human approval gate; reads stay public.
  */
 export async function POST(req: NextRequest) {
-  if (!requestAuthorized(req)) {
-    return NextResponse.json(
-      { error: "authorization required: investigation requests can spend money, so they are gated behind a bearer token (NIGHTSHIFT_API_TOKEN)" },
-      { status: 401 },
-    );
-  }
-
   let body: { objective?: unknown; mode?: unknown; spendLimitUsdCents?: unknown };
   try {
     body = await req.json();
@@ -43,6 +37,14 @@ export async function POST(req: NextRequest) {
   const mode = body.mode === "free" ? "free" : body.mode === "intel" ? "intel" : "intel";
   if (body.mode !== undefined && body.mode !== "free" && body.mode !== "intel") {
     return NextResponse.json({ error: 'mode must be "free" or "intel"' }, { status: 400 });
+  }
+  // Only the paid mode is privileged: free investigations never plan a
+  // purchase, so they stay usable without the operator token.
+  if (mode !== "free" && !requestAuthorized(req)) {
+    return NextResponse.json(
+      { error: "authorization required: intel investigations can spend money, so they are gated behind a bearer token (NIGHTSHIFT_API_TOKEN); mode \"free\" stays open" },
+      { status: 401 },
+    );
   }
 
   const spendLimitUsdCents =
