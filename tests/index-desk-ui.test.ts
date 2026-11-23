@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   deskActivityRows,
   deskHrefWithTask,
+  deskSessionView,
   deskSnapshot,
   deskTaskParam,
   displayMissingDimensions,
   friendlyDeskError,
   parseCustomWeights,
   parseSpendLimitUsd,
+  restrictedViewVisible,
   sanitizeDeskMessage,
 } from "@/lib/indexdesk/desk-ui";
 import type { TaskRecord } from "@/lib/engine/types";
@@ -184,6 +186,30 @@ describe("activity rows", () => {
     expect(rows.map((r) => r.id)).toEqual(["a"]);
     expect(rows[0].title).toBe("Large Cap");
     expect(rows[0].href).toBe("/minds/index-desk?task=a");
+  });
+});
+
+describe("session and restricted-view messaging", () => {
+  it("distinguishes authenticated, anonymous and unreadable sessions", () => {
+    expect(deskSessionView({ operatorSession: true })).toBe("authenticated");
+    expect(deskSessionView({ operatorSession: false })).toBe("anonymous");
+    expect(deskSessionView({})).toBe("anonymous");
+    expect(deskSessionView(null)).toBe("unavailable");
+  });
+
+  it("shows restricted messaging only for a completed withheld report", () => {
+    const running = deskSnapshot({ redacted: true, task: { state: "executing" } });
+    expect(restrictedViewVisible(running)).toBe(false);
+
+    const completed = deskSnapshot({ redacted: true, task: { state: "completed" } });
+    expect(restrictedViewVisible(completed)).toBe(true);
+
+    const rejected = deskSnapshot({ redacted: true, task: { state: "rejected" } });
+    expect(restrictedViewVisible(rejected)).toBe(false);
+
+    const full = deskSnapshot({ task: { state: "completed" } });
+    expect(restrictedViewVisible(full)).toBe(false);
+    expect(restrictedViewVisible(null)).toBe(false);
   });
 });
 

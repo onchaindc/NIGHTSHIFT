@@ -232,6 +232,31 @@ export function deskSnapshot(body: unknown): DeskTaskSnapshot {
 }
 
 /* ------------------------------------------------------------------ */
+/* Session + restricted view                                           */
+/* ------------------------------------------------------------------ */
+
+export type DeskSession = "loading" | "anonymous" | "authenticated" | "unavailable";
+
+/**
+ * Read the operator session from GET /api/status. "anonymous" is a valid,
+ * fully usable state (free desks); it is never an error banner.
+ */
+export function deskSessionView(status: unknown): DeskSession {
+  if (!status || typeof status !== "object") return "unavailable";
+  const body = status as { operatorSession?: unknown };
+  return body.operatorSession === true ? "authenticated" : "anonymous";
+}
+
+/**
+ * Restricted messaging belongs only to a COMPLETED investigation whose
+ * proposal was withheld. A running task is not a restricted view, and an
+ * anonymous visitor configuring a desk has not tried to read anything private.
+ */
+export function restrictedViewVisible(snap: DeskTaskSnapshot | null): boolean {
+  return !!snap && snap.redacted === true && snap.terminal === "completed";
+}
+
+/* ------------------------------------------------------------------ */
 /* URL persistence                                                     */
 /* ------------------------------------------------------------------ */
 

@@ -20,6 +20,7 @@ import { planIndexDesk } from "@/lib/indexdesk/plan";
 import { resetIndexDeskDeps, setIndexDeskDeps } from "@/lib/mind/indexdesk-execute";
 import type { ExecuteInput, ProbeOutcome } from "@/lib/terminal/ask";
 import { POST as indexDeskPOST, GET as indexDeskGET } from "@/app/api/mind/index-desk/route";
+import { OPERATOR_COOKIE, expectedOperatorCookieValue } from "@/lib/api/auth";
 
 /**
  * Index Reconstitution Desk tests. All network effects are injected through
@@ -676,6 +677,28 @@ describe("index-desk tool endpoint", () => {
   it("rejects unauthenticated intel desks with 401", async () => {
     const res = await indexDeskPOST(req({ body: validBody }));
     expect(res.status).toBe(401);
+  });
+
+  it("does not require a session for free desks", async () => {
+    // Outside a Next request scope `after()` cannot schedule the background
+    // run, so the in-process response may be 500; what matters for the auth
+    // contract is that a free desk is never refused as unauthorized.
+    const res = await indexDeskPOST(req({ body: JSON.stringify({ index: definition, mode: "free" }) }));
+    expect(res.status).not.toBe(401);
+  });
+
+  it("accepts the operator session cookie (authenticated browser experience)", async () => {
+    const cookie = `${OPERATOR_COOKIE}=${expectedOperatorCookieValue()}`;
+    const res = await indexDeskPOST(
+      new NextRequest("http://localhost/api/mind/index-desk", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: validBody,
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { task?: { state?: string } };
+    expect(body.task?.state).toBe("awaiting_approval");
   });
 
   it("validates the definition after authentication", async () => {
