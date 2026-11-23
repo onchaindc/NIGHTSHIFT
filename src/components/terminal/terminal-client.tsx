@@ -671,6 +671,27 @@ export default function TerminalClient({
             // The envelope holds the miner's payload under `result`; showing the
             // envelope itself is how node-level prose used to masquerade as the answer.
             const minerResult = nodeBody && "result" in nodeBody ? nodeBody.result : result.body;
+            // The route normalizes the receipt to base64 JSON for both rails;
+            // fall back to the locally known offer fields if it is unreadable.
+            const receipt: ReceiptInfo = {
+              receipt_hash: "",
+              rail: challenge.payment.scheme === "escrow" ? "escrow" : "x402",
+              payer: signerWallet.address,
+              miner: challenge.payment.payTo,
+              intent: "",
+              amount_uusdc: challenge.payment.amount,
+              epoch_id: 0,
+              settlement: result.paymentResponse ?? "",
+              chain: challenge.payment.network,
+              timestamp: Date.now(),
+            };
+            if (typeof result.receipt === "string" && result.receipt) {
+              try {
+                Object.assign(receipt, JSON.parse(atob(result.receipt)) as Partial<ReceiptInfo>);
+              } catch {
+                /* keep the locally known values */
+              }
+            }
             setAnswer({
               answer: {
                 result: minerResult,
@@ -678,18 +699,7 @@ export default function TerminalClient({
                 minerId: typeof nodeBody?.miner_id === "string" ? nodeBody.miner_id : undefined,
               },
               signalHash,
-              receipt: {
-                receipt_hash: result.receipt ?? "",
-                rail: challenge.payment.scheme === "escrow" ? "escrow" : "x402",
-                payer: signerWallet.address,
-                miner: challenge.payment.payTo,
-                intent: "",
-                amount_uusdc: challenge.payment.amount,
-                epoch_id: 0,
-                settlement: result.paymentResponse ?? "",
-                chain: challenge.payment.network,
-                timestamp: Date.now(),
-              },
+              receipt,
               settlement: result.paymentResponse,
             });
             setChallenge(null);

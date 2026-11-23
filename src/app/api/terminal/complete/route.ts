@@ -38,6 +38,18 @@ function activityRef(activity: Awaited<ReturnType<typeof recordTerminalOutcome>>
   return activity.saved ? { id: activity.id, saved: true } : { saved: false, detail: activity.detail };
 }
 
+/** X-PAYMENT-RESPONSE is base64 JSON; only a real receipt is accepted. */
+function receiptFromPaymentResponse(raw: string | null): ReturnType<typeof extractReceipt> {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64").toString("utf8")) as { receipt_hash?: unknown };
+    if (typeof parsed.receipt_hash !== "string") return null;
+    return parsed as unknown as NonNullable<ReturnType<typeof extractReceipt>>;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: Request) {
   let input: {
     urlPath?: string;
@@ -101,8 +113,11 @@ export async function POST(req: Request) {
     parsed = text.slice(0, 400);
   }
 
-  const receipt = extractReceipt(res.headers);
   const paymentResponse = res.headers.get("payment-response") ?? res.headers.get("x-payment-response");
+  // Escrow answers carry the standard receipt in X-PAYMENT-RESPONSE (base64
+  // JSON); the exact rail also sets X-TELEGRAPH-RECEIPT. Read both, so an
+  // escrow purchase can be recorded in Activity instead of being session-only.
+  const receipt = extractReceipt(res.headers) ?? receiptFromPaymentResponse(paymentResponse);
   const signalHash =
     parsed && typeof parsed === "object" && "signal_hash" in parsed
       ? String((parsed as { signal_hash?: string }).signal_hash ?? "")
@@ -140,7 +155,9 @@ export async function POST(req: Request) {
         status: res.status,
         body: parsed,
         paymentResponse,
-        receipt: res.headers.get("x-telegraph-receipt"),
+        // Normalized to base64 JSON for both rails, so the client can show the
+        // committed hash and amount rather than a header blob or a blank.
+        receipt: Buffer.from(JSON.stringify(receipt), "utf8").toString("base64"),
         activity: activityRef(activity),
       });
     }
