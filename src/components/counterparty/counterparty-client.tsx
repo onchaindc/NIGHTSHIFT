@@ -165,7 +165,18 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
         // and the post-purchase analysis all describe the same ask.
         setProbe({
           kind: "challenge",
-          offer: { ...o, request: { company: company.trim(), jurisdiction: jurisdiction.trim() || undefined } },
+          offer: {
+            ...o,
+            // Freeze the normalized values the node was actually asked for, so
+            // the approval card and the analysis describe the same request.
+            request: {
+              company: company.trim(),
+              jurisdiction:
+                typeof o.body?.params?.jurisdiction === "string"
+                  ? o.body.params.jurisdiction
+                  : jurisdiction.trim() || undefined,
+            },
+          },
         });
         setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
         return;
@@ -342,13 +353,36 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
         analyze(signalHash, bodyResult, offer.request);
         return;
       }
-      const detail =
+      const rawDetail =
         result.status === 402
           ? (typeof result.error === "string" && result.error
               ? `${result.error} Nothing settled on chain, and this flow never re-sends a refused payment.`
               : "The signed payment did not verify (bare 402). Nothing settled on chain, and this flow never re-sends a refused payment.")
-          : result.error ?? JSON.stringify(result.body ?? result).slice(0, 300);
-      setFailure({ heading: result.status === 402 ? "Payment refused by the network" : "Payment failed", detail });
+          : (result.error ?? JSON.stringify(result.body ?? result).slice(0, 300));
+
+      // A 5xx is the MINER's answer, not a broken payment: the ask was priced
+      // and sent, so it may have been charged even though nothing came back.
+      // Say that plainly, and point at the input the registry actually needs.
+      const minerFailure =
+        result.status >= 500 && /miner error|NOT_FOUND|SEARCH_TOO_BROAD|No exact/i.test(rawDetail);
+      let detail = rawDetail;
+      if (minerFailure) {
+        if (/SEARCH_TOO_BROAD|organi[sz]ation number/i.test(rawDetail)) {
+          detail += " Put the 9-digit organisation number in the name field for a Norwegian lookup.";
+        } else if (/No exact|NOT_FOUND/i.test(rawDetail)) {
+          detail += " Use the registered legal name exactly as the register holds it, including the legal suffix.";
+        }
+        detail += " The ask was priced and sent, so it may still have been charged — check Wallet and Activity.";
+      }
+      setFailure({
+        heading:
+          result.status === 402
+            ? "Payment refused by the network"
+            : minerFailure
+              ? "The specialist found no match"
+              : "Payment failed",
+        detail,
+      });
     } catch (err) {
       const aborted = err instanceof DOMException && err.name === "AbortError";
       const msg = aborted
@@ -448,22 +482,22 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
         <div className="space-y-4 px-4 py-4 sm:px-5">
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
             <div>
-              <label htmlFor="cp-company" className="x-label">Company name</label>
+              <label htmlFor="cp-company" className="x-label">Registered legal name</label>
               <input
                 id="cp-company"
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
-                placeholder="e.g. Equinor ASA"
+                placeholder="e.g. Amazon.com, Inc."
                 className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
               />
             </div>
             <div>
-              <label htmlFor="cp-jurisdiction" className="x-label">Jurisdiction <span className="text-ink-faint">(optional)</span></label>
+              <label htmlFor="cp-jurisdiction" className="x-label">Jurisdiction</label>
               <input
                 id="cp-jurisdiction"
                 value={jurisdiction}
                 onChange={(e) => setJurisdiction(e.target.value)}
-                placeholder="e.g. Norway"
+                placeholder="e.g. United States or US"
                 className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
               />
             </div>
@@ -471,14 +505,20 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
           <button
             type="button"
             onClick={runProbe}
-            disabled={company.trim().length < 2 || probe.kind === "probing"}
+            disabled={company.trim().length < 2 || jurisdiction.trim().length < 2 || probe.kind === "probing"}
             className="btn-primary inline-flex items-center gap-2"
           >
             {probe.kind === "probing" ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Search size={14} aria-hidden />}
             {probe.kind === "probing" ? "Asking the network…" : "Check price"}
           </button>
+          <p className="text-[11.5px] leading-relaxed text-ink-faint">
+            The specialist matches the <span className="text-ink-soft">registered legal name</span> exactly, so include
+            the legal suffix (Amazon.com, Inc. · SHELL PLC · Equinor ASA). Norwegian lookups also accept the 9-digit
+            organisation number in the name field. Country names are sent as ISO codes (United States → US).
+          </p>
           <p className="text-[11.5px] text-ink-faint">
-            The price check is free: the node validates the request and returns the live offer before any payment exists.
+            The price check is free. The ask itself is charged once you approve it — including when the registry finds
+            no exact match.
           </p>
         </div>
       </section>
