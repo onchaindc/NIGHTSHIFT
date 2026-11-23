@@ -55,6 +55,9 @@ export function SiteFooter() {
                 <Ref href="/terminal">Ask the network</Ref>
               </li>
               <li>
+                <Ref href="/minds">Minds</Ref>
+              </li>
+              <li>
                 <Ref href="/miners">Miner catalog</Ref>
               </li>
               <li>

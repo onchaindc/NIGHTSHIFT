@@ -70,7 +70,7 @@ export async function POST(req: Request) {
     });
     if (balance > 0n) {
       return NextResponse.json(
-        { error: "This wallet already holds test USDC — you can ask right away." },
+        { error: "This wallet already holds test USDC — no deposit needed." },
         { status: 409 },
       );
     }
