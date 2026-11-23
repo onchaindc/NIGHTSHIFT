@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, Code2, Compass, Radar, ReceiptText, Wallet, type LucideIcon } from "lucide-react";
+import { BrainCircuit, Compass, Radar, ReceiptText, Wallet, type LucideIcon } from "lucide-react";
 
 /**
  * The phone's map. The areas live within thumb reach at the bottom while the
@@ -12,11 +12,10 @@ type Item = { href: string; label: string; icon: LucideIcon; activeFor?: string[
 
 const ITEMS: Item[] = [
   { href: "/miners", label: "Explorer", icon: Compass, activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
-  { href: "/counterparty", label: "Intel", icon: Building2 },
+  { href: "/minds", label: "Minds", icon: BrainCircuit },
   { href: "/signals", label: "Signals", icon: Radar },
-  { href: "/activity", label: "Activity", icon: ReceiptText },
   { href: "/funds", label: "Wallet", icon: Wallet },
-  { href: "/developers", label: "Developers", icon: Code2 },
+  { href: "/activity", label: "Activity", icon: ReceiptText },
 ];
 
 export function MobileTabBar() {

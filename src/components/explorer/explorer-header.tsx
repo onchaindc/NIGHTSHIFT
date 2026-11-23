@@ -11,11 +11,10 @@ import { Wordmark } from "@/components/explorer/brand";
 /** The product's areas, in the order a newcomer needs them. */
 const AREAS = [
   { href: "/miners", label: "Explorer", activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
-  { href: "/counterparty", label: "Intel" },
+  { href: "/minds", label: "Minds" },
   { href: "/signals", label: "Signals" },
-  { href: "/activity", label: "Activity" },
   { href: "/funds", label: "Wallet" },
-  { href: "/developers", label: "Developers" },
+  { href: "/activity", label: "Activity" },
 ];
 
 /** What the Explorer contains, in the network's own words. Every tab is a
@@ -51,6 +50,12 @@ export function ExplorerHeader() {
         </nav>
 
         <div className="flex items-center gap-2 justify-self-end">
+          <Link
+            href="/developers"
+            className="hidden rounded-lg px-2.5 py-1.5 text-[12px] text-ink-faint transition-colors hover:text-ink sm:inline-flex"
+          >
+            Developers
+          </Link>
           <ThemeToggle />
           <Link
             href="/terminal"

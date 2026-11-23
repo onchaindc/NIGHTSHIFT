@@ -421,11 +421,14 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <p className="x-tag">TELEGRAPH · COUNTERPARTY INTEL</p>
-      <h1 className="x-display-1 mt-3 text-ink">Counterparty Intel</h1>
+      <Link href="/minds" className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
+        ← All Minds
+      </Link>
+      <p className="x-tag mt-4">MINDS · COUNTERPARTY</p>
+      <h1 className="x-display-1 mt-3 text-ink">Counterparty intelligence</h1>
       <p className="mt-4 max-w-[62ch] text-[14px] leading-relaxed text-ink-soft">
-        Name a company; the network answers from a corporate-registry service, paid per request through
-        your wallet. What you see is the hash-committed answer — verified against the signal registry and
+        Name a company; a pinned corporate-registry specialist answers, paid per request through your
+        wallet. What you see is the hash-committed answer — verified against the signal registry and
         split into facts, gaps, and conflicts.
       </p>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-faint">

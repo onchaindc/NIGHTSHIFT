@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
       { source: "/settings", destination: "/developers", permanent: false },
       // The tab says Wallet; keep the old-ish path working for links and bookmarks.
       { source: "/wallet", destination: "/funds", permanent: false },
+      // Counterparty intelligence became the first Mind; keep old links working.
+      { source: "/counterparty", destination: "/minds/counterparty", permanent: false },
     ];
   },
 };
