@@ -36,6 +36,7 @@ import type { IndexDeskReport } from "@/lib/indexdesk/report";
 import {
   DESK_STATE_META,
   deskHrefWithTask,
+  deskSessionView,
   deskSnapshot,
   deskTaskParam,
   dimensionLabel,
@@ -43,38 +44,26 @@ import {
   friendlyDeskError,
   parseCustomWeights,
   parseSpendLimitUsd,
+  restrictedViewVisible,
   sanitizeDeskMessage,
   type DeskEvidence,
+  type DeskSession,
   type DeskTaskSnapshot,
 } from "@/lib/indexdesk/desk-ui";
+import {
+  addAssetRow,
+  createAssetRow,
+  removeAssetRow,
+  rowFieldName,
+  updateAssetRow,
+  type AssetRow,
+} from "@/lib/indexdesk/desk-rows";
 
 export interface IndexDeskGuarantees {
   nodeUrl: string;
   coverage: Array<{ dimension: string; intent: string; miner: string; price: string }>;
   notCovered: string[];
 }
-
-interface AssetRow {
-  symbol: string;
-  company: string;
-  jurisdiction: string;
-  chain: string;
-  pool: string;
-  declaredSupply: string;
-  declaredPrice: string;
-  declaredVolume: string;
-}
-
-const emptyRow = (): AssetRow => ({
-  symbol: "",
-  company: "",
-  jurisdiction: "",
-  chain: "ethereum",
-  pool: "",
-  declaredSupply: "",
-  declaredPrice: "",
-  declaredVolume: "",
-});
 
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -119,7 +108,8 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const [scheme, setScheme] = useState<"equal" | "market_cap" | "custom">("equal");
   const [notes, setNotes] = useState("");
   const [customWeights, setCustomWeights] = useState("");
-  const [rows, setRows] = useState<AssetRow[]>([emptyRow(), emptyRow()]);
+  const [rows, setRows] = useState<AssetRow[]>(() => [createAssetRow(), createAssetRow()]);
+  const [session, setSession] = useState<DeskSession>("loading");
   const [mode, setMode] = useState<"free" | "intel">("free");
   const [spendLimit, setSpendLimit] = useState("");
   const [creating, setCreating] = useState(false);
@@ -129,7 +119,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const [snap, setSnap] = useState<DeskTaskSnapshot | null>(null);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
   const [token, setToken] = useState("");
   const [signingIn, setSigningIn] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -147,6 +137,22 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   }, []);
 
   useEffect(() => stopPolling, [stopPolling]);
+
+  // Operator session state drives the sign-in panel and approval wording.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/status", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (!cancelled) setSession(deskSessionView(body));
+      })
+      .catch(() => {
+        if (!cancelled) setSession("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async (id: string) => {
     try {
@@ -198,8 +204,10 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
     window.history.replaceState(null, "", deskHrefWithTask(id));
   };
 
-  const updateRow = (i: number, patch: Partial<AssetRow>) => {
-    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  // Address rows by their stable id, never by array index: index edits are
+  // what let one asset inherit another's issuer fields after a removal.
+  const updateRow = (id: string, patch: Partial<Omit<AssetRow, "id">>) => {
+    setRows((rs) => updateAssetRow(rs, id, patch));
   };
 
   const buildDefinition = useCallback(() => {
@@ -284,7 +292,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       const body = (await res.json().catch(() => ({}))) as { task?: { id?: string }; error?: string };
       if (!res.ok || !body.task?.id) {
         setError(friendlyDeskError(res.status, body.error));
-        if (res.status === 401) setNeedsSignIn(true);
+        if (res.status === 401) setSession("anonymous");
         return;
       }
       setTaskId(body.task.id);
@@ -313,7 +321,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         if (!res.ok) {
           setActionError(friendlyDeskError(res.status, body.error));
-          if (res.status === 401) setNeedsSignIn(true);
+          if (res.status === 401) setSession("anonymous");
           return;
         }
         if (action === "approve") {
@@ -337,7 +345,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
     async (e: React.FormEvent) => {
       e.preventDefault();
       setSigningIn(true);
-      setActionError(null);
+      setSignInError(null);
       try {
         const res = await fetch("/api/session", {
           method: "POST",
@@ -346,30 +354,38 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
         });
         if (res.ok) {
           setToken("");
-          setNeedsSignIn(false);
+          setSession("authenticated");
+          setSignInError(null);
           setActionError(null);
+          // Re-read the active investigation at full clearance immediately.
+          if (taskId) void load(taskId);
         } else {
-          setActionError(
+          setSignInError(
             res.status === 401
-              ? "That operator passphrase was not accepted. Check it and try again."
+              ? "That operator token was not accepted. Check it and try again."
               : friendlyDeskError(res.status),
           );
         }
       } catch {
-        setActionError(friendlyDeskError(0));
+        setSignInError(friendlyDeskError(0));
       } finally {
         setSigningIn(false);
       }
-    },
-    [token],
+        },
+    [token, taskId, load],
   );
+
+  const signOut = useCallback(async () => {
+    await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
+    setSession("anonymous");
+    if (taskId) void load(taskId);
+  }, [taskId, load]);
 
   const reset = () => {
     stopPolling();
     setTaskId(null);
     setSnap(null);
     setActionError(null);
-    setNeedsSignIn(false);
     writeUrl(null);
   };
 
@@ -396,6 +412,87 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
         regulatory filings — and returns a deterministic constituent and weighting proposal with
         per-asset evidence, declared-vs-verified provenance and the missing-dimension ledger.
       </p>
+
+      {/* how it works */}
+      <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-edge bg-edge sm:grid-cols-3">
+        {[
+          { n: "1", title: "Define", body: "Name the universe and choose how it should be weighted." },
+          { n: "2", title: "Review", body: "Free probes price every ask; paid asks wait for your approval." },
+          { n: "3", title: "Read", body: "A reproducible proposal with evidence and stated gaps." },
+        ].map((step) => (
+          <div key={step.n} className="bg-panel px-4 py-3">
+            <p className="flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-ink-faint">
+              <span className="grid size-5 place-items-center rounded-full bg-panel-3 text-[10px] font-semibold text-ink-soft">{step.n}</span>
+              {step.title}
+            </p>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">{step.body}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* operator access: the one place sign-in lives, always reachable */}
+      <section id="operator-access" className="mt-6 scroll-mt-20 overflow-hidden rounded-xl border border-edge bg-panel">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
+          <p className="x-label">Operator access</p>
+          {session === "authenticated" ? (
+            <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal">
+              <span aria-hidden className="size-1.5 rounded-full bg-teal" /> Signed in
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint">
+              <span aria-hidden className="size-1.5 rounded-full bg-ink-faint/60" /> Browsing anonymously
+            </span>
+          )}
+        </div>
+        <div className="px-4 py-3 sm:px-5">
+          {session === "authenticated" ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[12px] leading-relaxed text-ink-soft">
+                This browser holds an operator session: paid intel desks and plan approvals are available.
+              </p>
+              <button
+                type="button"
+                onClick={signOut}
+                className="text-[11.5px] font-medium text-ink-faint transition-colors hover:text-ink"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <>
+              <p className="text-[12px] leading-relaxed text-ink-soft">
+                Free desks are open to everyone. Running a paid intel desk or approving its asks needs the
+                operator token — sign in here once; the token is verified server-side and is not stored in this page.
+              </p>
+              <form onSubmit={signIn} className="mt-2.5 flex flex-wrap items-end gap-2">
+                <label className="min-w-0 flex-1">
+                  <span className="x-label">Operator token</span>
+                  <input
+                    type="password"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder="Paste the operator token"
+                    autoComplete="off"
+                    className="mt-1 h-9 w-full rounded-md border border-edge bg-panel-2 px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={signingIn || !token}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink transition-colors hover:border-teal/50 hover:text-teal"
+                >
+                  {signingIn ? <Loader2 size={12} className="animate-spin" aria-hidden /> : null}
+                  Sign in
+                </button>
+              </form>
+              {signInError && <p className="mt-1.5 text-[12px] text-risk">{signInError}</p>}
+              {session === "unavailable" && (
+                <p className="mt-1.5 text-[11.5px] text-ink-faint">Session status could not be read; signing in still works.</p>
+              )}
+            </>
+          )}
+        </div>
+      </section>
 
       {/* 1 · define */}
       <section className="mt-8 overflow-hidden rounded-xl border border-edge bg-panel">
@@ -450,13 +547,13 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
           <div className="space-y-3">
             <p className="x-label">Universe <span className="text-ink-faint">— at least two assets</span></p>
             {rows.map((r, i) => (
-              <div key={i} className="rounded-lg border border-edge bg-panel-2 p-3">
+              <div key={r.id} className="rounded-lg border border-edge bg-panel-2 p-2.5">
                 <div className="flex items-center justify-between">
                   <p className="x-label">Asset {i + 1}</p>
                   {rows.length > 2 && (
                     <button
                       type="button"
-                      onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}
+                      onClick={() => setRows((rs) => removeAssetRow(rs, r.id))}
                       className="text-ink-faint transition-colors hover:text-risk"
                       aria-label={`Remove asset ${i + 1}`}
                     >
@@ -464,24 +561,30 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                     </button>
                   )}
                 </div>
-                <div className="mt-2 grid gap-2 sm:grid-cols-[110px_1fr_110px]">
+                <div className="mt-1.5 grid gap-2 sm:grid-cols-[92px_1fr_92px]">
                   <input
                     value={r.symbol}
-                    onChange={(e) => updateRow(i, { symbol: e.target.value.toUpperCase() })}
+                    name={rowFieldName(r.id, "symbol")}
+                    autoComplete="off"
+                    onChange={(e) => updateRow(r.id, { symbol: e.target.value.toUpperCase() })}
                     placeholder="SYMBOL"
                     aria-label={`Asset ${i + 1} symbol`}
                     className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
                   />
                   <input
                     value={r.company}
-                    onChange={(e) => updateRow(i, { company: e.target.value })}
+                    name={rowFieldName(r.id, "company")}
+                    autoComplete="off"
+                    onChange={(e) => updateRow(r.id, { company: e.target.value })}
                     placeholder="Issuer registered legal name"
                     aria-label={`Asset ${i + 1} issuer company`}
                     className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
                   />
                   <input
                     value={r.jurisdiction}
-                    onChange={(e) => updateRow(i, { jurisdiction: e.target.value })}
+                    name={rowFieldName(r.id, "jurisdiction")}
+                    autoComplete="off"
+                    onChange={(e) => updateRow(r.id, { jurisdiction: e.target.value })}
                     placeholder="ISO, e.g. US"
                     aria-label={`Asset ${i + 1} jurisdiction`}
                     className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
@@ -496,35 +599,45 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     <input
                       value={r.chain}
-                      onChange={(e) => updateRow(i, { chain: e.target.value })}
+                      name={rowFieldName(r.id, "chain")}
+                      autoComplete="off"
+                      onChange={(e) => updateRow(r.id, { chain: e.target.value })}
                       placeholder="chain (default ethereum)"
                       aria-label={`Asset ${i + 1} chain`}
                       className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
                     />
                     <input
                       value={r.pool}
-                      onChange={(e) => updateRow(i, { pool: e.target.value })}
+                      name={rowFieldName(r.id, "pool")}
+                      autoComplete="off"
+                      onChange={(e) => updateRow(r.id, { pool: e.target.value })}
                       placeholder="DEX pool (needed for liquidity)"
                       aria-label={`Asset ${i + 1} pool`}
                       className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
                     />
                     <input
                       value={r.declaredSupply}
-                      onChange={(e) => updateRow(i, { declaredSupply: e.target.value })}
+                      name={rowFieldName(r.id, "declaredSupply")}
+                      autoComplete="off"
+                      onChange={(e) => updateRow(r.id, { declaredSupply: e.target.value })}
                       placeholder="declared circulating supply"
                       aria-label={`Asset ${i + 1} declared supply`}
                       className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
                     />
                     <input
                       value={r.declaredPrice}
-                      onChange={(e) => updateRow(i, { declaredPrice: e.target.value })}
+                      name={rowFieldName(r.id, "declaredPrice")}
+                      autoComplete="off"
+                      onChange={(e) => updateRow(r.id, { declaredPrice: e.target.value })}
                       placeholder="declared price USD"
                       aria-label={`Asset ${i + 1} declared price`}
                       className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
                     />
                     <input
                       value={r.declaredVolume}
-                      onChange={(e) => updateRow(i, { declaredVolume: e.target.value })}
+                      name={rowFieldName(r.id, "declaredVolume")}
+                      autoComplete="off"
+                      onChange={(e) => updateRow(r.id, { declaredVolume: e.target.value })}
                       placeholder="declared 30d volume USD"
                       aria-label={`Asset ${i + 1} declared volume`}
                       className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge sm:col-span-2"
@@ -538,25 +651,27 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
             ))}
             <button
               type="button"
-              onClick={() => setRows((rs) => [...rs, emptyRow()])}
+              onClick={() => setRows((rs) => addAssetRow(rs))}
               className="inline-flex items-center gap-1.5 text-[12.5px] text-teal hover:underline"
             >
               <Plus size={13} aria-hidden /> Add asset
             </button>
           </div>
 
-          <div>
-            <label htmlFor="ix-notes" className="x-label">
-              Methodology notes <span className="text-ink-faint">— recorded verbatim (optional)</span>
-            </label>
+          <details className="group rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+            <summary className="flex cursor-pointer list-none items-center gap-1 text-[12px] text-ink-soft">
+              <ChevronRight size={12} aria-hidden className="transition-transform group-open:rotate-90" />
+              Methodology notes (optional)
+            </summary>
             <input
               id="ix-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="e.g. quarterly rebalance, capped at 30% per constituent"
-              className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+              className="mt-2 h-9 w-full rounded-md border border-edge bg-panel px-2.5 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
             />
-          </div>
+            <p className="mt-1 text-[11px] text-ink-faint">Recorded verbatim in the proposal.</p>
+          </details>
 
           <div className="grid gap-4 border-t border-edge pt-4 sm:grid-cols-2">
             <div>
@@ -567,9 +682,16 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                 onChange={(e) => setMode(e.target.value as typeof mode)}
                 className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none focus:ring-1 focus:ring-edge"
               >
-                <option value="free">Free — no purchases</option>
+                <option value="free">Free — probes only, no purchases</option>
                 <option value="intel">Intel — paid asks after you approve</option>
               </select>
+              <p className="mt-1.5 text-[11px] text-ink-faint">
+                {mode === "intel" && session !== "authenticated"
+                  ? "Paid intel needs the operator session above; running it anonymously is refused."
+                  : mode === "intel"
+                    ? "Plans one paid ask per verified dimension and waits for approval."
+                    : "Probes and declared inputs only; nothing is purchased."}
+              </p>
             </div>
             {mode === "intel" && (
               <div>
@@ -709,7 +831,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                     <button
                       type="button"
                       onClick={() => act("approve")}
-                      disabled={acting !== null}
+                      disabled={acting !== null || session === "anonymous"}
                       className="btn-primary inline-flex items-center gap-2"
                     >
                       {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
@@ -718,43 +840,19 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                     <button
                       type="button"
                       onClick={() => act("reject")}
-                      disabled={acting !== null}
+                      disabled={acting !== null || session === "anonymous"}
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink-soft transition-colors hover:border-risk/40 hover:text-risk"
                     >
                       Reject
                     </button>
                   </div>
-
-                  {(needsSignIn || actionError) && (
-                    <div className="mt-3 border-t border-amber/30 pt-3">
-                      {actionError && <p className="text-[12px] text-risk">{actionError}</p>}
-                      <form onSubmit={signIn} className="mt-2 flex flex-wrap items-end gap-2">
-                        <label className="min-w-0 flex-1">
-                          <span className="x-label">Operator sign-in</span>
-                          <input
-                            type="password"
-                            value={token}
-                            onChange={(e) => setToken(e.target.value)}
-                            placeholder="Operator passphrase"
-                            autoComplete="current-password"
-                            className="mt-1 h-9 w-full rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
-                          />
-                        </label>
-                        <button
-                          type="submit"
-                          disabled={signingIn || !token}
-                          className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink transition-colors hover:border-teal/50 hover:text-teal"
-                        >
-                          {signingIn ? <Loader2 size={12} className="animate-spin" aria-hidden /> : null}
-                          Sign in
-                        </button>
-                      </form>
-                      <p className="mt-1 text-[11px] text-ink-faint">
-                        Same passphrase as the deployment&apos;s operator credential. It is verified server-side;
-                        nothing is stored in this page.
-                      </p>
-                    </div>
+                  {session === "anonymous" && (
+                    <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+                      <a href="#operator-access" className="text-teal hover:underline">Sign in under Operator access</a>{" "}
+                      to approve or reject this plan. Your approval releases the paid asks.
+                    </p>
                   )}
+                  {actionError && <p className="mt-2 text-[12px] text-risk">{actionError}</p>}
                 </div>
               )}
 
@@ -782,15 +880,17 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                 </div>
               )}
 
-              {/* restricted view */}
-              {snap?.redacted && (
+              {/* restricted view: only when a completed report is withheld */}
+              {restrictedViewVisible(snap) && (
                 <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] leading-relaxed text-ink-soft">
                   <p className="flex items-center gap-1.5 font-medium text-amber-deep">
-                    <Lock size={13} aria-hidden /> Restricted view
+                    <Lock size={13} aria-hidden /> Completed · private to the operator
                   </p>
                   <p className="mt-1.5">
-                    You are viewing anonymously, so objectives, proposals, evidence and spend entries do not cross
-                    the public gate. Sign in above (from any awaiting plan) to read the full desk report.
+                    The investigation finished, but its proposal, per-asset evidence and spend ledger do not cross
+                    the public gate.{" "}
+                    <a href="#operator-access" className="text-teal hover:underline">Sign in under Operator access</a>{" "}
+                    to read the full report.
                   </p>
                 </div>
               )}
