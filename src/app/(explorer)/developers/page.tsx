@@ -388,12 +388,17 @@ export default function DevelopersPage() {
               <Api method="GET" path="/api/tasks · /api/tasks/{id}" access="public">
                 Task records with full execution timelines, spend entries and evidence.
               </Api>
-              <Api method="POST" path="/api/tasks" access="public">
-                Submit a goal: goal, spendLimitUsdCents, requiresApproval, mode (auto|free|paid). A request marked
-                free can never be purchased.
+              <Api method="POST" path="/api/tasks" access="free public · paid token">
+                Submit a goal: goal, spendLimitUsdCents, mode (auto|free|paid). Free goals stay public; auto and
+                paid goals require the operator bearer token and always stop at the approval gate.
               </Api>
-              <Api method="POST" path="/api/tasks/{id}/action" access="public">
-                Explicit plan approval or rejection before paid steps run.
+              <Api method="POST" path="/api/tasks/{id}/action" access="token-gated">
+                Explicit plan approval or rejection before paid steps run. Operator-only: approval is what releases
+                a purchase.
+              </Api>
+              <Api method="POST" path="/api/mind/investigations" access="free public · intel token">
+                Investigation tool. Free mode is public and spends nothing; intel mode requires the operator token
+                and always waits for human approval.
               </Api>
               <Api method="POST" path="/api/terminal/preview" access="public">
                 Unpaid pre-flight of an assembled ask; returns the live 402 offer without signing.
@@ -413,8 +418,8 @@ export default function DevelopersPage() {
                 Read-only aggregates for the Explorer and a relay of the Daemon feed (no operator data).
               </Api>
               <Api method="MIX" path="/api/watches/{id}/(check|scheduler-tick)" access="token-gated">
-                Protocol Watch management, check runs and scheduler tick are gated behind the NIGHTSHIFT_API_TOKEN
-                bearer when configured — the only privileged operator surface this deployment exposes.
+                Protocol Watch management, check runs and scheduler tick require the NIGHTSHIFT_API_TOKEN bearer
+                (the scheduler also accepts Vercel Cron&apos;s CRON_SECRET). The gate fails closed when neither is set.
               </Api>
               <Api method="POST" path="/api/telegram/webhook" access="secret-checked">
                 Telegram Bot API webhook validated by TELEGRAM_WEBHOOK_SECRET (accepts all updates while unset, e.g.

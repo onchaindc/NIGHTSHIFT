@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { autoCheckEnabled, runAutoScanOnce } from "@/lib/watch/scheduler";
-import { requestAuthorized } from "@/lib/api/auth";
+import { cronAuthorized, requestAuthorized } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,11 +18,11 @@ export const maxDuration = 60;
  * duplicate workers, idempotent via persisted fingerprints (a repeated tick
  * can never double-report a change).
  *
- * Auth: gated by NIGHTSHIFT_API_TOKEN exactly like other watch-management
- * calls when that token is configured.
+ * Auth: the operator token, or the CRON_SECRET Vercel Cron presents as its
+ * bearer token. Fails closed when neither is configured.
  */
 async function tick(req: NextRequest) {
-  if (!requestAuthorized(req)) {
+  if (!requestAuthorized(req) && !cronAuthorized(req)) {
     return NextResponse.json(
       { error: "authorization required: this deployment gates watch management behind a bearer token (NIGHTSHIFT_API_TOKEN)" },
       { status: 401 },

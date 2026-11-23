@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { approveTask, rejectTask, defaultDeps } from "@/lib/engine/engine";
 import { getTask } from "@/lib/engine/store";
+import { requestAuthorized } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,8 +13,18 @@ export const maxDuration = 60;
  * POST /api/tasks/:id/action - { action: "approve" | "reject" }
  * Approve resumes execution (the engine enforces that only a task in
  * awaiting_approval can proceed); reject terminates without any spend.
+ *
+ * Operator-only: approval is what releases paid steps, so it must never be
+ * reachable by an anonymous caller.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  if (!requestAuthorized(req)) {
+    return NextResponse.json(
+      { error: "authorization required: approving or rejecting a plan releases paid execution, so it is gated behind a bearer token (NIGHTSHIFT_API_TOKEN)" },
+      { status: 401 },
+    );
+  }
+
   const { id } = await ctx.params;
   let body: { action?: unknown };
   try {

@@ -1,17 +1,17 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 /**
- * Operator-gate for watch-management APIs.
+ * Operator gate for every API that can create, approve, execute or spend.
  *
- * NIGHTSHIFT has no user accounts: it is a single-operator deployment. When
- * NIGHTSHIFT_API_TOKEN is set, mutating watch-management requests
- * (create/delete a watch, trigger a check, including any paid investigation
- * mode) must present `Authorization: Bearer <token>`; every other request is
- * rejected with 401. When the token is NOT set the deployment runs in "open"
- * mode, which /api/status reports honestly as less hardened so an operator
- * cannot mistake the two.
+ * NIGHTSHIFT has no user accounts: it is a single-operator deployment, so the
+ * operator token is the only identity the server can check. The gate FAILS
+ * CLOSED: when NIGHTSHIFT_API_TOKEN is not configured there is no way to tell
+ * an operator from an anonymous caller, so sensitive routes authorize nobody.
+ * /api/status reports that state honestly as "open" so it is never mistaken
+ * for a hardened deployment.
  *
- * Reads (GETs of configs and history) stay public: configs are non-secret.
+ * Reads (GETs of history, status, catalogues) stay public: they are
+ * non-secret and spend nothing.
  */
 
 export type ApiAuthMode = "open" | "token";
@@ -20,13 +20,38 @@ export function apiAuthMode(): ApiAuthMode {
   return process.env.NIGHTSHIFT_API_TOKEN ? "token" : "open";
 }
 
-export function requestAuthorized(req: Request): boolean {
-  if (apiAuthMode() === "open") return true;
-  const header = req.headers.get("authorization") ?? "";
-  const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!presented) return false;
-  const expected = process.env.NIGHTSHIFT_API_TOKEN ?? "";
+/** Constant-time comparison of a presented secret against a configured one. */
+function secretMatches(presented: string, expected: string): boolean {
   const a = createHash("sha256").update(presented).digest();
   const b = createHash("sha256").update(expected).digest();
   return timingSafeEqual(a, b);
+}
+
+function bearer(req: Request): string {
+  const header = req.headers.get("authorization") ?? "";
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
+}
+
+/**
+ * `Authorization: Bearer <NIGHTSHIFT_API_TOKEN>`. Always false when the token
+ * is unset — an unconfigured deployment never authorizes a privileged call.
+ */
+export function requestAuthorized(req: Request): boolean {
+  const expected = process.env.NIGHTSHIFT_API_TOKEN ?? "";
+  if (!expected) return false;
+  const presented = bearer(req);
+  if (!presented) return false;
+  return secretMatches(presented, expected);
+}
+
+/**
+ * Vercel Cron sends `Authorization: Bearer $CRON_SECRET` when that variable is
+ * configured. Accepted only for the scheduler tick, and never when unset.
+ */
+export function cronAuthorized(req: Request): boolean {
+  const expected = process.env.CRON_SECRET ?? "";
+  if (!expected) return false;
+  const presented = bearer(req);
+  if (!presented) return false;
+  return secretMatches(presented, expected);
 }
