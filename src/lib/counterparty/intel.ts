@@ -88,13 +88,70 @@ export function validateCounterpartyRequest(req: CounterpartyRequest): { ok: tru
 }
 
 /**
+ * Country names and common spellings → ISO 3166-1 alpha-2. The specialist
+ * routes lookups by jurisdiction code; "USA" or "United Kingdom" is not the
+ * same input as "US" / "GB", and a name it cannot route is charged and then
+ * answered with "no match". Codes are passed through uppercased and an
+ * unknown name is sent verbatim (the node may still understand it).
+ */
+const JURISDICTION_CODES: Record<string, string> = {
+  norway: "NO",
+  norge: "NO",
+  "united states": "US",
+  "united states of america": "US",
+  usa: "US",
+  us: "US",
+  "united kingdom": "GB",
+  uk: "GB",
+  "great britain": "GB",
+  england: "GB",
+  scotland: "GB",
+  wales: "GB",
+  ireland: "IE",
+  germany: "DE",
+  deutschland: "DE",
+  france: "FR",
+  netherlands: "NL",
+  "the netherlands": "NL",
+  belgium: "BE",
+  switzerland: "CH",
+  austria: "AT",
+  spain: "ES",
+  italy: "IT",
+  portugal: "PT",
+  poland: "PL",
+  sweden: "SE",
+  denmark: "DK",
+  finland: "FI",
+  estonia: "EE",
+  latvia: "LV",
+  lithuania: "LT",
+  canada: "CA",
+  australia: "AU",
+  singapore: "SG",
+  japan: "JP",
+  "hong kong": "HK",
+  india: "IN",
+  brazil: "BR",
+  "south africa": "ZA",
+};
+
+export function normalizeJurisdiction(value: string): string {
+  const raw = value.trim();
+  if (!raw) return "";
+  if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
+  const key = raw.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+  return JURISDICTION_CODES[key] ?? raw;
+}
+
+/**
  * The canonical paid body: the intent plus typed params, pinned to the
  * primary provider. This is exactly the shape the node's input schema v3
  * echoes back, so the user sees what the miner was paid to answer.
  */
 export function buildCounterpartySpec(req: CounterpartyRequest): AskRequestSpec {
   const params: Record<string, unknown> = { company: req.company.trim() };
-  const jurisdiction = typeof req.jurisdiction === "string" ? req.jurisdiction.trim() : "";
+  const jurisdiction = typeof req.jurisdiction === "string" ? normalizeJurisdiction(req.jurisdiction) : "";
   if (jurisdiction) params.jurisdiction = jurisdiction;
   return { intent: COUNTERPARTY_INTENT, params, minerId: COUNTERPARTY_PRIMARY_MINER };
 }
