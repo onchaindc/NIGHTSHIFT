@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { telegraphNodeUrl, decodeChallenge, extractReceipt } from "@/lib/telegraph/client";
+import { telegraphNodeUrl, telegraphFetch, decodeChallenge, extractReceipt } from "@/lib/telegraph/client";
 import { recordTerminalOutcome } from "@/lib/terminal/store";
 import { payerFromSettlement } from "@/lib/terminal/activity";
 import { normalizeAskPath } from "@/lib/terminal/paths";
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
   const node = telegraphNodeUrl();
   let res: Response | null = null;
   try {
-    res = await fetch(`${node}${urlPath}`, {
+    res = await telegraphFetch(`${node}${urlPath}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

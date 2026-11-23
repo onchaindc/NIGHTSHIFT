@@ -83,6 +83,29 @@ export function telegraphNodeUrl(): string {
   return (process.env.TELEGRAPH_NODE_URL || DEFAULT_NODE_URL).replace(/\/+$/, "");
 }
 
+/**
+ * Every server→node call goes through this fetch. The node's edge (Cloudflare)
+ * answers a PAID POST whose HTTP client sends no User-Agent (Node's undici
+ * default) with a bare 402 even when the signature is valid — observed live on
+ * 2026-11-22: the identical challenge/signature flow settles once a UA is
+ * present, while the unpaid probe succeeds either way. The UA here identifies
+ * this client honestly; nothing about the request pretends to be a browser.
+ */
+const TELEGRAPH_UA = "NIGHTSHIFT/1.0 (Telegraph x402 client)";
+
+export function telegraphFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (input instanceof Request) {
+    // wrapFetchWithPayment always hands over a Request with the payment header
+    // already set on its headers: add ours there (passing init.headers would
+    // REPLACE the Request's headers per fetch spec and strip the payment).
+    input.headers.set("User-Agent", TELEGRAPH_UA);
+    return fetch(input, init);
+  }
+  const headers = new Headers(init?.headers);
+  headers.set("User-Agent", TELEGRAPH_UA);
+  return fetch(input, { ...init, headers });
+}
+
 /** Returns the env keys missing for PAID inference. Discovery needs none. */
 export function missingPaidCredentials(): string[] {
   return process.env.TELEGRAPH_EVM_PRIVATE_KEY ? [] : ["TELEGRAPH_EVM_PRIVATE_KEY"];
@@ -106,7 +129,7 @@ export interface MinerSummary {
 
 export async function listMiners(intent?: string): Promise<MinerSummary[]> {
   const qs = intent ? `?intent=${encodeURIComponent(intent)}` : "";
-  const res = await fetch(`${telegraphNodeUrl()}/api/miners${qs}`, { cache: "no-store" });
+  const res = await telegraphFetch(`${telegraphNodeUrl()}/api/miners${qs}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`miners discovery failed: HTTP ${res.status}`);
   return (await res.json()) as MinerSummary[];
 }
@@ -118,7 +141,7 @@ export interface IntentSummary {
 }
 
 export async function listIntents(): Promise<IntentSummary[]> {
-  const res = await fetch(`${telegraphNodeUrl()}/engine/v1/intents`, { cache: "no-store" });
+  const res = await telegraphFetch(`${telegraphNodeUrl()}/engine/v1/intents`, { cache: "no-store" });
   if (!res.ok) throw new Error(`intents discovery failed: HTTP ${res.status}`);
   const body = (await res.json()) as { intents: IntentSummary[] };
   return body.intents ?? [];
@@ -366,7 +389,7 @@ export async function askAuto(opts: AskOptions): Promise<TelegraphAnswer> {
   let probedOffer: { network: string; asset?: string; payTo?: string; amountCents: number } | null = null;
 
   // Step 1: free attempt. Receipt shows the challenge; nothing is charged.
-  const probe = await fetch(`${node}/engine/v1/ask`, {
+  const probe = await telegraphFetch(`${node}/engine/v1/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
@@ -417,7 +440,7 @@ export async function askAuto(opts: AskOptions): Promise<TelegraphAnswer> {
     paymentRequirementsSelector: (_version, accepts) =>
       selectTelegraphRequirement(accepts as never, offer, opts.remainingBudgetUsdCents) as never,
   });
-  const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+  const fetchWithPayment = wrapFetchWithPayment(telegraphFetch, client);
 
   let res: Response;
   try {
@@ -506,7 +529,7 @@ export interface SignalRecord {
  * independent of key ordering).
  */
 export async function lookupSignal(signalHash: string): Promise<SignalRecord> {
-  const res = await fetch(`${telegraphNodeUrl()}/engine/v1/signal/${encodeURIComponent(signalHash)}`, {
+  const res = await telegraphFetch(`${telegraphNodeUrl()}/engine/v1/signal/${encodeURIComponent(signalHash)}`, {
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`signal lookup failed: HTTP ${res.status}`);

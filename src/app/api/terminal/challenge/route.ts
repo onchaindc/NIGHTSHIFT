@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { telegraphNodeUrl, decodeChallenge, escrowEvmOffer, exactEvmOffer } from "@/lib/telegraph/client";
+import { telegraphNodeUrl, telegraphFetch, decodeChallenge, escrowEvmOffer, exactEvmOffer } from "@/lib/telegraph/client";
 import { normalizeAskPath } from "@/lib/terminal/paths";
 
 /** POST /api/terminal/challenge — return the live x402 challenge for client signing. */
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   }
 
   const node = telegraphNodeUrl();
-  const res = await fetch(`${node}${urlPath}`, {
+  const res = await telegraphFetch(`${node}${urlPath}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body.body ?? {}),

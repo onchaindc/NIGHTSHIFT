@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Code2, Compass, Radar, ReceiptText, Wallet, type LucideIcon } from "lucide-react";
+import { Building2, Code2, Compass, Radar, ReceiptText, Wallet, type LucideIcon } from "lucide-react";
 
 /**
  * The phone's map. The areas live within thumb reach at the bottom while the
@@ -12,6 +12,7 @@ type Item = { href: string; label: string; icon: LucideIcon; activeFor?: string[
 
 const ITEMS: Item[] = [
   { href: "/miners", label: "Explorer", icon: Compass, activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
+  { href: "/counterparty", label: "Intel", icon: Building2 },
   { href: "/signals", label: "Signals", icon: Radar },
   { href: "/activity", label: "Activity", icon: ReceiptText },
   { href: "/funds", label: "Wallet", icon: Wallet },
@@ -43,7 +44,7 @@ export function MobileTabBar() {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex min-h-14 flex-1 flex-col items-center justify-center gap-1 pb-1.5 pt-2 text-[10px] transition-colors active:bg-panel-3 ${
+                className={`relative flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1 px-0.5 pb-1.5 pt-2 text-[10px] transition-colors active:bg-panel-3 ${
                   active ? "text-teal" : "text-ink-faint hover:text-ink"
                 }`}
               >
@@ -51,7 +52,7 @@ export function MobileTabBar() {
                   <span aria-hidden className="absolute inset-x-0 top-0 mx-auto h-[2px] w-7 rounded-b-full bg-teal" />
                 )}
                 <Icon size={19} strokeWidth={active ? 2.1 : 1.6} aria-hidden />
-                <span className={active ? "font-semibold" : "font-medium"}>{item.label}</span>
+                <span className={`w-full truncate text-center ${active ? "font-semibold" : "font-medium"}`}>{item.label}</span>
               </Link>
             );
           })}

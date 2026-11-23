@@ -32,6 +32,7 @@ import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { ExactEvmScheme } from "@x402/evm";
 import {
   decodeChallenge,
+  telegraphFetch,
   diagnosePaymentRejection,
   escrowEvmOffer,
   exactEvmOffer,
@@ -133,7 +134,7 @@ export async function probeAsk(
   const { body, urlPath } = assembled;
   const node = telegraphNodeUrl();
   try {
-    const res = await fetch(`${node}${urlPath}`, {
+    const res = await telegraphFetch(`${node}${urlPath}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -320,7 +321,7 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
         Number.POSITIVE_INFINITY,
       ) as never,
   });
-  const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+  const fetchWithPayment = wrapFetchWithPayment(telegraphFetch, client);
 
   let res: Response;
   try {
@@ -427,7 +428,7 @@ export async function verifySignal(signalHash: string): Promise<VerifyOutcome> {
   const node = telegraphNodeUrl();
   let record: Record<string, unknown> | null = null;
   try {
-    const res = await fetch(`${node}/engine/v1/signal/${encodeURIComponent(signalHash)}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    const res = await telegraphFetch(`${node}/engine/v1/signal/${encodeURIComponent(signalHash)}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
     if (!res.ok) {
       return { kind: "unverified", detail: `The signal registry answered HTTP ${res.status} — this call is not recorded there yet. A settlement usually appears within minutes; nothing is claimed verified until it does.` };
     }
