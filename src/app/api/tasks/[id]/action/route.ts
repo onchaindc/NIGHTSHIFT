@@ -15,12 +15,14 @@ export const maxDuration = 60;
  * awaiting_approval can proceed); reject terminates without any spend.
  *
  * Operator-only: approval is what releases paid steps, so it must never be
- * reachable by an anonymous caller.
+ * reachable by an anonymous caller. Accepted identity: the bearer token, or
+ * the operator session cookie established at /api/session (same privilege:
+ * both require knowing NIGHTSHIFT_API_TOKEN).
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   if (!requestAuthorized(req)) {
     return NextResponse.json(
-      { error: "authorization required: approving or rejecting a plan releases paid execution, so it is gated behind a bearer token (NIGHTSHIFT_API_TOKEN)" },
+      { error: "authorization required: approving or rejecting a plan releases paid execution, so it is gated behind the operator token or session" },
       { status: 401 },
     );
   }

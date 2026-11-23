@@ -10,8 +10,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
  * /api/status reports that state honestly as "open" so it is never mistaken
  * for a hardened deployment.
  *
- * Reads (GETs of history, status, catalogues) stay public: they are
- * non-secret and spend nothing.
+ * Writes and spends require the operator token. Reads return a PUBLIC
+ * PROJECTION to anonymous callers (discovery-level fields only) and full
+ * records to the operator: the bearer token, or the derived operator session
+ * cookie established via /api/session.
  */
 
 export type ApiAuthMode = "open" | "token";
@@ -27,21 +29,67 @@ function secretMatches(presented: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-function bearer(req: Request): string {
+/** Constant-time check of a presented operator token against the configured one. */
+export function presentedTokenMatches(presented: string): boolean {
+  const expected = process.env.NIGHTSHIFT_API_TOKEN ?? "";
+  if (!expected) return false;
+  return secretMatches(presented, expected);
+}
+
+/** The presented bearer token, or "" when the header is absent/malformed. */
+export function bearerTokenOf(req: Request): string {
   const header = req.headers.get("authorization") ?? "";
   return header.startsWith("Bearer ") ? header.slice(7) : "";
 }
 
 /**
- * `Authorization: Bearer <NIGHTSHIFT_API_TOKEN>`. Always false when the token
- * is unset — an unconfigured deployment never authorizes a privileged call.
+ * Operator browser session. NIGHTSHIFT_API_TOKEN must never appear in browser
+ * code or bundles, yet the console (Approvals, History, task detail) renders
+ * full records that anonymous visitors must not see. The operator therefore
+ * signs in once: the token is POSTed to /api/session over HTTPS, verified here
+ * constant-time, and an HttpOnly cookie holding a DERIVED verifier (not the
+ * token itself) is set. Read routes and console actions accept this cookie as
+ * operator identity; the raw token still works everywhere via the bearer
+ * header. Fails closed when the token (or the session) is not configured.
  */
-export function requestAuthorized(req: Request): boolean {
+export const OPERATOR_COOKIE = "ns_operator";
+const OPERATOR_COOKIE_CONTEXT = "ns-operator-session-v1";
+
+/** The cookie value a valid operator session presents, derived from the token. */
+export function expectedOperatorCookieValue(): string {
+  const token = process.env.NIGHTSHIFT_API_TOKEN ?? "";
+  if (!token) return "";
+  return createHash("sha256").update(`${token}|${OPERATOR_COOKIE_CONTEXT}`).digest("hex");
+}
+
+/** Authorization decision from already-parsed credentials. Always false when
+ *  NIGHTSHIFT_API_TOKEN is unset — an unconfigured deployment authorizes nobody. */
+export function requestAuthorizedFromParts(presentedBearer: string, operatorCookie: string | undefined): boolean {
   const expected = process.env.NIGHTSHIFT_API_TOKEN ?? "";
   if (!expected) return false;
-  const presented = bearer(req);
-  if (!presented) return false;
-  return secretMatches(presented, expected);
+  if (presentedBearer && secretMatches(presentedBearer, expected)) return true;
+  const expectedCookie = expectedOperatorCookieValue();
+  if (expectedCookie && operatorCookie && secretMatches(operatorCookie, expectedCookie)) return true;
+  return false;
+}
+
+/** Cookie-header parse for the operator session (route handlers and RSC). */
+export function operatorCookieFromHeader(cookieHeader: string | null | undefined): string | undefined {
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name === OPERATOR_COOKIE) return rest.join("=");
+  }
+  return undefined;
+}
+
+/**
+ * `Authorization: Bearer <NIGHTSHIFT_API_TOKEN>`, or the operator session
+ * cookie. Always false when the token is unset — an unconfigured deployment
+ * never authorizes a privileged call.
+ */
+export function requestAuthorized(req: Request): boolean {
+  return requestAuthorizedFromParts(bearerTokenOf(req), operatorCookieFromHeader(req.headers.get("cookie")));
 }
 
 /**
@@ -51,7 +99,7 @@ export function requestAuthorized(req: Request): boolean {
 export function cronAuthorized(req: Request): boolean {
   const expected = process.env.CRON_SECRET ?? "";
   if (!expected) return false;
-  const presented = bearer(req);
+  const presented = bearerTokenOf(req);
   if (!presented) return false;
   return secretMatches(presented, expected);
 }

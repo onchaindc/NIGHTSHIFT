@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { cookies, headers } from "next/headers";
 
+import { OPERATOR_COOKIE, requestAuthorizedFromParts } from "@/lib/api/auth";
 import { ResultView, resultFromSummary } from "@/components/result-view";
 import { activityOffer, activityTitle, payerOf } from "@/lib/terminal/activity";
 import { getTask } from "@/lib/engine/store";
@@ -84,6 +86,38 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           No record with this id exists in the store. That means it has never been run on this deployment&apos;s
           persistence, it was deleted, or the store has been reset; nothing is shown rather than a guessed record.
+        </p>
+        <Link href="/activity" className="btn-quiet mt-6 !min-h-9">
+          Back to activity
+        </Link>
+      </div>
+    );
+  }
+
+  // Operator clearance: full records (objectives, reports, evidence,
+  // settlement proofs, the payment ledger) are operator-only. An anonymous
+  // visitor gets the discovery-level projection: that a record exists, its
+  // kind, its lifecycle state, when it ran and the aggregate spend.
+  const authHeader = (await headers()).get("authorization") ?? "";
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const operatorCookie = (await cookies()).get(OPERATOR_COOKIE)?.value;
+  if (!requestAuthorizedFromParts(bearer, operatorCookie)) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
+        <p className="x-tag">ACTIVITY RECORD · RESTRICTED</p>
+        <h1 className="x-display-1 mt-4 text-ink">Restricted activity record</h1>
+        <p className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-soft">
+          <StatusChip state={task.state} />
+          <span>{fmtTime(task.createdAt)}</span>
+          <span>{task.jobType === "protocol_watch" ? "watch run" : task.jobType === "terminal_request" ? "terminal ask" : task.jobType === "mind_investigation" ? "investigation" : "task"}</span>
+          <span>
+            spent {money(task.spend.spentUsdCents)} of the {money(task.spend.limitUsdCents)} ceiling
+          </span>
+        </p>
+        <p className="mt-4 max-w-[60ch] text-[13.5px] leading-relaxed text-ink-soft">
+          Investigation objectives, reports, evidence and settlement proofs are operator-only and are not
+          shown here. Sign in from Settings to view this record in full, or call the API with the operator
+          bearer token.
         </p>
         <Link href="/activity" className="btn-quiet mt-6 !min-h-9">
           Back to activity

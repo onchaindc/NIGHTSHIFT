@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 
 import { requestAuthorized } from "@/lib/api/auth";
+import { tasksForCaller } from "@/lib/api/public";
 import { listTasks } from "@/lib/engine/store";
 import { createTask, runTask, EngineError, defaultDeps } from "@/lib/engine/engine";
 import { planMindInvestigation } from "@/lib/mind/plan";
@@ -22,7 +23,11 @@ export const maxDuration = 60;
  *
  * Free investigations spend nothing and stay public. Intel investigations can
  * spend, so they are gated by the operator token (NIGHTSHIFT_API_TOKEN) and
- * always wait at the human approval gate; reads stay public.
+ * always wait at the human approval gate. Reads return the catalog (tool,
+ * modes) to everyone; the investigation records are full for the operator
+ * (bearer token or /api/session cookie) and discovery-level public
+ * projections for anonymous callers — objectives, reports, evidence and
+ * spend-ledger entries never cross this gate anonymously.
  */
 export async function POST(req: NextRequest) {
   let body: { objective?: unknown; mode?: unknown; spendLimitUsdCents?: unknown };
@@ -95,7 +100,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   let tasks;
   try {
     tasks = await listTasks();
@@ -104,5 +109,6 @@ export async function GET() {
     return NextResponse.json({ error: "storage unavailable", detail: detail.slice(0, 200) }, { status: 503 });
   }
   const investigations = tasks.filter((t) => t.jobType === "mind_investigation");
-  return NextResponse.json({ investigations, tool: "nightshift.investigation", modes: ["free", "intel"] });
+  const view = tasksForCaller(req, investigations);
+  return NextResponse.json({ investigations: view.tasks, redacted: view.redacted, tool: "nightshift.investigation", modes: ["free", "intel"] });
 }

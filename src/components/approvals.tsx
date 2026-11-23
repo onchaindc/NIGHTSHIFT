@@ -157,7 +157,7 @@ export default function Approvals() {
                   </span>
                 </div>
                 <div className="px-4 py-3.5">
-                  <p className="text-[14.5px] font-medium leading-snug text-ink">{t.goal}</p>
+                  <p className="text-[14.5px] font-medium leading-snug text-ink">{t.goal || "Restricted record — sign in from Settings to view the objective"}</p>
                   {t.plan && t.plan.length > 0 && (
                     <ol className="mt-2.5 space-y-1.5 border-l-2 border-amber/25 pl-3">
                       {t.plan.map((s, i) => (
