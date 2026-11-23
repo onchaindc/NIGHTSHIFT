@@ -158,7 +158,7 @@ export default async function MinersPage({
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <span className="x-label mr-1">Order</span>
             {SORTS.map((option) => (
-              <a
+              <Link
                 key={option.key}
                 href={sortHref(option.key)}
                 aria-current={sortKey === option.key ? "page" : undefined}
@@ -169,7 +169,7 @@ export default async function MinersPage({
                 }`}
               >
                 {option.label}
-              </a>
+              </Link>
             ))}
             <p className="mt-1 w-full text-[11px] leading-relaxed text-ink-faint">
               Newest is registration time; Recently scored is the network&apos;s last evaluator update. For the latest
@@ -284,9 +284,9 @@ export default async function MinersPage({
         {total > PAGE_SIZE && (
           <nav aria-label="Pagination" className="mt-10 flex items-center justify-between border-t border-edge pt-6">
             {startIdx > 0 ? (
-              <a href={pageHref(pageN - 1)} className="btn-quiet !min-h-9">
+              <Link href={pageHref(pageN - 1)} className="btn-quiet !min-h-9">
                 Previous
-              </a>
+              </Link>
             ) : (
               <span />
             )}
@@ -294,9 +294,9 @@ export default async function MinersPage({
               PAGE {pageN} · SHOWING {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, total)} OF {total.toLocaleString()}
             </p>
             {startIdx + PAGE_SIZE < total ? (
-              <a href={pageHref(pageN + 1)} className="btn-quiet !min-h-9">
+              <Link href={pageHref(pageN + 1)} className="btn-quiet !min-h-9">
                 Next
-              </a>
+              </Link>
             ) : (
               <span />
             )}

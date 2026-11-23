@@ -510,3 +510,14 @@ textarea {
     scroll-behavior: auto !important;
   }
 }
+
+/* iOS Safari zooms the whole page when a focused field's text is under 16px,
+   and it stays magnified until the user pinches back out. Keep the compact
+   desktop sizes off phones so typing never changes the zoom level. */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
