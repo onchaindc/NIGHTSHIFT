@@ -13,7 +13,7 @@ export const maxDuration = 60;
  * The Mind's investigation tool — the externally reachable HTTP capability a
  * Minds agent (or any operator) calls with an investigation objective.
  *
- * POST /api/mind/investigations  { objective, mode?, spendLimitUsdCents?, requiresApproval? }
+ * POST /api/mind/investigations  { objective, mode?, spendLimitUsdCents? }
  *   mode "intel" (default): plan = free baseline → PAID specialist ask
  *   (Telegraph/Counterparty, one attempt, drift-checked) → reasoned report
  *   with the with/without-Telegraph comparison. Human approval is REQUIRED
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { objective?: unknown; mode?: unknown; spendLimitUsdCents?: unknown; requiresApproval?: unknown };
+  let body: { objective?: unknown; mode?: unknown; spendLimitUsdCents?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -63,9 +63,9 @@ export async function POST(req: NextRequest) {
       goal: objective,
       spendLimitUsdCents,
       // Human approval for paid actions is the product invariant: an intel
-      // investigation waits at the approval gate unless the caller explicitly
-      // waives it (free mode never spends, so it does not need the gate).
-      requiresApproval: mode === "intel" ? body.requiresApproval !== false : false,
+      // investigation always waits at the approval gate and cannot waive it
+      // (free mode never spends, so it does not need the gate).
+      requiresApproval: mode === "intel",
       origin: { source: "web" },
       jobType: "mind_investigation",
       plan: planned.steps,
