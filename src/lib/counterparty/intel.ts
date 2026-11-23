@@ -117,15 +117,19 @@ export type CounterpartyProbeOutcome =
  * directly — the same validation, the same challenge decoding, and the same
  * guarantee that nothing is ever signed here.
  */
-export async function probeCounterparty(req: CounterpartyRequest): Promise<CounterpartyProbeOutcome> {
+export async function probeCounterparty(
+  req: CounterpartyRequest,
+  opts: { preferEscrow?: boolean } = {},
+): Promise<CounterpartyProbeOutcome> {
   const valid = validateCounterpartyRequest(req);
   if (!valid.ok) {
     return { kind: "rejected", status: 0, body: { error: valid.error }, text: valid.error };
   }
   const spec = buildCounterpartySpec(req);
-  // The node's only Ethereum Sepolia rail now is escrow; approving the exact
-  // Base Sepolia offer here would leave the wallet unable to pay it.
-  const outcome = await probeAsk(spec, { preferEscrow: true });
+  // Interactive flows sign with the user's wallet, so they approve the escrow
+  // rail the node offers on Ethereum Sepolia. Autonomous callers that settle
+  // server-side pass preferEscrow:false and approve the exact offer instead.
+  const outcome = await probeAsk(spec, { preferEscrow: opts.preferEscrow !== false });
   if (outcome.kind === "challenge") {
     return {
       kind: "challenge",

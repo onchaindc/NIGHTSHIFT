@@ -132,7 +132,11 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
 
   await event(task, "step_started", `Unpaid pre-flight for ${entity.company}: validating the specialist ask (nothing is signed at this stage)`);
 
-  const outcome = await mindDeps.probe(req);
+  // The Mind settles through executeAsk, which signs the exact EVM rail with
+  // the deployment payer key. The escrow rail needs a personal_sign
+  // authorization from the user's wallet and belongs to the interactive
+  // flows, so the autonomous run approves the offer it can actually pay.
+  const outcome = await mindDeps.probe(req, { preferEscrow: false });
 
   const probe =
     outcome.kind === "challenge"
