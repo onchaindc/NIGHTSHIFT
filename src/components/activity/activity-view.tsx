@@ -8,6 +8,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import type { TaskRecord } from "@/lib/engine/types";
 import { activityPayer, activityTitle } from "@/lib/terminal/activity";
 import { isTestRun, money, StatusChip, timeOf } from "@/components/taskParts";
+import { DESK_STATE_META, deskActivityRows } from "@/lib/indexdesk/desk-ui";
 
 /**
  * Activity (personal): only the asks paid by the wallet(s) currently connected
@@ -78,7 +79,9 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
       const res = await fetch("/api/tasks", { cache: "no-store" });
       if (res.ok) {
         const all = ((await res.json()) as { tasks: TaskRecord[] }).tasks;
-        setTasks(all.filter((t) => t.jobType === "terminal_request"));
+        // Keep every record: wallet asks are filtered by payer below, and the
+        // desk investigations get their own section (a desk has no payer).
+        setTasks(all);
         setLoadFailed(false);
       } else {
         setLoadFailed(true);
@@ -108,6 +111,8 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
   const real = mine.filter((t) => !isTestRun(t));
   const testRuns = mine.filter(isTestRun);
   const total = mine.length;
+  // Desks carry no payer; redacted records have an empty goal and are skipped.
+  const desks = deskActivityRows(tasks ?? []);
 
   const spentReal = real.reduce((acc, t) => acc + t.spend.spentUsdCents, 0);
   const receiptCount = real.reduce((acc, t) => acc + (t.spend.entries?.length ?? 0), 0);
@@ -301,6 +306,41 @@ export default function ActivityView({ persistenceMode }: { persistenceMode: str
                   <span className="tabular text-[11px] text-ink-faint">{timeOf(t.createdAt)}</span>
                 </Link>
               ))}
+            </section>
+          )}
+
+          {desks.length > 0 && (
+            <section className="mt-10" aria-label="Index desk investigations">
+              <p className="x-label">INDEX DESK INVESTIGATIONS · {desks.length} on file</p>
+              <div className="x-rule mb-0 mt-1" />
+              <ul className="divide-y divide-edge">
+                {desks.map((d) => {
+                  const meta = DESK_STATE_META[d.state] ?? DESK_STATE_META.created;
+                  return (
+                    <li key={d.id}>
+                      <Link
+                        href={d.href}
+                        className="group flex flex-wrap items-center justify-between gap-3 px-1 py-3.5 transition-colors hover:bg-panel"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-[13.5px] text-ink transition group-hover:text-amber">{d.title}</span>
+                          <span className="block text-[11px] text-ink-faint">
+                            {d.spendUsdCents > 0 ? `${money(d.spendUsdCents)} spent` : "no spend"} · {timeOf(d.createdAt)}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] ${meta.tone}`}>
+                            {meta.label}
+                          </span>
+                          <span className="text-[12px] font-medium text-teal transition-transform duration-200 group-hover:translate-x-0.5">
+                            Open
+                          </span>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
             </section>
           )}
         </>

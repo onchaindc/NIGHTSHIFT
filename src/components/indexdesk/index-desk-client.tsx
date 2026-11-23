@@ -3,15 +3,15 @@
 /**
  * The Index Reconstitution Desk client. A strict, honest sequence:
  *
- *   define (universe + methodology, verbatim) → create (the task engine
- *   plans: free baseline → [approval gate → paid asks] → deterministic
- *   report) → poll (the shared task store; the same Activity infrastructure)
- *   → read (the proposal with per-asset evidence, declared-vs-verified
- *   provenance and the missing-dimension ledger).
+ *   define (universe + methodology) → run (the task engine plans: free
+ *   baseline → [approval gate → paid asks] → deterministic report) → read
+ *   (proposal with per-asset evidence, declared-vs-verified provenance and the
+ *   missing-dimension ledger).
  *
- * Nothing here invents a constituent, a price or a success. A redacted task
- * (anonymous viewer) is shown as the restricted view, exactly like the rest
- * of the console.
+ * The active investigation id lives in the URL (?task=…), so a refresh or a
+ * trip to Activity does not lose progress. Approval happens here, inline,
+ * through the engine's action route — never through a retired console page.
+ * Nothing on this page invents a constituent, a price or a success.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -19,6 +19,7 @@ import Link from "next/link";
 import {
   AlertTriangle,
   BadgeCheck,
+  ChevronRight,
   CircleAlert,
   ExternalLink,
   Layers,
@@ -26,15 +27,26 @@ import {
   Lock,
   Play,
   Plus,
+  ShieldCheck,
   Trash2,
   XCircle,
 } from "lucide-react";
 
 import type { IndexDeskReport } from "@/lib/indexdesk/report";
-import type { Evidence } from "@/lib/engine/types";
-
-/** The index_asset_finding evidence rows the task result carries. */
-type AssetEvidence = Extract<Evidence, { kind: "index_asset_finding" }>;
+import {
+  DESK_STATE_META,
+  deskHrefWithTask,
+  deskSnapshot,
+  deskTaskParam,
+  dimensionLabel,
+  displayMissingDimensions,
+  friendlyDeskError,
+  parseCustomWeights,
+  parseSpendLimitUsd,
+  sanitizeDeskMessage,
+  type DeskEvidence,
+  type DeskTaskSnapshot,
+} from "@/lib/indexdesk/desk-ui";
 
 export interface IndexDeskGuarantees {
   nodeUrl: string;
@@ -70,17 +82,21 @@ function shortHash(h: string): string {
   return h.length > 22 ? `${h.slice(0, 10)}…${h.slice(-8)}` : h;
 }
 
+function money(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
 function fmtValue(v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
-  if (typeof v === "boolean") return v ? "Yes (active)" : "No (not active)";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
   return String(v);
 }
 
-function assetEvidenceOf(evidence: AssetEvidence[], symbol: string): AssetEvidence | null {
-  return evidence.find((e) => e.kind === "index_asset_finding" && e.symbol === symbol) ?? null;
+function fmtNumber(v: number): string {
+  return v.toLocaleString(undefined, { maximumFractionDigits: 6 });
 }
 
-const STATUS_CHIP: Record<string, string> = {
+const STATUS_TONE: Record<string, string> = {
   verified: "border-teal/30 bg-teal/5 text-teal",
   recorded: "border-amber/40 bg-amber-soft/50 text-amber-deep",
   included: "border-teal/30 bg-teal/5 text-teal",
@@ -104,19 +120,24 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const [notes, setNotes] = useState("");
   const [customWeights, setCustomWeights] = useState("");
   const [rows, setRows] = useState<AssetRow[]>([emptyRow(), emptyRow()]);
-  const [mode, setMode] = useState<"free" | "intel">("intel");
+  const [mode, setMode] = useState<"free" | "intel">("free");
   const [spendLimit, setSpendLimit] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [taskState, setTaskState] = useState<string | null>(null);
-  const [taskError, setTaskError] = useState<string | null>(null);
-  const [awaitingApproval, setAwaitingApproval] = useState(false);
-  const [redacted, setRedacted] = useState(false);
-  const [report, setReport] = useState<IndexDeskReport | null>(null);
-  const [evidence, setEvidence] = useState<AssetEvidence[]>([]);
-  const [spendUsdCents, setSpendUsdCents] = useState(0);
+  const [snap, setSnap] = useState<DeskTaskSnapshot | null>(null);
+  const [acting, setActing] = useState<"approve" | "reject" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [token, setToken] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+  // Approval resumes in the background (after()), so the first poll or two can
+  // still show awaiting_approval. Without this grace the client would stop
+  // polling and show the gate again immediately after the user approved it.
+  const approveGraceUntil = useRef(0);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -127,42 +148,55 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
 
   useEffect(() => stopPolling, [stopPolling]);
 
+  const load = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store" });
+      if (!res.ok) {
+        if (res.status === 404) {
+          setSnap(deskSnapshot({ task: null, redacted: true }));
+          setError("That investigation could not be found. Start a new one.");
+        }
+        return;
+      }
+      const body = (await res.json()) as unknown;
+      let next = deskSnapshot(body);
+      if (next.terminal === "awaiting_approval" && Date.now() < approveGraceUntil.current) {
+        next = { ...next, state: "executing", terminal: null, stopPolling: false, plan: next.plan };
+      }
+      setSnap(next);
+      if (next.stopPolling) stopPolling();
+      return next;
+    } catch {
+      /* transient: the next poll retries */
+      return undefined;
+    }
+  }, [stopPolling]);
+
   const poll = useCallback(
     (id: string) => {
       stopPolling();
-      pollRef.current = setInterval(async () => {
-        try {
-          const res = await fetch(`/api/tasks/${id}`, { cache: "no-store" });
-          const body = (await res.json()) as { task?: { state?: string; error?: string | null; result?: { indexDeskReport?: IndexDeskReport; evidence?: unknown[] } | null }; redacted?: boolean; spend?: { spentUsdCents?: number } };
-          const t = body.task;
-          if (!t) return;
-          setTaskState(t.state ?? null);
-          setTaskError(t.error ?? null);
-          setRedacted(body.redacted === true);
-          if (typeof body.spend?.spentUsdCents === "number") setSpendUsdCents(body.spend.spentUsdCents);
-          if (Array.isArray(t.result?.evidence)) setEvidence(t.result.evidence as AssetEvidence[]);
-          if (t.state === "awaiting_approval") {
-            setAwaitingApproval(true);
-            stopPolling();
-            return;
-          }
-          if (t.state === "completed" && t.result?.indexDeskReport) {
-            setReport(t.result.indexDeskReport);
-            if (Array.isArray(t.result.evidence)) setEvidence(t.result.evidence as AssetEvidence[]);
-            stopPolling();
-            return;
-          }
-          if (t.state === "failed" || t.state === "blocked" || t.state === "rejected") {
-            stopPolling();
-            return;
-          }
-        } catch {
-          /* transient poll failure: keep polling */
-        }
+      void load(id);
+      pollRef.current = setInterval(() => {
+        void load(id);
       }, 3000);
     },
-    [stopPolling],
+    [load, stopPolling],
   );
+
+  // Restore an investigation from the URL on mount (refresh / back / Activity).
+  useEffect(() => {
+    const id = deskTaskParam(typeof window === "undefined" ? "" : window.location.search);
+    if (!id) return;
+    setTaskId(id);
+    poll(id);
+    return () => stopPolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const writeUrl = (id: string | null) => {
+    if (typeof window === "undefined") return;
+    window.history.replaceState(null, "", deskHrefWithTask(id));
+  };
 
   const updateRow = (i: number, patch: Partial<AssetRow>) => {
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -171,10 +205,11 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const buildDefinition = useCallback(() => {
     const num = (v: string): number | undefined => {
       if (!v.trim()) return undefined;
+      if (!/^\d+(\.\d+)?$/.test(v.trim())) return NaN;
       const n = Number(v);
       return Number.isFinite(n) && n >= 0 ? n : NaN;
     };
-    const parsed: Array<{ invalid: true } | { invalid: false; asset: Record<string, unknown> }> = [];
+    const assets: Array<Record<string, unknown>> = [];
     for (const r of rows) {
       if (!r.symbol.trim() && !r.company.trim()) continue;
       const declared: Record<string, number> = {};
@@ -182,100 +217,171 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       const p = num(r.declaredPrice);
       const v = num(r.declaredVolume);
       if (Number.isNaN(s) || Number.isNaN(p) || Number.isNaN(v)) {
-        parsed.push({ invalid: true });
-        continue;
+        return { error: `Asset ${r.symbol.trim().toUpperCase() || "(unnamed)"}: declared inputs must be non-negative numbers.` };
       }
       if (s !== undefined) declared.circulatingSupply = s;
       if (p !== undefined) declared.priceUsd = p;
       if (v !== undefined) declared.volume30dUsd = v;
-      parsed.push({
-        invalid: false,
-        asset: {
-          symbol: r.symbol.trim().toUpperCase(),
-          issuer: { company: r.company.trim(), jurisdiction: r.jurisdiction.trim() },
-          ...(r.chain.trim() ? { chain: r.chain.trim().toLowerCase() } : {}),
-          ...(r.pool.trim() ? { pool: r.pool.trim() } : {}),
-          ...(Object.keys(declared).length ? { declared } : {}),
-        },
+      assets.push({
+        symbol: r.symbol.trim().toUpperCase(),
+        issuer: { company: r.company.trim(), jurisdiction: r.jurisdiction.trim() },
+        ...(r.chain.trim() ? { chain: r.chain.trim().toLowerCase() } : {}),
+        ...(r.pool.trim() ? { pool: r.pool.trim() } : {}),
+        ...(Object.keys(declared).length ? { declared } : {}),
       });
     }
-    if (parsed.some((a) => a.invalid)) return { error: "Declared inputs must be non-negative numbers." };
-    const custom: Record<string, number> | undefined =
-      scheme === "custom"
-        ? Object.fromEntries(
-            customWeights
-              .split(/[,\n]/)
-              .map((pair) => pair.split(/[:=]/).map((x) => x.trim()))
-              .filter((parts) => parts.length === 2 && parts[0] && parts[1])
-              .map(([k, v]) => [k.toUpperCase(), Number(v)]),
-          )
-        : undefined;
-    if (scheme === "custom" && (!custom || Object.keys(custom).length === 0)) {
-      return { error: 'Scheme "custom" needs weights as "SYMBOL: percent" pairs (comma or newline separated).' };
+
+    let weights: Record<string, number> | undefined;
+    if (scheme === "custom") {
+      const parsed = parseCustomWeights(
+        customWeights,
+        assets.map((a) => String(a.symbol)),
+      );
+      if (!parsed.ok) return { error: parsed.error };
+      weights = parsed.weights;
     }
+
     return {
       definition: {
         name: indexName.trim(),
         methodology: {
           scheme,
-          ...(custom ? { customWeights: custom } : {}),
+          ...(weights ? { customWeights: weights } : {}),
           ...(notes.trim() ? { notes: notes.trim() } : {}),
         },
-        assets: parsed.map((a) => (a as { invalid: false; asset: Record<string, unknown> }).asset),
+        assets,
       },
     };
   }, [rows, scheme, customWeights, notes, indexName]);
 
   const runDesk = useCallback(async () => {
     setError(null);
-    setReport(null);
-    setTaskError(null);
-    setAwaitingApproval(false);
-    setRedacted(false);
-    setSpendUsdCents(0);
+    setActionError(null);
     const built = buildDefinition();
     if ("error" in built && built.error) {
       setError(built.error);
       return;
     }
-    if ("definition" in built) {
-      const limit = spendLimit.trim() ? Number(spendLimit) : undefined;
-      if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
-        setError("The spend limit must be a positive number of USD cents.");
+    if (!("definition" in built)) return;
+
+    const limit = parseSpendLimitUsd(spendLimit);
+    if (!limit.ok) {
+      setError(limit.error);
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const res = await fetch("/api/mind/index-desk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          index: built.definition,
+          mode,
+          ...(limit.cents !== undefined ? { spendLimitUsdCents: limit.cents } : {}),
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { task?: { id?: string }; error?: string };
+      if (!res.ok || !body.task?.id) {
+        setError(friendlyDeskError(res.status, body.error));
+        if (res.status === 401) setNeedsSignIn(true);
         return;
       }
-      setCreating(true);
-      try {
-        const res = await fetch("/api/mind/index-desk", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            index: built.definition,
-            mode,
-            ...(limit !== undefined ? { spendLimitUsdCents: Math.round(limit) } : {}),
-          }),
-        });
-        const body = (await res.json()) as { task?: { id?: string; state?: string }; error?: string; note?: string };
-        if (!res.ok || !body.task?.id) {
-          setError(body.error ?? `The desk could not be created (HTTP ${res.status}).`);
-          return;
-        }
-        setTaskId(body.task.id);
-        setTaskState(body.task.state ?? null);
-        if (body.task.state === "awaiting_approval") setAwaitingApproval(true);
-        else poll(body.task.id);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setCreating(false);
-      }
+      setTaskId(body.task.id);
+      setSnap(null);
+      writeUrl(body.task.id);
+      poll(body.task.id);
+      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    } catch {
+      setError(friendlyDeskError(0));
+    } finally {
+      setCreating(false);
     }
   }, [buildDefinition, mode, spendLimit, poll]);
 
-  const canRun =
-    indexName.trim().length >= 2 &&
-    rows.filter((r) => r.symbol.trim() && r.company.trim() && r.jurisdiction.trim()).length >= 2 &&
-    !creating;
+  const act = useCallback(
+    async (action: "approve" | "reject") => {
+      if (!taskId) return;
+      setActing(action);
+      setActionError(null);
+      try {
+        const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/action`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) {
+          setActionError(friendlyDeskError(res.status, body.error));
+          if (res.status === 401) setNeedsSignIn(true);
+          return;
+        }
+        if (action === "approve") {
+          approveGraceUntil.current = Date.now() + 8000;
+          setSnap((s) => (s ? { ...s, state: "executing", terminal: null, stopPolling: false } : s));
+          poll(taskId);
+        } else {
+          stopPolling();
+          await load(taskId);
+        }
+      } catch {
+        setActionError(friendlyDeskError(0));
+      } finally {
+        setActing(null);
+      }
+    },
+    [taskId, poll, load, stopPolling],
+  );
+
+  const signIn = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setSigningIn(true);
+      setActionError(null);
+      try {
+        const res = await fetch("/api/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+        if (res.ok) {
+          setToken("");
+          setNeedsSignIn(false);
+          setActionError(null);
+        } else {
+          setActionError(
+            res.status === 401
+              ? "That operator passphrase was not accepted. Check it and try again."
+              : friendlyDeskError(res.status),
+          );
+        }
+      } catch {
+        setActionError(friendlyDeskError(0));
+      } finally {
+        setSigningIn(false);
+      }
+    },
+    [token],
+  );
+
+  const reset = () => {
+    stopPolling();
+    setTaskId(null);
+    setSnap(null);
+    setActionError(null);
+    setNeedsSignIn(false);
+    writeUrl(null);
+  };
+
+  const completeAssets = rows.filter(
+    (r) => r.symbol.trim() && r.company.trim() && r.jurisdiction.trim(),
+  ).length;
+  const canRun = indexName.trim().length >= 2 && completeAssets >= 2 && !creating;
+
+  const state = snap?.state ?? null;
+  const stateMeta = state ? (DESK_STATE_META[state] ?? DESK_STATE_META.created) : null;
+  const awaiting = state === "awaiting_approval";
+  const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
@@ -290,179 +396,431 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
         regulatory filings — and returns a deterministic constituent and weighting proposal with
         per-asset evidence, declared-vs-verified provenance and the missing-dimension ledger.
       </p>
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-faint">
-        <span className="inline-flex items-center gap-1.5">
-          <Layers size={12} aria-hidden /> node: <span className="text-ink-soft">{guarantees.nodeUrl.replace(/^https?:\/\//, "")}</span>
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          verified coverage: <span className="text-ink-soft">{guarantees.coverage.length} dimensions</span>
-        </span>
-      </div>
-
-      {/* verified coverage */}
-      <section className="mt-6 overflow-hidden rounded-xl border border-edge bg-panel">
-        <div className="border-b border-edge px-4 py-3 sm:px-5">
-          <p className="x-label">Verified network coverage <span className="text-ink-faint">— probed live before integration, never assumed</span></p>
-        </div>
-        <div className="divide-y divide-edge">
-          {guarantees.coverage.map((c) => (
-            <div key={c.intent} className="grid gap-x-4 gap-y-0.5 px-4 py-2.5 text-[12.5px] sm:grid-cols-[190px_1fr_auto] sm:px-5">
-              <span className="text-ink">{c.dimension}</span>
-              <span className="break-words text-ink-faint">{c.intent} <span className="text-ink-soft">@ {c.miner}</span></span>
-              <span className="tabular text-ink-soft">{c.price}</span>
-            </div>
-          ))}
-          {guarantees.notCovered.map((n) => (
-            <div key={n} className="flex items-start gap-2 px-4 py-2.5 text-[12.5px] text-amber-deep sm:px-5">
-              <CircleAlert size={13} className="mt-0.5 shrink-0" aria-hidden />
-              <span>{n}</span>
-            </div>
-          ))}
-        </div>
-      </section>
 
       {/* 1 · define */}
       <section className="mt-8 overflow-hidden rounded-xl border border-edge bg-panel">
         <div className="border-b border-edge px-4 py-3 sm:px-5">
-          <p className="x-label">1 · Define the index universe and methodology</p>
+          <p className="x-label">1 · Define the index</p>
         </div>
-        <div className="space-y-4 px-4 py-4 sm:px-5">
+        <div className="space-y-5 px-4 py-4 sm:px-5">
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
             <div>
               <label htmlFor="ix-name" className="x-label">Index name</label>
-              <input id="ix-name" value={indexName} onChange={(e) => setIndexName(e.target.value)} placeholder="e.g. September Digital Large Cap" className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
+              <input
+                id="ix-name"
+                value={indexName}
+                onChange={(e) => setIndexName(e.target.value)}
+                placeholder="e.g. September Digital Large Cap"
+                className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+              />
             </div>
             <div>
-              <label htmlFor="ix-scheme" className="x-label">Weighting scheme</label>
-              <select id="ix-scheme" value={scheme} onChange={(e) => setScheme(e.target.value as typeof scheme)} className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none focus:ring-1 focus:ring-edge">
-                <option value="equal">equal — 1/N over kept assets</option>
-                <option value="market_cap">market_cap — supply × price</option>
-                <option value="custom">custom — declared weights</option>
+              <label htmlFor="ix-scheme" className="x-label">Weighting</label>
+              <select
+                id="ix-scheme"
+                value={scheme}
+                onChange={(e) => setScheme(e.target.value as typeof scheme)}
+                className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none focus:ring-1 focus:ring-edge"
+              >
+                <option value="equal">Equal weight</option>
+                <option value="market_cap">Market cap (supply × price)</option>
+                <option value="custom">Custom weights</option>
               </select>
             </div>
           </div>
+
           {scheme === "custom" && (
             <div>
-              <label htmlFor="ix-custom" className="x-label">Custom weights <span className="text-ink-faint">— SYMBOL: percent, comma or newline separated; normalized to 100</span></label>
-              <input id="ix-custom" value={customWeights} onChange={(e) => setCustomWeights(e.target.value)} placeholder="WBTC: 40, ETH: 35, SOL: 25" className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
+              <label htmlFor="ix-custom" className="x-label">
+                Custom weights <span className="text-ink-faint">— SYMBOL: percent, comma or newline separated</span>
+              </label>
+              <input
+                id="ix-custom"
+                value={customWeights}
+                onChange={(e) => setCustomWeights(e.target.value)}
+                placeholder="WBTC: 40, ETH: 35, SOL: 25"
+                className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+              />
+              <p className="mt-1.5 text-[11.5px] text-ink-faint">
+                Weights are normalized to 100. Invalid or missing weights are reported, never treated as zero.
+              </p>
             </div>
           )}
-          <div>
-            <label htmlFor="ix-notes" className="x-label">Methodology notes <span className="text-ink-faint">— recorded verbatim in the proposal (optional)</span></label>
-            <input id="ix-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. quarterly rebalance, capped at 30% per constituent" className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
-          </div>
 
           <div className="space-y-3">
+            <p className="x-label">Universe <span className="text-ink-faint">— at least two assets</span></p>
             {rows.map((r, i) => (
               <div key={i} className="rounded-lg border border-edge bg-panel-2 p-3">
                 <div className="flex items-center justify-between">
                   <p className="x-label">Asset {i + 1}</p>
                   {rows.length > 2 && (
-                    <button type="button" onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))} className="text-ink-faint transition-colors hover:text-risk" aria-label={`Remove asset ${i + 1}`}>
+                    <button
+                      type="button"
+                      onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}
+                      className="text-ink-faint transition-colors hover:text-risk"
+                      aria-label={`Remove asset ${i + 1}`}
+                    >
                       <Trash2 size={14} aria-hidden />
                     </button>
                   )}
                 </div>
-                <div className="mt-2 grid gap-2 sm:grid-cols-6">
-                  <input value={r.symbol} onChange={(e) => updateRow(i, { symbol: e.target.value.toUpperCase() })} placeholder="SYMBOL" aria-label={`Asset ${i + 1} symbol`} className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge sm:col-span-1" />
-                  <input value={r.company} onChange={(e) => updateRow(i, { company: e.target.value })} placeholder="Issuer legal name" aria-label={`Asset ${i + 1} issuer company`} className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge sm:col-span-2" />
-                  <input value={r.jurisdiction} onChange={(e) => updateRow(i, { jurisdiction: e.target.value })} placeholder="Jurisdiction (ISO)" aria-label={`Asset ${i + 1} jurisdiction`} className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
-                  <input value={r.chain} onChange={(e) => updateRow(i, { chain: e.target.value })} placeholder="chain" aria-label={`Asset ${i + 1} chain`} className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
-                  <input value={r.pool} onChange={(e) => updateRow(i, { pool: e.target.value })} placeholder="DEX pool (opt.)" aria-label={`Asset ${i + 1} pool`} className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge sm:col-span-1" />
+                <div className="mt-2 grid gap-2 sm:grid-cols-[110px_1fr_110px]">
+                  <input
+                    value={r.symbol}
+                    onChange={(e) => updateRow(i, { symbol: e.target.value.toUpperCase() })}
+                    placeholder="SYMBOL"
+                    aria-label={`Asset ${i + 1} symbol`}
+                    className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                  />
+                  <input
+                    value={r.company}
+                    onChange={(e) => updateRow(i, { company: e.target.value })}
+                    placeholder="Issuer registered legal name"
+                    aria-label={`Asset ${i + 1} issuer company`}
+                    className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                  />
+                  <input
+                    value={r.jurisdiction}
+                    onChange={(e) => updateRow(i, { jurisdiction: e.target.value })}
+                    placeholder="ISO, e.g. US"
+                    aria-label={`Asset ${i + 1} jurisdiction`}
+                    className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                  />
                 </div>
-                <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                  <input value={r.declaredSupply} onChange={(e) => updateRow(i, { declaredSupply: e.target.value })} placeholder="declared circulating supply (opt.)" aria-label={`Asset ${i + 1} declared supply`} className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
-                  <input value={r.declaredPrice} onChange={(e) => updateRow(i, { declaredPrice: e.target.value })} placeholder="declared price USD (opt.)" aria-label={`Asset ${i + 1} declared price`} className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
-                  <input value={r.declaredVolume} onChange={(e) => updateRow(i, { declaredVolume: e.target.value })} placeholder="declared 30d volume USD (opt.)" aria-label={`Asset ${i + 1} declared volume`} className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
-                </div>
-                <p className="mt-1.5 text-[11px] text-ink-faint">
-                  Declared figures are labelled <span className="text-ink-soft">declared</span> in the proposal — never presented as network-verified.
-                </p>
+
+                <details className="group mt-2">
+                  <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
+                    <ChevronRight size={12} aria-hidden className="transition-transform group-open:rotate-90" />
+                    Advanced inputs (chain, pool, declared figures)
+                  </summary>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <input
+                      value={r.chain}
+                      onChange={(e) => updateRow(i, { chain: e.target.value })}
+                      placeholder="chain (default ethereum)"
+                      aria-label={`Asset ${i + 1} chain`}
+                      className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                    />
+                    <input
+                      value={r.pool}
+                      onChange={(e) => updateRow(i, { pool: e.target.value })}
+                      placeholder="DEX pool (needed for liquidity)"
+                      aria-label={`Asset ${i + 1} pool`}
+                      className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                    />
+                    <input
+                      value={r.declaredSupply}
+                      onChange={(e) => updateRow(i, { declaredSupply: e.target.value })}
+                      placeholder="declared circulating supply"
+                      aria-label={`Asset ${i + 1} declared supply`}
+                      className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                    />
+                    <input
+                      value={r.declaredPrice}
+                      onChange={(e) => updateRow(i, { declaredPrice: e.target.value })}
+                      placeholder="declared price USD"
+                      aria-label={`Asset ${i + 1} declared price`}
+                      className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                    />
+                    <input
+                      value={r.declaredVolume}
+                      onChange={(e) => updateRow(i, { declaredVolume: e.target.value })}
+                      placeholder="declared 30d volume USD"
+                      aria-label={`Asset ${i + 1} declared volume`}
+                      className="h-9 rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge sm:col-span-2"
+                    />
+                    <p className="text-[11px] text-ink-faint sm:col-span-2">
+                      Declared figures are labelled <span className="text-ink-soft">declared</span> — never presented as network-verified.
+                    </p>
+                  </div>
+                </details>
               </div>
             ))}
+            <button
+              type="button"
+              onClick={() => setRows((rs) => [...rs, emptyRow()])}
+              className="inline-flex items-center gap-1.5 text-[12.5px] text-teal hover:underline"
+            >
+              <Plus size={13} aria-hidden /> Add asset
+            </button>
           </div>
-          <button type="button" onClick={() => setRows((rs) => [...rs, emptyRow()])} className="inline-flex items-center gap-1.5 text-[12.5px] text-teal hover:underline">
-            <Plus size={13} aria-hidden /> Add asset
-          </button>
 
-          <div className="grid gap-4 border-t border-edge pt-4 sm:grid-cols-[1fr_1fr]">
+          <div>
+            <label htmlFor="ix-notes" className="x-label">
+              Methodology notes <span className="text-ink-faint">— recorded verbatim (optional)</span>
+            </label>
+            <input
+              id="ix-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. quarterly rebalance, capped at 30% per constituent"
+              className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+            />
+          </div>
+
+          <div className="grid gap-4 border-t border-edge pt-4 sm:grid-cols-2">
             <div>
               <label htmlFor="ix-mode" className="x-label">Mode</label>
-              <select id="ix-mode" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none focus:ring-1 focus:ring-edge">
-                <option value="intel">intel — paid asks after your approval</option>
-                <option value="free">free — probes and pricing only, no purchases</option>
+              <select
+                id="ix-mode"
+                value={mode}
+                onChange={(e) => setMode(e.target.value as typeof mode)}
+                className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none focus:ring-1 focus:ring-edge"
+              >
+                <option value="free">Free — no purchases</option>
+                <option value="intel">Intel — paid asks after you approve</option>
               </select>
             </div>
-            <div>
-              <label htmlFor="ix-limit" className="x-label">Spend limit <span className="text-ink-faint">— USD cents (optional)</span></label>
-              <input id="ix-limit" value={spendLimit} onChange={(e) => setSpendLimit(e.target.value)} placeholder="e.g. 30 (= $0.30)" className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge" />
-            </div>
+            {mode === "intel" && (
+              <div>
+                <label htmlFor="ix-limit" className="x-label">Maximum spend (USD)</label>
+                <input
+                  id="ix-limit"
+                  value={spendLimit}
+                  onChange={(e) => setSpendLimit(e.target.value)}
+                  placeholder="e.g. 0.30"
+                  inputMode="decimal"
+                  className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                />
+                <p className="mt-1.5 text-[11.5px] text-ink-faint">Optional. Nothing is signed before your approval.</p>
+              </div>
+            )}
           </div>
 
           <button type="button" onClick={runDesk} disabled={!canRun} className="btn-primary inline-flex items-center gap-2">
             {creating ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Play size={14} aria-hidden />}
-            {creating ? "Creating the investigation…" : `Run the desk${mode === "intel" ? " (approval gate)" : ""}`}
+            {creating ? "Starting the investigation…" : "Run the desk"}
           </button>
           <p className="text-[11.5px] leading-relaxed text-ink-faint">
-            The pre-flight probes are free. In intel mode every paid ask is one attempt, drift-checked
-            against its approved offer and budget-guarded; a bare refusal after signing is terminal and
-            never retried. Issuer jurisdiction is required — the registry intent rejects lookups without it.
+            The pre-flight probes are free. Intel mode plans one paid ask per asset per verified dimension and
+            stops at the approval gate; each ask runs once, drift-checked and budget-guarded.
           </p>
         </div>
       </section>
 
       {error && (
-        <section className="mt-5 rounded-xl border border-risk/40 bg-risk/5 p-4 text-[13px] text-risk">
-          <p className="flex items-center gap-1.5 font-medium"><XCircle /> {error}</p>
+        <section className="mt-5 rounded-xl border border-risk/40 bg-risk/5 p-4 text-[13px] text-risk" role="alert">
+          <p className="flex items-center gap-1.5 font-medium"><XCircle size={14} aria-hidden /> {sanitizeDeskMessage(error)}</p>
         </section>
       )}
 
+      {/* technical coverage — collapsed by default */}
+      <details className="group mt-5 rounded-xl border border-edge bg-panel">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[12.5px] text-ink-soft sm:px-5">
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            <Layers size={13} aria-hidden /> Network coverage &amp; technical details
+          </span>
+          <span className="text-[11px] text-ink-faint">
+            {guarantees.coverage.length} dimensions · {guarantees.nodeUrl.replace(/^https?:\/\//, "")}
+          </span>
+        </summary>
+        <div className="border-t border-edge px-4 py-3 sm:px-5">
+          <div className="divide-y divide-edge">
+            {guarantees.coverage.map((c) => (
+              <div key={c.intent} className="grid gap-x-4 gap-y-0.5 py-2 text-[12px] sm:grid-cols-[180px_1fr_auto]">
+                <span className="text-ink">{c.dimension}</span>
+                <span className="break-words text-ink-faint">
+                  {c.intent} <span className="text-ink-soft">@ {c.miner}</span>
+                </span>
+                <span className="tabular text-ink-soft">{c.price}</span>
+              </div>
+            ))}
+          </div>
+          <ul className="mt-2 space-y-1 border-t border-edge pt-2">
+            {guarantees.notCovered.map((n) => (
+              <li key={n} className="flex items-start gap-2 text-[11.5px] text-amber-deep">
+                <CircleAlert size={12} className="mt-0.5 shrink-0" aria-hidden />
+                <span>{n}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </details>
+
       {/* 2 · investigation */}
-      {taskId && (
-        <section className="mt-5 overflow-hidden rounded-xl border border-edge bg-panel">
-          <div className="border-b border-edge px-4 py-3 sm:px-5">
-            <p className="x-label">2 · The investigation <span className="text-ink-faint">— task {shortHash(taskId)}</span></p>
-          </div>
-          <div className="space-y-3 px-4 py-4 sm:px-5">
-            {awaitingApproval && taskState === "awaiting_approval" && (
-              <div className="rounded-lg border border-amber/40 bg-amber-soft/50 p-3 text-[12.5px] leading-relaxed text-ink-soft">
-                <p className="flex items-center gap-1.5 font-medium text-amber-deep"><Lock size={13} aria-hidden /> Awaiting your approval — nothing has been signed</p>
-                <p className="mt-1.5">
-                  The plan is at the engine&apos;s approval gate. Approve it from{" "}
-                  <Link href="/approvals" className="text-teal hover:underline">Approvals</Link> (or{" "}
-                  <Link href="/history" className="text-teal hover:underline">History</Link>) as the operator; the paid
-                  asks start only then, one attempt each.
-                </p>
+      <div ref={resultRef}>
+        {taskId && (
+          <section className="mt-6 overflow-hidden rounded-xl border border-edge bg-panel">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
+              <p className="x-label">2 · The investigation <span className="text-ink-faint">— task {shortHash(taskId)}</span></p>
+              <div className="flex items-center gap-2">
+                {snap?.spendUsdCents !== null && snap?.spendUsdCents !== undefined && (
+                  <span className="tabular text-[11.5px] text-ink-soft">{money(snap.spendUsdCents)} spent</span>
+                )}
+                {stateMeta && <Chip label={stateMeta.label} tone={stateMeta.tone} />}
               </div>
-            )}
-            {(taskState === "executing" || taskState === "verifying" || taskState === "planning") && (
-              <div className="flex items-center gap-2 rounded-lg border border-edge bg-panel-2 p-3 text-[12.5px] text-ink-soft">
-                <Loader2 size={13} className="animate-spin" aria-hidden />
-                {taskState === "verifying" ? "Verifying the evidence and reconciling the ledger…" : "Investigating — free probes first, paid asks after the gate…"}
-              </div>
-            )}
-            {taskState === "failed" && (
-              <div className="rounded-lg border border-risk/40 bg-risk/5 p-3 text-[12.5px] text-risk">
-                <p className="font-medium">The investigation failed</p>
-                {taskError && <p className="mt-1 break-words">{taskError}</p>}
-              </div>
-            )}
-            {redacted && !report && (
-              <div className="rounded-lg border border-amber/40 bg-amber-soft/50 p-3 text-[12.5px] leading-relaxed text-ink-soft">
-                <p className="flex items-center gap-1.5 font-medium text-amber-deep"><Lock size={13} aria-hidden /> Restricted view</p>
-                <p className="mt-1.5">
-                  You are viewing anonymously, so objectives, proposals, evidence and spend entries do not
-                  cross the public gate. <Link href="/settings" className="text-teal hover:underline">Sign in as the operator</Link>{" "}
-                  to read the full desk report.
-                </p>
-              </div>
-            )}
-            {report && (
-              <IndexReportView report={report} spendUsdCents={spendUsdCents} evidence={evidence} />
-            )}
-          </div>
-        </section>
-      )}
+            </div>
+
+            <div className="space-y-4 px-4 py-4 sm:px-5">
+              {/* live progress */}
+              {running && !snap?.redacted && (
+                <div className="rounded-lg border border-edge bg-panel-2 p-3">
+                  <p className="flex items-center gap-2 text-[12.5px] font-medium text-ink-soft">
+                    <Loader2 size={13} className="animate-spin text-teal" aria-hidden />
+                    {state === "verifying"
+                      ? "Verifying evidence and reconciling the ledger…"
+                      : state === "executing"
+                        ? "Running the investigation…"
+                        : "Preparing the plan…"}
+                  </p>
+                  {snap && snap.progress.length > 0 ? (
+                    <ul className="mt-2 space-y-1 border-t border-edge pt-2 text-[11.5px] text-ink-faint">
+                      {snap.progress.map((p, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span aria-hidden className="mt-1.5 size-1 shrink-0 rounded-full bg-teal/70" />
+                          <span>{sanitizeDeskMessage(p)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1.5 text-[11.5px] text-ink-faint">
+                      Free probes run first; paid asks start only after approval.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* approval gate */}
+              {awaiting && (
+                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5">
+                  <p className="flex items-center gap-1.5 text-[13px] font-medium text-amber-deep">
+                    <Lock size={13} aria-hidden /> Awaiting your approval — nothing has been signed
+                  </p>
+                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
+                    Approving releases the paid asks for this exact plan, one attempt each. Rejecting ends the
+                    investigation with nothing spent.
+                  </p>
+                  {snap?.plan && snap.plan.length > 0 && (
+                    <ol className="mt-3 space-y-1.5 border-t border-amber/30 pt-3 text-[12px] text-ink-soft">
+                      {snap.plan.map((step) => (
+                        <li key={step.id} className="flex gap-2">
+                          <span aria-hidden className="mt-1.5 size-1 shrink-0 rounded-full bg-amber" />
+                          <span>
+                            {step.description}
+                            {typeof step.maxCostUsdCents === "number" && (
+                              <span className="text-ink-faint"> (ceiling {money(step.maxCostUsdCents)})</span>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => act("approve")}
+                      disabled={acting !== null}
+                      className="btn-primary inline-flex items-center gap-2"
+                    >
+                      {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
+                      Approve &amp; run paid asks
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => act("reject")}
+                      disabled={acting !== null}
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink-soft transition-colors hover:border-risk/40 hover:text-risk"
+                    >
+                      Reject
+                    </button>
+                  </div>
+
+                  {(needsSignIn || actionError) && (
+                    <div className="mt-3 border-t border-amber/30 pt-3">
+                      {actionError && <p className="text-[12px] text-risk">{actionError}</p>}
+                      <form onSubmit={signIn} className="mt-2 flex flex-wrap items-end gap-2">
+                        <label className="min-w-0 flex-1">
+                          <span className="x-label">Operator sign-in</span>
+                          <input
+                            type="password"
+                            value={token}
+                            onChange={(e) => setToken(e.target.value)}
+                            placeholder="Operator passphrase"
+                            autoComplete="current-password"
+                            className="mt-1 h-9 w-full rounded-md border border-edge bg-panel px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                          />
+                        </label>
+                        <button
+                          type="submit"
+                          disabled={signingIn || !token}
+                          className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink transition-colors hover:border-teal/50 hover:text-teal"
+                        >
+                          {signingIn ? <Loader2 size={12} className="animate-spin" aria-hidden /> : null}
+                          Sign in
+                        </button>
+                      </form>
+                      <p className="mt-1 text-[11px] text-ink-faint">
+                        Same passphrase as the deployment&apos;s operator credential. It is verified server-side;
+                        nothing is stored in this page.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* terminal states */}
+              {state === "rejected" && (
+                <div className="rounded-lg border border-edge bg-panel-2 p-3.5 text-[12.5px] text-ink-soft">
+                  <p className="flex items-center gap-1.5 font-medium text-ink">Rejected — nothing was signed or spent.</p>
+                  <p className="mt-1.5">The plan ended at the approval gate. Adjust the universe or methodology and run it again.</p>
+                </div>
+              )}
+              {state === "blocked" && (
+                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] text-ink-soft">
+                  <p className="flex items-center gap-1.5 font-medium text-amber-deep">
+                    <AlertTriangle size={13} aria-hidden /> Blocked before execution
+                  </p>
+                  <p className="mt-1.5">{snap?.error ? sanitizeDeskMessage(snap.error) : "The engine refused to run this plan; nothing was spent."}</p>
+                </div>
+              )}
+              {state === "failed" && (
+                <div className="rounded-lg border border-risk/40 bg-risk/5 p-3.5 text-[12.5px] text-risk">
+                  <p className="font-medium">The investigation failed</p>
+                  <p className="mt-1.5 break-words">
+                    {snap?.error ? sanitizeDeskMessage(snap.error) : "No report was produced. Nothing further was signed."}
+                  </p>
+                </div>
+              )}
+
+              {/* restricted view */}
+              {snap?.redacted && (
+                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] leading-relaxed text-ink-soft">
+                  <p className="flex items-center gap-1.5 font-medium text-amber-deep">
+                    <Lock size={13} aria-hidden /> Restricted view
+                  </p>
+                  <p className="mt-1.5">
+                    You are viewing anonymously, so objectives, proposals, evidence and spend entries do not cross
+                    the public gate. Sign in above (from any awaiting plan) to read the full desk report.
+                  </p>
+                </div>
+              )}
+
+              {/* completed */}
+              {state === "completed" && snap?.report && (
+                <IndexReportView report={snap.report} spendUsdCents={snap.spendUsdCents ?? 0} evidence={snap.evidence} />
+              )}
+              {state === "completed" && !snap?.report && !snap?.redacted && (
+                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] text-ink-soft">
+                  <p className="flex items-center gap-1.5 font-medium text-amber-deep">
+                    <CircleAlert size={13} aria-hidden /> Completed without a readable report
+                  </p>
+                  <p className="mt-1.5">The task finished but carries no proposal. Open it from Activity to inspect the full record.</p>
+                </div>
+              )}
+
+              {(state === "completed" || state === "rejected" || state === "blocked" || state === "failed") && (
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="text-[12.5px] font-medium text-teal hover:underline"
+                >
+                  Start a new investigation
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
@@ -471,163 +829,194 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
 /* The report view                                                     */
 /* ------------------------------------------------------------------ */
 
-function IndexReportView({ report, spendUsdCents, evidence }: { report: IndexDeskReport; spendUsdCents: number; evidence: AssetEvidence[] }) {
+const INPUT_LABELS: Record<string, string> = {
+  marketCap: "Market cap",
+  supply: "Supply",
+  price: "Price (USD)",
+  liquidityUsd: "Liquidity (USD)",
+  holders: "Holders",
+  filings: "Filings",
+  volume30dUsd: "30d volume (USD)",
+};
+
+function IndexReportView({ report, spendUsdCents, evidence }: { report: IndexDeskReport; spendUsdCents: number; evidence: DeskEvidence[] }) {
   const p = report.methodology.proposal;
-  const excluded = report.assets.filter((a) => a.status === "excluded");
-  const provisional = report.assets.filter((a) => a.status === "provisional");
+  const missing = displayMissingDimensions(report.missingDimensions);
+  const portfolioMissing = missing.filter((m) => m.scope === "portfolio");
+  const assetMissing = missing.filter((m) => m.scope === "asset");
+
   return (
     <div className="space-y-5">
+      {/* proposal */}
       {p ? (
-        <div className="rounded-lg border border-teal/30 bg-teal/5 p-3.5">
-          <p className="flex items-center gap-1.5 text-[13px] font-semibold text-teal">
-            <BadgeCheck size={14} aria-hidden /> Proposal — {p.scheme} rule
-          </p>
-          <div className="mt-2.5 divide-y divide-edge overflow-hidden rounded-lg border border-edge bg-panel-2">
+        <div className="rounded-lg border border-teal/30 bg-teal/5 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-[13px] font-semibold text-teal">
+              <BadgeCheck size={14} aria-hidden /> Constituent proposal
+            </p>
+            <span className="text-[11.5px] text-ink-soft">
+              {p.scheme === "market_cap" ? "Market-cap weighted" : p.scheme === "custom" ? "Custom-weighted" : "Equal-weighted"}
+            </span>
+          </div>
+          <div className="mt-3 space-y-2">
             {p.weights.map((w) => (
-              <div key={w.symbol} className="flex items-center justify-between px-3 py-2 text-[13px]">
-                <span className="font-medium text-ink">{w.symbol}</span>
-                <span className="tabular text-ink">{w.weightPct.toFixed(2)}%</span>
+              <div key={w.symbol}>
+                <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+                  <span className="font-medium text-ink">{w.symbol}</span>
+                  <span className="tabular text-ink">{w.weightPct.toFixed(2)}%</span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-panel-3">
+                  <div className="h-full rounded-full bg-teal" style={{ width: `${Math.min(100, Math.max(0, w.weightPct))}%` }} />
+                </div>
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[12px] text-ink-soft">
-            Sum {p.weightSumPct.toFixed(2)}%{p.normalizedFrom !== undefined ? ` (normalized from ${p.normalizedFrom.toFixed(2)}%)` : ""} · HHI {p.concentration.hhi.toFixed(4)} · effective N {p.concentration.effectiveN.toFixed(2)} · top-1 {p.concentration.top1Pct.toFixed(2)}% · top-3 {p.concentration.top3Pct.toFixed(2)}%
-          </p>
+          <div className="mt-3 grid gap-1 border-t border-teal/20 pt-2.5 text-[11.5px] text-ink-soft sm:grid-cols-2">
+            <span>Sum {p.weightSumPct.toFixed(2)}%{p.normalizedFrom !== undefined ? ` (normalized from ${p.normalizedFrom.toFixed(2)}%)` : ""}</span>
+            <span className="tabular">HHI {p.concentration.hhi.toFixed(4)} · effective N {p.concentration.effectiveN.toFixed(2)}</span>
+            <span className="tabular">Top-1 {p.concentration.top1Pct.toFixed(2)}% · top-3 {p.concentration.top3Pct.toFixed(2)}%</span>
+          </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-amber/40 bg-amber-soft/50 p-3.5 text-[12.5px] text-ink-soft">
+        <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] text-ink-soft">
           <p className="flex items-center gap-1.5 font-medium text-amber-deep"><AlertTriangle size={13} aria-hidden /> No weighting proposed</p>
           <p className="mt-1">{report.methodology.proposalBlocker}</p>
         </div>
       )}
 
-      {/* per-asset evidence */}
+      {/* per-asset */}
       <div>
         <p className="x-label">Per-asset evidence <span className="text-ink-faint">— every dimension carries its honest status</span></p>
         <div className="mt-2 space-y-3">
-          {report.assets.map((a) => (
-            <div key={a.symbol} className="overflow-hidden rounded-lg border border-edge bg-panel-2">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[13.5px] font-semibold text-ink">{a.symbol}</span>
-                  <span className="text-[11.5px] text-ink-faint">{a.issuer} · {a.issuerJurisdiction}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Chip label={a.status} tone={STATUS_CHIP[a.status] ?? "border-edge bg-panel text-ink-soft"} />
+          {report.assets.map((a) => {
+            const inputs = (
+              Object.entries(a.inputs ?? {}) as Array<[string, { value: number; provenance: string } | undefined]>
+            ).filter(([, v]) => v !== undefined);
+            const probes = dedupeProbes(report.baseline.probes.filter((pr) => pr.symbol === a.symbol));
+            const receipts = assetReceipts(evidence, a.symbol);
+            return (
+              <div key={a.symbol} className="overflow-hidden rounded-lg border border-edge bg-panel-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-3 py-2.5">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13.5px] font-semibold text-ink">{a.symbol}</span>
+                      <Chip label={a.status} tone={STATUS_TONE[a.status] ?? "border-edge bg-panel text-ink-soft"} />
+                    </div>
+                    <p className="mt-0.5 truncate text-[11.5px] text-ink-faint">{a.issuer} · {a.issuerJurisdiction}</p>
+                  </div>
                   {a.weightPct !== undefined && <span className="tabular text-[13px] font-medium text-ink">{a.weightPct.toFixed(2)}%</span>}
                 </div>
-              </div>
-              {(a.exclusionReason || a.provisionalReason) && (
-                <p className="border-b border-edge bg-panel px-3 py-2 text-[12px] text-ink-soft">
-                  {a.exclusionReason ?? a.provisionalReason}
-                </p>
-              )}
-              <div className="divide-y divide-edge">
-                {report.baseline.probes.filter((pr) => pr.symbol === a.symbol).map((pr, i) => (
-                  <div key={`${pr.dimension}-${i}`} className="grid gap-x-3 gap-y-0.5 px-3 py-1.5 text-[12px] sm:grid-cols-[170px_1fr]">
-                    <span className="text-ink-faint">probe · {pr.dimension}</span>
-                    <span className="text-ink-soft">
-                      {pr.status === "challenge" ? `routable at $${((pr.priceUsdCents ?? 0) / 100).toFixed(2)}` : pr.status}
-                      {pr.detail ? ` — ${pr.detail}` : ""}
-                    </span>
-                  </div>
-                ))}
-                {(a.inputs.supply || a.inputs.price || a.inputs.marketCap || a.inputs.liquidityUsd || a.inputs.holders || a.inputs.filings || a.inputs.volume30dUsd) && (
-                  <div className="grid gap-x-3 gap-y-1 px-3 py-1.5 text-[12px] sm:grid-cols-[170px_1fr]">
-                    <span className="text-ink-faint">weighting inputs</span>
-                    <span className="space-y-0.5 text-ink-soft">
-                      {(["marketCap", "supply", "price", "liquidityUsd", "holders", "filings", "volume30dUsd"] as const).map((k) => {
-                        const inp = a.inputs[k];
-                        if (!inp) return null;
-                        return (
-                          <div key={k} className="flex flex-wrap items-center gap-1.5">
-                            <span className="tabular text-ink">{inp.value.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
-                            <Chip label={inp.provenance} tone={STATUS_CHIP[inp.provenance === "telegraph-verified" ? "verified" : "declared"]} />
-                          </div>
-                        );
-                      })}
-                    </span>
-                  </div>
-                )}
-                <div className="grid gap-x-3 gap-y-0.5 px-3 py-1.5 text-[12px] sm:grid-cols-[170px_1fr]">
-                  <span className="text-ink-faint">data quality</span>
-                  <span className="text-ink-soft">
-                    registry fields {a.dataQuality.registryFieldsKnown}/{a.dataQuality.registryFieldsTotal} · dimensions verified {a.dataQuality.dimensionsVerified}/{a.dataQuality.dimensionsTotal} · conflicts {a.dataQuality.disagreements} · score {a.dataQuality.score}/100
-                  </span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
 
-      {/* signal receipts */}
-      {report.mode === "intel" && (
-        <div>
-          <p className="x-label">Signals &amp; receipts <span className="text-ink-faint">— ${(spendUsdCents / 100).toFixed(2)} spent, one receipt per ask</span></p>
-          <div className="mt-2 space-y-2">
-            {report.assets.map((a) => {
-              const ev = assetEvidenceOf(evidence, a.symbol);
-              const paid = ev?.dimensions.filter((d) => d.signalHash) ?? [];
-              if (!ev || paid.length === 0) {
-                return (
-                  <div key={`rc-${a.symbol}`} className="rounded-lg border border-edge bg-panel-2 px-3 py-2 text-[12px] text-ink-faint">
-                    {a.symbol}: no settled asks recorded for this asset.
-                  </div>
-                );
-              }
-              return (
-                <div key={`rc-${a.symbol}`} className="rounded-lg border border-edge bg-panel-2 px-3 py-2 text-[12px]">
-                  <p className="font-medium text-ink">{a.symbol} <span className="text-ink-faint">— {paid.length} ask(s), ${(ev.totalCostUsdCents / 100).toFixed(2)}</span></p>
-                  <div className="mt-1 space-y-1">
-                    {paid.map((d, i) => (
-                      <div key={`${d.dimension}-${i}`} className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                        <span className="text-ink-faint">{d.dimension}</span>
-                        {d.signalHash && HASH_RE.test(d.signalHash) ? (
-                          <Link href={`/signals/${d.signalHash}`} className="inline-flex items-center gap-0.5 break-all text-teal hover:underline">
-                            {shortHash(d.signalHash)} <ExternalLink size={10} aria-hidden />
-                          </Link>
-                        ) : (
-                          <span className="break-all text-ink-soft">{d.signalHash ?? "—"}</span>
-                        )}
-                        {d.receiptHash && <span className="break-all text-ink-faint">receipt {shortHash(d.receiptHash)}</span>}
-                        {typeof d.costUsdCents === "number" && <span className="tabular text-ink-soft">${(d.costUsdCents / 100).toFixed(2)}</span>}
-                        {d.value !== undefined && <span className="tabular text-ink">→ {fmtValue(d.value)}</span>}
+                {(a.exclusionReason || a.provisionalReason) && (
+                  <p className="border-b border-edge bg-panel px-3 py-2 text-[12px] leading-relaxed text-ink-soft">
+                    {a.exclusionReason ?? a.provisionalReason}
+                  </p>
+                )}
+
+                {inputs.length > 0 && (
+                  <div className="grid gap-2 px-3 py-2.5 sm:grid-cols-2">
+                    {inputs.map(([key, value]) => (
+                      <div key={key} className="flex items-center justify-between gap-2 rounded-md border border-edge bg-panel px-2.5 py-1.5">
+                        <span className="text-[11.5px] text-ink-faint">{INPUT_LABELS[key] ?? dimensionLabel(key)}</span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="tabular text-[12px] text-ink">{fmtNumber(value!.value)}</span>
+                          <Chip
+                            label={value!.provenance === "telegraph-verified" ? "verified" : "declared"}
+                            tone={STATUS_TONE[value!.provenance === "telegraph-verified" ? "verified" : "declared"]}
+                          />
+                        </span>
                       </div>
                     ))}
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                )}
 
-      {/* methodology rules */}
-      <div>
-        <p className="x-label">Methodology rules <span className="text-ink-faint">— stated verbatim, reproducible</span></p>
-        <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-[12.5px] text-ink-soft">
-          {report.methodology.methodologyRules.map((r, i) => (
-            <li key={i}>{r}</li>
-          ))}
-        </ol>
+                <div className="border-t border-edge px-3 py-2 text-[11.5px] text-ink-faint">
+                  Registry fields {a.dataQuality.registryFieldsKnown}/{a.dataQuality.registryFieldsTotal} · dimensions
+                  verified {a.dataQuality.dimensionsVerified}/{a.dataQuality.dimensionsTotal} · conflicts{" "}
+                  {a.dataQuality.disagreements} · quality score {a.dataQuality.score}/100
+                </div>
+
+                {(probes.length > 0 || receipts.length > 0) && (
+                  <details className="group border-t border-edge">
+                    <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
+                      <span className="inline-flex items-center gap-1">
+                        <ChevronRight size={12} aria-hidden className="transition-transform group-open:rotate-90" />
+                        Probe &amp; receipt details ({probes.length + receipts.length})
+                      </span>
+                    </summary>
+                    <div className="space-y-1.5 border-t border-edge px-3 py-2">
+                      {probes.map((pr) => (
+                        <div key={pr.dimension} className="flex flex-wrap items-baseline gap-x-2 text-[11.5px]">
+                          <span className="w-32 shrink-0 text-ink-faint">{dimensionLabel(pr.dimension)}</span>
+                          <span className="text-ink-soft">
+                            {pr.status === "challenge"
+                              ? `routable at ${money(pr.priceUsdCents ?? 0)}`
+                              : pr.status === "not_askable"
+                                ? "needs more input"
+                                : pr.status}
+                          </span>
+                        </div>
+                      ))}
+                      {receipts.map((r, i) => (
+                        <div key={`${r.dimension}-${i}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px]">
+                          <span className="w-32 shrink-0 text-ink-faint">{dimensionLabel(r.dimension)}</span>
+                          {r.signalHash && HASH_RE.test(r.signalHash) ? (
+                            <Link href={`/signals/${r.signalHash}`} className="inline-flex items-center gap-0.5 break-all text-teal hover:underline">
+                              {shortHash(r.signalHash)} <ExternalLink size={10} aria-hidden />
+                            </Link>
+                          ) : (
+                            <span className="break-all text-ink-soft">{r.signalHash ?? "—"}</span>
+                          )}
+                          {typeof r.costUsdCents === "number" && <span className="tabular text-ink-soft">{money(r.costUsdCents)}</span>}
+                          {r.value !== undefined && <span className="tabular text-ink">→ {fmtValue(r.value)}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
+      {/* spend */}
+      <p className="text-[11.5px] text-ink-faint">
+        Total spent on this investigation: <span className="tabular text-ink-soft">{money(spendUsdCents)}</span>
+        {report.mode === "free" ? " · free mode: no purchases were made" : ""}
+      </p>
+
       {/* missing dimensions */}
-      {report.missingDimensions.length > 0 && (
-        <div>
-          <p className="x-label">Missing-dimension ledger <span className="text-ink-faint">— identified, never fabricated</span></p>
-          <div className="mt-2 space-y-1.5">
-            {report.missingDimensions.map((m, i) => (
-              <div key={i} className="rounded-lg border border-amber/40 bg-amber-soft/40 px-3 py-2 text-[12px] text-ink-soft">
-                <span className="font-medium text-amber-deep">{m.scope === "portfolio" ? "Portfolio-wide" : m.symbol}</span>
-                {" · "}
-                {m.dimension} — {m.reason}
+      <div>
+        <p className="x-label">Missing-dimension ledger <span className="text-ink-faint">— identified, never fabricated</span></p>
+        {missing.length === 0 ? (
+          <p className="mt-2 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-[12px] text-ink-soft">
+            No missing dimensions — every declared dimension verified in this run.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {portfolioMissing.map((m) => (
+              <div key={m.key} className="rounded-lg border border-amber/40 bg-amber-soft/40 px-3 py-2 text-[12px] text-ink-soft">
+                <span className="font-medium text-amber-deep">Portfolio-wide · {m.dimension}</span> — {m.reason}
               </div>
             ))}
+            {assetMissing.length > 0 && (
+              <details className="group rounded-lg border border-amber/40 bg-amber-soft/40">
+                <summary className="cursor-pointer list-none px-3 py-2 text-[12px] text-ink-soft">
+                  Per-asset gaps ({assetMissing.length})
+                </summary>
+                <div className="space-y-1.5 border-t border-amber/30 px-3 py-2">
+                  {assetMissing.map((m) => (
+                    <p key={m.key} className="text-[11.5px] text-ink-soft">
+                      <span className="font-medium text-amber-deep">{m.symbol}</span> · {m.dimension} — {m.reason}
+                    </p>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* reasoning */}
       <div>
@@ -638,9 +1027,34 @@ function IndexReportView({ report, spendUsdCents, evidence }: { report: IndexDes
           ))}
         </ol>
       </div>
+
+      <details className="group rounded-lg border border-edge bg-panel-2">
+        <summary className="cursor-pointer list-none px-3 py-2 text-[12px] text-ink-soft">
+          Methodology rules ({report.methodology.methodologyRules.length})
+        </summary>
+        <ol className="list-decimal space-y-1.5 border-t border-edge px-3 py-2 pl-7 text-[12px] text-ink-soft">
+          {report.methodology.methodologyRules.map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ol>
+      </details>
+
       <p className="text-[11.5px] text-ink-faint">
-        Confidence: {report.confidence}. The proposal is deterministic: rerun with the same definition and the same network answers and the weights reproduce exactly.
+        Confidence: {report.confidence}. The proposal is deterministic: rerun with the same definition and the same
+        network answers and the weights reproduce exactly.
       </p>
     </div>
   );
+}
+
+function dedupeProbes<T extends { dimension: string }>(probes: T[]): T[] {
+  const seen = new Map<string, T>();
+  for (const p of probes) if (!seen.has(p.dimension)) seen.set(p.dimension, p);
+  return [...seen.values()];
+}
+
+function assetReceipts(evidence: DeskEvidence[], symbol: string) {
+  const ev = evidence.find((e) => e.symbol === symbol);
+  if (!ev) return [];
+  return ev.dimensions.filter((d) => d.signalHash);
 }
