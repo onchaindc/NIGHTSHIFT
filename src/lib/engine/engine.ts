@@ -9,6 +9,8 @@ import { executeWatchCheck, executeWatchCorroborate, executeWatchRepoInvestigate
 import type { WatchRunState } from "@/lib/watch/types";
 import { executeCounterpartyAsk, executeMindBaseline, executeMindReport } from "@/lib/mind/execute";
 import type { MindBaseline, MindIntelResult } from "@/lib/mind/report";
+import { executeIndexBaseline, executeIndexDataAsk, executeIndexReport } from "@/lib/mind/indexdesk-execute";
+import type { IndexDeskBaselineOutput, IndexDeskAsksOutput } from "@/lib/mind/indexdesk-execute";
 import { getGasPrice, getTransactionReceipt, rpcForChainId } from "@/lib/chain/rpc";
 import type { ChainReceipt, ChainGasPrice } from "@/lib/chain/rpc";
 import type { SignalRecord } from "@/lib/telegraph/client";
@@ -44,6 +46,10 @@ export interface ExecutionOutputs {
   mindBaseline?: MindBaseline;
   /** Mind investigation: the purchased specialist intelligence (when approved). */
   mindIntel?: MindIntelResult;
+  /** Index desk: the unpaid per-asset, per-dimension dossier + pinned offers. */
+  indexDeskBaseline?: IndexDeskBaselineOutput;
+  /** Index desk: the collected per-asset evidence from the paid asks. */
+  indexDeskAsks?: IndexDeskAsksOutput;
 }
 
 export interface EngineDeps {
@@ -368,6 +374,16 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "mind_report") {
         // Completes the task itself (verification invariants run inside).
         await executeMindReport(task, step.target, outputs);
+        return task;
+      } else if (step.kind === "index_baseline") {
+        await executeIndexBaseline(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "index_data_ask") {
+        await executeIndexDataAsk(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "index_report") {
+        // Completes the task itself (verification invariants run inside).
+        await executeIndexReport(task, step.target, outputs);
         return task;
       } else if (step.kind === "free_chain_read") {
         outputs.freeRead = await executeFreeChainRead(task, deps);
