@@ -1,0 +1,523 @@
+@import "tailwindcss";
+
+/*
+ * Telegraph explorer design system — DROPTEST light direction.
+ * Warm off-white page, white surfaces with hairline borders, dark ink,
+ * teal and one amber accent, Geist / Geist Mono. Numbers always render
+ * on a tabular mono grid; colors carry state, never decoration.
+ */
+
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-display: var(--font-instrument), Georgia, "Times New Roman", serif;
+
+  /* Surfaces: warm paper + white cards */
+  --color-night: #f7f6f2;
+  --color-panel: #ffffff;
+  --color-panel-2: #ffffff;
+  --color-panel-3: #faf9f6;
+  --color-edge: #e3e0d8;
+  --color-edge-strong: #c9c5ba;
+  --color-hairline: #e3e0d8;
+
+  /* Ink: dark hierarchy on paper */
+  --color-ink: #16181d;
+  --color-ink-soft: #4b4f57;
+  --color-ink-faint: #8a887f;
+
+  /* Accents */
+  --color-amber: #b45309;
+  --color-amber-deep: #92400e;
+  --color-amber-soft: #fdf3e3;
+
+  /* Status colors (state only) */
+  --color-teal: #0f766e;
+  --color-blue: #2563eb;
+  --color-risk: #b91c1c;
+
+  /* Legacy aliases so existing class names keep resolving */
+  --color-ivory: #ece8df;
+  --color-mist: #a29d93;
+  --color-faint: #6a6661;
+  --color-lamp: #0f766e;
+  --color-lamp-deep: #0c5f59;
+  --color-go: #0f766e;
+  --color-amflat: #0a0b0d;
+  --color-stop: #b91c1c;
+  --color-accent: #b45309;
+  --color-surface: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-strong: #ffffff;
+  --color-background: #f7f6f2;
+  --color-background2: #f7f6f2;
+
+  --radius-card: 8px;
+}
+
+
+/* Night theme — applied via .dark on <html> */
+html.dark {
+  color-scheme: dark;
+  /* Warm dark — close to the light paper's temperature, not cold slate */
+  --color-night: #14120f;
+  --color-panel: #1c1a16;
+  --color-panel-2: #221f1a;
+  --color-panel-3: #181612;
+  --color-edge: #2e2a24;
+  --color-edge-strong: #3f3a32;
+  --color-hairline: #2e2a24;
+  --color-ink: #efece6;
+  --color-ink-soft: #c4bfb4;
+  --color-ink-faint: #9a9488;
+  --color-amber: #e08a2c;
+  --color-amber-deep: #c46b1a;
+  --color-amber-soft: #2a1f12;
+  --color-teal: #2dd4bf;
+  --color-blue: #7dd3fc;
+  --color-risk: #fca5a5;
+  --color-ivory: #221f1a;
+  --color-background: #14120f;
+  --color-background2: #14120f;
+  --color-surface: #1c1a16;
+  --color-surface-2: #221f1a;
+}
+
+html {
+  color-scheme: light;
+  /* A single stray wide child must never shift the whole page sideways on a
+     phone. clip (not hidden) keeps sticky headers and anchor scrolling intact. */
+  overflow-x: clip;
+}
+
+/* A grid that declares columns only at a breakpoint has ONE implicit column on
+   smaller screens, and an implicit track is sized to max-content. One long hash
+   then makes that column wider than the phone, and because the page clips
+   horizontally the right side of every card becomes unreachable. Every grid now
+   starts at a single minmax(0, 1fr) column: content wraps instead of widening,
+   and grids that declare their own columns are untouched. */
+.grid {
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+body {
+  background-color: var(--color-night);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: clip;
+  /* Long registry tokens (hashes, URLs, intent names) wrap instead of pushing
+     their container wider than the screen. */
+  overflow-wrap: break-word;
+}
+
+::selection {
+  background: rgba(15, 118, 110, 0.18);
+  color: var(--color-ink);
+}
+
+/* Inline code carries URLs, hashes and paths: let any of them break rather
+   than widen the paragraph they sit in. */
+:where(code) {
+  overflow-wrap: anywhere;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-strong) transparent;
+}
+
+/* Numeric readouts always render on a tabular grid. */
+.tabular {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Display type scale: the editorial voice of the product. */
+.x-display-hero {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(2.9rem, 7.2vw, 6.25rem);
+  line-height: 0.98;
+  letter-spacing: -0.015em;
+}
+
+.x-display-1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.9rem, 3.4vw, 2.75rem);
+  line-height: 1.06;
+  letter-spacing: -0.01em;
+}
+
+.x-display-2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.45rem, 2.4vw, 1.9rem);
+  line-height: 1.12;
+}
+
+/* Micro metadata marks. Quieter than they used to be: these should read as a
+   caption, not as a second headline shouting in capitals. */
+.x-tag {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--color-ink-faint);
+}
+
+/* Editorial section labels */
+.x-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--color-ink-faint);
+}
+
+/* Section eyebrow: a small amber dot plus a plain label. Used instead of the
+   old all-caps strings so a section announces itself in normal language. */
+.x-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-ink-soft);
+}
+
+.x-eyebrow::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--color-amber);
+}
+
+.x-rule {
+  height: 1px;
+  background: var(--color-edge);
+}
+
+/* Disclosure controls get a quiet chevron. */
+details > summary::-webkit-details-marker,
+details > summary::marker {
+  display: none;
+  content: "";
+}
+
+.x-chev {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-right: 1px solid var(--color-ink-faint);
+  border-bottom: 1px solid var(--color-ink-faint);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.2s ease;
+}
+
+details[open] > summary .x-chev {
+  transform: rotate(-135deg) translateY(1px);
+}
+
+/* One visible focus style for every interactive control. */
+:where(button, a, input, textarea, [role="switch"], summary):focus-visible {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Light text inputs */
+input,
+textarea {
+  color-scheme: light;
+}
+
+/* Primary action: solid dark ink, the one loud element. */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  border-radius: 0.625rem;
+  background: var(--color-ink);
+  color: var(--color-night);
+  padding: 0 1.25rem;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 1px 2px rgba(22, 24, 29, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+.btn-primary:hover {
+  background: #2b2f36;
+  box-shadow:
+    0 3px 10px rgba(22, 24, 29, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(22, 24, 29, 0.16);
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Explorer accent action: teal outline */
+.btn-signal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  border-radius: 0.625rem;
+  border: 1px solid rgba(15, 118, 110, 0.5);
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--color-teal);
+  padding: 0 1.25rem;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease;
+}
+.btn-signal:hover {
+  background: rgba(15, 118, 110, 0.14);
+}
+.btn-signal:active {
+  transform: translateY(1px);
+}
+.btn-signal:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--color-edge);
+  background: var(--color-panel);
+  color: var(--color-ink-soft);
+  padding: 0 0.9rem;
+  font-size: 13px;
+  box-shadow: 0 1px 1px rgba(22, 24, 29, 0.04);
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+.btn-quiet:hover {
+  border-color: var(--color-edge-strong);
+  color: var(--color-ink);
+  box-shadow: 0 2px 6px rgba(22, 24, 29, 0.07);
+  transform: translateY(-1px);
+}
+.btn-quiet:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ *
+ * Motion: the ask lifecycle. One travelling packet on a rail, a sweeper
+ * along a surface edge, a live dot and a terminal caret. All decorative,
+ * all CSS, all disabled by the reduced-motion rule at the end of the file.
+ * ------------------------------------------------------------------ */
+@keyframes packet-travel {
+  0% {
+    top: 4px;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  86% {
+    opacity: 1;
+  }
+  100% {
+    top: calc(100% - 6px);
+    opacity: 0;
+  }
+}
+
+.x-packet {
+  animation: packet-travel 4.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes sheen-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  55%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+/* A hairline of light crossing the top edge of a surface. */
+.x-sheen::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-amber), transparent);
+  opacity: 0.7;
+  animation: sheen-sweep 5.2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.32);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(15, 118, 110, 0);
+  }
+}
+
+.x-live-dot {
+  animation: live-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.x-caret {
+  animation: caret-blink 1.1s steps(1, end) infinite;
+}
+
+/* Page enter: content settles in rather than snapping into place. */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.x-page > * {
+  animation: page-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Section reveal driven by scroll position, where the browser supports it.
+   Without support the block simply renders in place — nothing is hidden. */
+/* Content settles into place on first paint for cards and rows. */
+@keyframes settle-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.x-settle {
+  animation: settle-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@supports (animation-timeline: view()) {
+  .x-reveal {
+    animation: reveal-up linear both;
+    animation-timeline: view();
+    animation-range: entry 4% entry 42%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .x-page > *,
+  .x-reveal,
+  .x-settle {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* Links and cards get a consistent, short response to the pointer. */
+@media (hover: hover) {
+  .x-reveal a,
+  .x-reveal button {
+    transition-duration: 0.18s;
+  }
+}
+
+/* Subtle entrance for rows and panels. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise-in {
+  animation: rise-in 0.24s ease both;
+}
+.rise-in-item:nth-child(1) { animation-delay: 0ms; }
+.rise-in-item:nth-child(2) { animation-delay: 30ms; }
+.rise-in-item:nth-child(3) { animation-delay: 60ms; }
+.rise-in-item:nth-child(4) { animation-delay: 90ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* iOS Safari zooms the whole page when a focused field's text is under 16px,
+   and it stays magnified until the user pinches back out. Keep the compact
+   desktop sizes off phones so typing never changes the zoom level. */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

@@ -1,0 +1,389 @@
+import type { RepoReport } from "@/lib/watch/repo-intel";
+import type { MindInvestigationReport } from "@/lib/mind/report";
+
+/**
+ * NIGHTSHIFT task engine — shared types.
+ *
+ * The engine is a plain TypeScript module: it imports nothing from Next.js,
+ * so the same code serves the web app and the Telegram bot.
+ */
+
+/** All states a task moves through. Transitions are constrained by ALLOWED_TRANSITIONS. */
+export type TaskState =
+  | "created" // goal accepted, nothing yet planned
+  | "planning" // building the plan
+  | "awaiting_approval" // plan built, waiting for explicit user approval
+  | "executing" // running plan steps (purchases happen here)
+  | "verifying" // checking the result against real evidence
+  | "completed" // result verified against evidence
+  | "failed" // a step or verification failed outright
+  | "rejected" // user rejected the plan
+  | "blocked"; // cannot proceed (missing credentials/integration blockers)
+
+/** Actions the engine may perform on the user's behalf. */
+export type ActionId = "telegraph.ask" | "telegram.notify" | "chain.read";
+
+/** Execution event types. `data` carries structured proof (hashes, amounts, errors). */
+export type ExecutionEventType =
+  | "goal_accepted"
+  | "plan_created"
+  | "criteria_defined"
+  | "approval_required"
+  | "plan_approved"
+  | "plan_rejected"
+  | "step_started"
+  | "step_succeeded"
+  | "step_failed"
+  | "step_retried"
+  | "recovery_selected"
+  | "action_started"
+  | "permission_denied"
+  | "spend_denied"
+  | "spend_recorded"
+  | "telegraph_challenge"
+  | "verification_started"
+  | "verification_passed"
+  | "verification_failed"
+  | "criteria_failed"
+  | "criteria_check_passed"
+  | "task_completed"
+  | "task_failed"
+  | "task_blocked"
+  // Protocol Watch lifecycle events
+  | "watch_source_checked"
+  | "watch_baseline"
+  | "watch_change_detected"
+  | "watch_corroborated"
+  | "watch_paid_skipped"
+  | "watch_report_ready"
+  // Repository Intelligence events (recorded reads + classified findings)
+  | "repo_intel_scope"
+  | "repo_intel_finding"
+  | "delivery_started"
+  | "delivery_succeeded"
+  | "delivery_failed"
+  | "delivery_skipped"
+  // Watch scheduling: an interrupted scan was reconciled by a later worker.
+  | "scan_interrupted"
+  // Mind investigation events (baseline dossier + reasoned report)
+  | "mind_baseline_ready"
+  | "mind_report_ready";
+
+export interface ExecutionEvent {
+  id: string;
+  ts: number; // unix ms
+  type: ExecutionEventType;
+  message: string;
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Success criteria, fixed BEFORE execution. Measurable and checked against
+ * real evidence; verification can never relax them.
+ */
+export interface VerificationCriteria {
+  primaryVerifiedAgainstNodeSignal: boolean;
+  answerSane: boolean;
+  answerMaxAgeSeconds: number;
+  ownPaymentSettledOnChain: boolean;
+  /** Reconcile the purchase ledger (receipts, txs, hashes, sums) during verification. */
+  reconcileLedgerEntries: boolean;
+  /** The answer must concern this chain (from the goal text), when known. */
+  expectedChain?: string;
+  /** The answer must concern this asset (from the goal text), when known. */
+  expectedAsset?: string;
+  /** Cross-check the purchased answer against our own public chain RPC read. */
+  crossCheckChainTelemetry?: boolean;
+  /** Goal threshold like "transfers under $0.01" — verified from real evidence only. */
+  maxFeeUsdFor21000Gas?: number;
+  /** Max relative deviation allowed between the purchased answer and the chain read. */
+  agreementToleranceRatio?: number;
+  /**
+   * Intent classified from the goal text BEFORE execution (fixed at creation):
+   * information (researched answer), preparation (guidance material, action not
+   * executed), or execution (external action required; currently unsupported).
+   */
+  goalIntent?: "information" | "preparation" | "execution";
+  /**
+   * Where the primary answer comes from: "telegraph" (paid inference) or
+   * "free" (public sources + read-only chain RPC, never spends). Verification
+   * checks the matching evidence kind only.
+   */
+  primarySource?: "telegraph" | "free";
+  /** Free plan requirement: a real chain read of this chain must exist. */
+  freeChainRead?: string;
+  /** Free plan requirement: a real public-source price lookup for this asset must exist. */
+  freeAssetLookup?: string;
+  /**
+   * True when the goal requires evidence of an actual external action
+   * (transaction receipt plus an independent outcome check). An inference
+   * response, a payment receipt for AI inference, or a self-reported
+   * confidence score is NEVER sufficient execution evidence.
+   */
+  requiresExecutionEvidence?: boolean;
+}
+
+export interface SpendEntry {
+  ts: number;
+  description: string;
+  amountUsdCents: number;
+  source: "telegraph";
+  receiptHash?: string;
+  txHash?: string;
+  signalHash?: string;
+}
+
+export interface TaskPermissions {
+  allowedActions: ActionId[];
+  /** If true, the plan must be explicitly approved before any paid action runs. */
+  requiresApproval: boolean;
+  maxRetries: number;
+}
+
+export interface TaskResult {
+  summary: string;
+  /** Evidence backing the summary. A task is completed ONLY when evidence verifies. */
+  evidence: Evidence[];
+  completedAt: number;
+  /**
+   * A completed Repository Intelligence report, present only when the
+   * investigation stage actually ran. Its absence is what distinguishes a
+   * routine no-change check from a completed technical examination.
+   */
+  repoReport?: RepoReport;
+  /**
+   * A completed Mind investigation report, present only for
+   * mind_investigation tasks: the reasoned deliverable with the
+   * with/without-Telegraph comparison and the evidence-tracing reasoning.
+   */
+  mindReport?: MindInvestigationReport;
+}
+
+export type Evidence =
+  | { kind: "telegraph_signal"; signalHash: string; minerId: string }
+  | { kind: "telegraph_receipt"; receiptHash: string; txHash?: string; amountUsdCents: number }
+  | { kind: "on_chain_settlement"; txHash: string; status: string; blockNumber: number; rpcUrl: string }
+  | {
+      kind: "chain_gas_crosscheck";
+      chain: string;
+      chainGasGwei: number;
+      answerGasGwei: number;
+      toleranceRatio: number;
+      agreed: boolean;
+      rpcUrl: string;
+    }
+  | {
+      /**
+       * Evidence from a Protocol Watch run: a finding that restates what a
+       * configured source actually returned. Not a payment signal; carrying
+       * the real source label and confidence instead of a fake hash.
+       */
+      kind: "watch_finding";
+      sourceLabel: string;
+      findingKind: string;
+      confidence: string;
+      url: string | null;
+      corroboratedBy?: string[];
+    }
+  | {
+      /** Free research evidence: a real read of public chain data (RPC). */
+      kind: "chain_read";
+      chain: string;
+      gasPriceWei: number;
+      gasPriceGwei: number;
+      rpcUrl: string;
+    }
+  | {
+      /**Repository Intelligence evidence: a classified finding restating data
+       * actually fetched from GitHub (commit hashes, advisory ids, versions). */
+      kind: "repo_intel";
+      findingTitle: string;
+      severity: string;
+      category: string;
+      evidence: string[];
+      url: string | null;
+    }
+  | {
+      /** Free research evidence: a real read of a public source (e.g. a price API). */
+      kind: "public_source_lookup";
+      url: string;
+      asset: string;
+      priceUsd: number;
+      fetchedAt: string;
+    }
+  | {
+      /**
+       * Mind investigation evidence: restates what the investigation actually
+       * established — the unpaid probe verdict and, when a purchase ran and
+       * verified, the hash-committed facts with their verification status.
+       */
+      kind: "counterparty_finding";
+      entity: string;
+      jurisdiction?: string;
+      probeStatus: "challenge" | "rejected" | "unavailable";
+      signalHash?: string;
+      receiptHash?: string;
+      costUsdCents?: number;
+      verificationStatus: string;
+      facts: Array<{ field: string; value: unknown }>;
+      missing: string[];
+      disagreements?: Array<{ field: string; left: string; right: string; note?: string }>;
+    };
+
+export type PlanStepKind =
+  | "telegraph_ask"
+  | "verify_settlement"
+  | "cross_check"
+  | "verify_evidence"
+  // Free research steps: public sources + read-only chain RPC, no payments
+  | "free_chain_read"
+  | "free_public_lookup"
+  // Protocol Watch steps
+  | "watch_check"
+  | "watch_corroborate"
+  | "watch_investigate"
+  | "watch_repo_investigate"
+  | "watch_deliver"
+  | "watch_report"
+  // Mind investigation steps (autonomous investigations over Counterparty Intelligence)
+  | "mind_baseline"
+  | "counterparty_ask"
+  | "mind_report";
+
+export interface PlanStep {
+  id: string;
+  kind: PlanStepKind;
+  description: string;
+  /** Estimated maximum cost in USD cents; the engine refuses to exceed the budget. */
+  maxCostUsdCents?: number;
+  /** Free-step parameter: the lookup target (e.g. a public price-source id). */
+  target?: string;
+}
+
+/**
+ * Optional provenance for engine task variants. A task with no jobType is an
+ * ordinary goal task. Protocol Watch tasks carry the watch reference so the
+ * engine can pass watch context to the watch step executors.
+ */
+export interface WatchRef {
+  watchId: string;
+  watchName: string;
+  /** Who or what triggered this check: "manual" or "auto-scheduler". */
+  triggeredBy?: string | null;
+  /** The telegram chat that receives the report, if configured. */
+  telegramChatId?: string | number | null;
+}
+
+/** Facts of one durably recorded interactive Terminal ask (Phase 5b). */
+export interface TerminalRunInfo {
+  /** Intent the router/miner knowledge provides, when present (e.g. WEATHER_FORECAST). */
+  intent?: string | null;
+  /** Miner that served the request (id/slug), when the response names one. */
+  miner?: string | null;
+  /** The engine path the request was paid to (e.g. /engine/v1/ask). */
+  endpointPath?: string;
+  /** The exact request body the node was paid to answer. */
+  request?: unknown;
+  /** The user-approved, drift-checked offer (network, asset, payTo, atomic amount). */
+  offer?: { scheme: string; network: string; asset: string; payTo: string; amount: string };
+  /** Payer's PUBLIC account address; never any key material. */
+  payerAddress?: string;
+  /** Node-reported timing, when present. */
+  durationMs?: number;
+  timestamp?: string;
+  /** x402 PAYMENT-RESPONSE settlement proof header, verbatim when present. */
+  settlementHeader?: string;
+}
+
+/** A task is either an ordinary goal, a protocol-watch check run, or a
+ * durably recorded interactive Terminal ask (jobTypes share one store so the
+ * Activity centre reads a single history). */
+export type JobType = "goal" | "protocol_watch" | "terminal_request" | "mind_investigation";
+
+export interface TaskRecord {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+  state: TaskState;
+  goal: string;
+  plan: PlanStep[] | null;
+  events: ExecutionEvent[];
+  spend: {
+    limitUsdCents: number;
+    spentUsdCents: number;
+    entries: SpendEntry[];
+  };
+  permissions: TaskPermissions;
+  criteria: VerificationCriteria;
+  result: TaskResult | null;
+  /** Terminal failure/blocker explanation, machine-readable where possible. */
+  error: string | null;
+  origin: {
+    source: "web" | "telegram";
+    actor?: string; // telegram chat id, etc.
+  };
+  /** Task variant: "goal" (default), "protocol_watch", or "terminal_request". */
+  jobType?: JobType;
+  /** Set when jobType is protocol_watch; carries the watch run context. */
+  watch?: WatchRef;
+  /**
+   * Set when jobType is terminal_request: the facts of the interactive paid
+   * ask, exactly as the execute route saw them (request body, user-approved
+   * offer, payer public address). No private key material is ever stored.
+   */
+  terminal?: TerminalRunInfo;
+  /**
+   * Optional provenance labels set outside the engine (e.g. "audit-rehearsal"
+   * marking tasks created by the automated interaction audit). Labels never
+   * change task state, spending, or approval.
+   */
+  labels?: string[];
+}
+
+/**
+ * Legal state transitions, enforced by the engine. Any transition not listed
+ * here is rejected (an invariant asserted in tests).
+ */
+export const ALLOWED_TRANSITIONS: Record<TaskState, TaskState[]> = {
+  created: ["planning", "blocked", "failed"],
+  planning: ["awaiting_approval", "executing", "blocked", "failed"],
+  awaiting_approval: ["executing", "rejected"],
+  executing: ["verifying", "failed", "blocked"],
+  verifying: ["completed", "failed"],
+  completed: [],
+  failed: [],
+  rejected: [],
+  blocked: [],
+};
+
+export function canTransition(from: TaskState, to: TaskState): boolean {
+  return ALLOWED_TRANSITIONS[from].includes(to);
+}
+
+export function isTerminal(state: TaskState): boolean {
+  return ALLOWED_TRANSITIONS[state].length === 0;
+}
+
+export interface TelegraphAnswer {
+  answer: Record<string, unknown>; // result read into the intent's shape
+  minerId: string;
+  minerName?: string;
+  costUsd: number | null;
+  signalHash: string | null;
+  receipt: TelegraphReceipt | null;
+}
+
+/** Doc-confirmed shape of the X-TELEGRAPH-RECEIPT header (base64 JSON). */
+export interface TelegraphReceipt {
+  receipt_hash: string;
+  rail: string;
+  payer: string;
+  miner: string;
+  intent: string;
+  amount_uusdc: string;
+  epoch_id: number;
+  settlement: string;
+  chain: string;
+  tx_hash?: string;
+  timestamp: number;
+}
