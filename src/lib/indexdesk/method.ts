@@ -192,14 +192,21 @@ export function buildIndexProposal(
 
   const weighted: WeightedAsset[] = [];
   const missing: MissingDimensionEntry[] = [];
+  const seenMissing = new Set<string>();
+  const addMissing = (entry: MissingDimensionEntry) => {
+    const key = `${entry.scope}|${entry.symbol ?? ""}|${entry.dimension}|${entry.reason}`;
+    if (seenMissing.has(key)) return;
+    seenMissing.add(key);
+    missing.push(entry);
+  };
 
   // Portfolio-level missing dimensions: what the network simply does not sell.
-  missing.push({
+  addMissing({
     scope: "portfolio",
     dimension: "Circulating float",
     reason: "the network exposes TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL (total supply) but no circulating-float or locked-supply intent; float-style figures exist only as user-declared inputs",
   });
-  missing.push({
+  addMissing({
     scope: "portfolio",
     dimension: "Trading volumes / trading quality",
     reason: "no network intent returns traded volumes or execution-quality metrics; the liquidity dimension covers DEX pool depth only, and volume-style figures exist only as user-declared inputs",
@@ -233,12 +240,6 @@ export function buildIndexProposal(
     // telegraph-verified label. The per-input provenance stays visible.
     const capProvenance: InputProvenance = supply && price && supply.provenance === "telegraph-verified" && price.provenance === "telegraph-verified" ? "telegraph-verified" : "declared";
     const marketCap = supply && price ? { value: supply.value * price.value, provenance: capProvenance } : undefined;
-
-    // Provenance-honest portfolio note: supply from the network is TOTAL supply;
-    // a declared circulating figure is the only float-style input.
-    if (supply && supply.provenance === "telegraph-verified") {
-      missing.push({ scope: "asset", symbol: def.symbol, dimension: "Circulating float", reason: "the verified figure is TOTAL supply (TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL); the market-cap input substitutes it and is labelled accordingly" });
-    }
 
     // Disagreement count across the asset's dimensions (explicit data from
     // the executors, never parsed out of prose).
@@ -319,19 +320,41 @@ export function buildIndexProposal(
     kept.push({ symbol: def.symbol, asset, ...(marketCap ? { cap: marketCap.value } : {}), customPct: definition.methodology.customWeights?.[def.symbol] });
   }
 
-  // Per-asset dimension ledger for anything not verified and not declared.
+  // Per-asset ledger: only dimensions that were actually attempted and came
+  // back unusable, plus the one input gap the caller can fix (a missing DEX
+  // pool). Dimensions never probed at all are reported ONCE, portfolio-wide,
+  // instead of once per asset — that duplication was ledger noise.
+  const unprobed = new Set<IndexDimension>();
   for (const asset of collected) {
+    const def = asset.definition;
+    if (!def.pool) {
+      addMissing({
+        scope: "asset",
+        symbol: def.symbol,
+        dimension: INDEX_DIMENSION_LABELS.liquidity,
+        reason: "no DEX pool was declared for this asset, so the liquidity ask cannot be assembled",
+      });
+    }
     for (const dimension of INDEX_DIMENSIONS) {
       const d = dimensionOf(asset, dimension);
-      const def = asset.definition;
-      if (d === undefined) {
-        missing.push({ scope: "asset", symbol: def.symbol, dimension: INDEX_DIMENSION_LABELS[dimension], reason: dimension === "liquidity" ? "no DEX pool was declared for this asset, so the liquidity ask cannot be assembled" : "dimension not probed" });
+      if (!d || d.status === "not_probed") {
+        unprobed.add(dimension);
         continue;
       }
       if (d.status === "missing") {
-        missing.push({ scope: "asset", symbol: def.symbol, dimension: INDEX_DIMENSION_LABELS[dimension], reason: d.detail });
+        if (dimension === "liquidity" && !def.pool) continue;
+        addMissing({ scope: "asset", symbol: def.symbol, dimension: INDEX_DIMENSION_LABELS[dimension], reason: d.detail });
       }
     }
+  }
+  if (unprobed.size > 0) {
+    addMissing({
+      scope: "portfolio",
+      dimension: "Unpurchased dimensions",
+      reason: `${[...unprobed]
+        .map((d) => INDEX_DIMENSION_LABELS[d])
+        .join(", ")} were not verified in this run (free mode buys nothing); they are reported here rather than inferred.`,
+    });
   }
 
   // Weighting.

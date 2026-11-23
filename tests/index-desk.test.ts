@@ -352,7 +352,15 @@ describe("deterministic methodology", () => {
     const collected: CollectedAsset[] = definition.assets.map((d) => ({ definition: d, dimensions: [] }));
     const out = buildIndexProposal(definition, collected);
     const portfolio = out.missingDimensions.filter((m) => m.scope === "portfolio");
-    expect(portfolio.map((m) => m.dimension)).toEqual(["Circulating float", "Trading volumes / trading quality"]);
+    // Two network-wide gaps, plus ONE aggregate row for dimensions this run
+    // never probed (previously duplicated per asset and per dimension).
+    expect(portfolio.map((m) => m.dimension)).toEqual([
+      "Circulating float",
+      "Trading volumes / trading quality",
+      "Unpurchased dimensions",
+    ]);
+    // The per-asset float note duplicated the portfolio row; it is gone.
+    expect(out.missingDimensions.filter((m) => m.scope === "asset" && m.dimension === "Circulating float")).toHaveLength(0);
     const liquidity = out.missingDimensions.filter((m) => m.dimension.includes("liquidity"));
     expect(liquidity.length).toBeGreaterThan(0);
     expect(liquidity[0].reason).toContain("no DEX pool was declared");
