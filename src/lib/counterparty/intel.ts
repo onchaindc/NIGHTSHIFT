@@ -139,9 +139,13 @@ const JURISDICTION_CODES: Record<string, string> = {
 export function normalizeJurisdiction(value: string): string {
   const raw = value.trim();
   if (!raw) return "";
-  if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
+  // Aliases win over the two-letter shortcut: "UK" is two letters but its
+  // registry code is GB, so it must go through the map first.
   const key = raw.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
-  return JURISDICTION_CODES[key] ?? raw;
+  const mapped = JURISDICTION_CODES[key];
+  if (mapped) return mapped;
+  if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
+  return raw;
 }
 
 /**
