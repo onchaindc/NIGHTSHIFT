@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, BadgeCheck, Building2, Lock, Sparkles } from "lucide-react";
+import { ArrowRight, BadgeCheck, Building2, Layers, Lock, Sparkles } from "lucide-react";
 
 export const metadata = { title: "Minds" };
 
@@ -24,7 +24,7 @@ export default function MindsPage() {
         </div>
         <p className="inline-flex items-center gap-2 rounded-full border border-edge bg-panel px-3.5 py-2 text-[12px] text-ink-soft">
           <span aria-hidden className="size-1.5 rounded-full bg-teal" />
-          1 available
+          2 available
           <span aria-hidden className="text-ink-faint">·</span>
           <span className="text-ink-faint">more in development</span>
         </p>
@@ -48,6 +48,37 @@ export default function MindsPage() {
           <p className="mt-2 flex-1 text-[13px] leading-relaxed text-ink-soft">
             Corporate-registry facts for a named company: legal name, registration ID, LEI, active
             status, registered address and more — split into facts, gaps and conflicts.
+          </p>
+          <div className="mt-5 flex items-end justify-between gap-3 border-t border-edge pt-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.12em] text-ink-faint">From</p>
+              <p className="tabular mt-0.5 text-[13px] font-medium text-ink">$0.01 / ask</p>
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-teal transition-transform duration-200 group-hover:translate-x-0.5">
+              Open
+              <ArrowRight size={13} aria-hidden />
+            </span>
+          </div>
+        </Link>
+
+        <Link
+          href="/minds/index-desk"
+          className="group flex flex-col rounded-2xl border border-edge bg-panel p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-teal/60 hover:shadow-[0_14px_40px_-28px_rgba(15,118,110,0.55)]"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <span className="inline-flex size-10 items-center justify-center rounded-xl bg-teal/10 text-teal ring-1 ring-teal/15">
+              <Layers size={19} strokeWidth={1.8} aria-hidden />
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-teal/25 bg-teal/5 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-teal">
+              <span aria-hidden className="size-1 rounded-full bg-teal" />
+              Available
+            </span>
+          </div>
+          <h2 className="mt-5 text-[17px] font-semibold tracking-tight text-ink">Index Reconstitution Desk</h2>
+          <p className="mt-2 flex-1 text-[13px] leading-relaxed text-ink-soft">
+            Declare a universe and a methodology; the desk investigates every asset across six verified
+            dimensions and returns a deterministic constituent and weighting proposal, with exclusions,
+            per-asset evidence and a missing-dimension ledger.
           </p>
           <div className="mt-5 flex items-end justify-between gap-3 border-t border-edge pt-4">
             <div>

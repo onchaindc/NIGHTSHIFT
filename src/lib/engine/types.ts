@@ -1,5 +1,6 @@
 import type { RepoReport } from "@/lib/watch/repo-intel";
 import type { MindInvestigationReport } from "@/lib/mind/report";
+import type { IndexDeskReport } from "@/lib/indexdesk/report";
 
 /**
  * NIGHTSHIFT task engine — shared types.
@@ -67,7 +68,10 @@ export type ExecutionEventType =
   | "scan_interrupted"
   // Mind investigation events (baseline dossier + reasoned report)
   | "mind_baseline_ready"
-  | "mind_report_ready";
+  | "mind_report_ready"
+  // Index Reconstitution Desk events (per-asset dossier + proposal)
+  | "index_baseline_ready"
+  | "index_proposal_ready";
 
 export interface ExecutionEvent {
   id: string;
@@ -157,6 +161,13 @@ export interface TaskResult {
    * with/without-Telegraph comparison and the evidence-tracing reasoning.
    */
   mindReport?: MindInvestigationReport;
+  /**
+   * A completed Index Reconstitution Desk report, present only for
+   * index_desk tasks: the deterministic constituent/weighting proposal with
+   * per-asset evidence, declared-vs-verified input provenance and the
+   * missing-dimension ledger.
+   */
+  indexDeskReport?: IndexDeskReport;
 }
 
 export type Evidence =
@@ -228,6 +239,28 @@ export type Evidence =
       facts: Array<{ field: string; value: unknown }>;
       missing: string[];
       disagreements?: Array<{ field: string; left: string; right: string; note?: string }>;
+    }
+  | {
+      /**
+       * Index Reconstitution Desk evidence: what one asset's investigation
+       * actually established — per-dimension probe/purchase verdicts with
+       * their hashes, costs and verification status, plus which weighting
+       * inputs were user-declared rather than network-verified.
+       */
+      kind: "index_asset_finding";
+      symbol: string;
+      issuer: string;
+      issuerJurisdiction?: string;
+      dimensions: Array<{
+        dimension: "registry" | "price" | "supply" | "liquidity" | "holders" | "filings";
+        status: "verified" | "recorded" | "missing" | "not_probed" | "declared_only";
+        signalHash?: string;
+        receiptHash?: string;
+        costUsdCents?: number;
+        value?: unknown;
+        detail: string;
+      }>;
+      totalCostUsdCents: number;
     };
 
 export type PlanStepKind =
@@ -248,7 +281,11 @@ export type PlanStepKind =
   // Mind investigation steps (autonomous investigations over Counterparty Intelligence)
   | "mind_baseline"
   | "counterparty_ask"
-  | "mind_report";
+  | "mind_report"
+  // Index Reconstitution Desk steps (first specialist Mind over verified market-data intents)
+  | "index_baseline"
+  | "index_data_ask"
+  | "index_report";
 
 export interface PlanStep {
   id: string;
@@ -298,7 +335,7 @@ export interface TerminalRunInfo {
 /** A task is either an ordinary goal, a protocol-watch check run, or a
  * durably recorded interactive Terminal ask (jobTypes share one store so the
  * Activity centre reads a single history). */
-export type JobType = "goal" | "protocol_watch" | "terminal_request" | "mind_investigation";
+export type JobType = "goal" | "protocol_watch" | "terminal_request" | "mind_investigation" | "index_desk";
 
 export interface TaskRecord {
   id: string;
