@@ -7,6 +7,8 @@ import { canTransition, type ActionId, type ExecutionEvent, type ExecutionEventT
 import * as telegraph from "@/lib/telegraph/client";
 import { executeWatchCheck, executeWatchCorroborate, executeWatchRepoInvestigate, executeWatchInvestigate, executeWatchDeliver, executeWatchReport } from "@/lib/watch/execute";
 import type { WatchRunState } from "@/lib/watch/types";
+import { executeCounterpartyAsk, executeMindBaseline, executeMindReport } from "@/lib/mind/execute";
+import type { MindBaseline, MindIntelResult } from "@/lib/mind/report";
 import { getGasPrice, getTransactionReceipt, rpcForChainId } from "@/lib/chain/rpc";
 import type { ChainReceipt, ChainGasPrice } from "@/lib/chain/rpc";
 import type { SignalRecord } from "@/lib/telegraph/client";
@@ -38,6 +40,10 @@ export interface ExecutionOutputs {
   freeRead?: { chain: string; gasPriceWei: number; gasPriceGwei: number; rpcUrl: string };
   /** Free research evidence: a real public-source price lookup. */
   freeLookup?: { url: string; asset: string; priceUsd: number; fetchedAt: string };
+  /** Mind investigation: the unpaid, without-intelligence dossier. */
+  mindBaseline?: MindBaseline;
+  /** Mind investigation: the purchased specialist intelligence (when approved). */
+  mindIntel?: MindIntelResult;
 }
 
 export interface EngineDeps {
@@ -353,6 +359,16 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "watch_report") {
         await executeWatchReport(task, deps, outputs);
         if (task.state !== "executing") return task;
+      } else if (step.kind === "mind_baseline") {
+        await executeMindBaseline(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "counterparty_ask") {
+        await executeCounterpartyAsk(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "mind_report") {
+        // Completes the task itself (verification invariants run inside).
+        await executeMindReport(task, step.target, outputs);
+        return task;
       } else if (step.kind === "free_chain_read") {
         outputs.freeRead = await executeFreeChainRead(task, deps);
         if (task.state !== "executing") return task;

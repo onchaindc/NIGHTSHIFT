@@ -1,4 +1,5 @@
 import type { RepoReport } from "@/lib/watch/repo-intel";
+import type { MindInvestigationReport } from "@/lib/mind/report";
 
 /**
  * NIGHTSHIFT task engine — shared types.
@@ -63,7 +64,10 @@ export type ExecutionEventType =
   | "delivery_failed"
   | "delivery_skipped"
   // Watch scheduling: an interrupted scan was reconciled by a later worker.
-  | "scan_interrupted";
+  | "scan_interrupted"
+  // Mind investigation events (baseline dossier + reasoned report)
+  | "mind_baseline_ready"
+  | "mind_report_ready";
 
 export interface ExecutionEvent {
   id: string;
@@ -147,6 +151,12 @@ export interface TaskResult {
    * routine no-change check from a completed technical examination.
    */
   repoReport?: RepoReport;
+  /**
+   * A completed Mind investigation report, present only for
+   * mind_investigation tasks: the reasoned deliverable with the
+   * with/without-Telegraph comparison and the evidence-tracing reasoning.
+   */
+  mindReport?: MindInvestigationReport;
 }
 
 export type Evidence =
@@ -200,6 +210,24 @@ export type Evidence =
       asset: string;
       priceUsd: number;
       fetchedAt: string;
+    }
+  | {
+      /**
+       * Mind investigation evidence: restates what the investigation actually
+       * established — the unpaid probe verdict and, when a purchase ran and
+       * verified, the hash-committed facts with their verification status.
+       */
+      kind: "counterparty_finding";
+      entity: string;
+      jurisdiction?: string;
+      probeStatus: "challenge" | "rejected" | "unavailable";
+      signalHash?: string;
+      receiptHash?: string;
+      costUsdCents?: number;
+      verificationStatus: string;
+      facts: Array<{ field: string; value: unknown }>;
+      missing: string[];
+      disagreements?: Array<{ field: string; left: string; right: string; note?: string }>;
     };
 
 export type PlanStepKind =
@@ -216,7 +244,11 @@ export type PlanStepKind =
   | "watch_investigate"
   | "watch_repo_investigate"
   | "watch_deliver"
-  | "watch_report";
+  | "watch_report"
+  // Mind investigation steps (autonomous investigations over Counterparty Intelligence)
+  | "mind_baseline"
+  | "counterparty_ask"
+  | "mind_report";
 
 export interface PlanStep {
   id: string;
@@ -266,7 +298,7 @@ export interface TerminalRunInfo {
 /** A task is either an ordinary goal, a protocol-watch check run, or a
  * durably recorded interactive Terminal ask (jobTypes share one store so the
  * Activity centre reads a single history). */
-export type JobType = "goal" | "protocol_watch" | "terminal_request";
+export type JobType = "goal" | "protocol_watch" | "terminal_request" | "mind_investigation";
 
 export interface TaskRecord {
   id: string;
