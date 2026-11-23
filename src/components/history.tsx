@@ -211,7 +211,7 @@ export default function HistoryView() {
                   className="history-row group grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 border-b border-edge px-1 py-3.5 transition-colors hover:bg-panel sm:grid-cols-[150px_minmax(0,1fr)_auto_auto] sm:gap-x-5"
                 >
                   <StatusChip state={t.state} />
-                  <span className="truncate text-[13.5px] text-ink transition group-hover:text-amber">{t.goal}</span>
+                  <span className="truncate text-[13.5px] text-ink transition group-hover:text-amber">{t.goal || "restricted record"}</span>
                   <span className="hidden tabular text-[11px] text-ink-faint sm:block">
                     {t.spend.spentUsdCents > 0 ? `${money(t.spend.spentUsdCents)} spent` : "no spend"}
                   </span>
@@ -239,7 +239,7 @@ export default function HistoryView() {
                     className="history-row group grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 border-b border-edge px-1 py-3.5 transition-colors hover:bg-panel sm:grid-cols-[150px_minmax(0,1fr)_auto_auto] sm:gap-x-5"
                   >
                     <StatusChip state={t.state} />
-                    <span className="truncate text-[13.5px] text-ink-soft transition group-hover:text-amber">{t.goal}</span>
+                    <span className="truncate text-[13.5px] text-ink-soft transition group-hover:text-amber">{t.goal || "restricted record"}</span>
                     <span className="hidden tabular text-[11px] text-ink-faint sm:block">test run</span>
                     <span className="tabular text-[11px] text-ink-faint">{timeOf(t.createdAt)}</span>
                   </Link>

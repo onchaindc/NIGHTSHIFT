@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { createTask, runTask, EngineError } from "@/lib/engine/engine";
 import { listTasks } from "@/lib/engine/store";
 import { requestAuthorized } from "@/lib/api/auth";
+import { tasksForCaller } from "@/lib/api/public";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,12 +11,15 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * GET /api/tasks - all tasks with their events (the UI renders these directly).
+ * GET /api/tasks - task records for the caller's clearance. The operator
+ * (bearer token or /api/session cookie) gets full records with events; an
+ * anonymous caller gets the discovery-level public projection only: no
+ * objectives, plans, timelines, reports, evidence or spend-ledger entries.
  * POST /api/tasks - submit a goal. Free goals stay public; any mode that can
- * plan a purchase requires the operator bearer token and ALWAYS stops at the
- * human approval gate (the caller cannot waive it).
+ * plan a purchase requires the operator (bearer token or session cookie) and
+ * ALWAYS stops at the human approval gate (the caller cannot waive it).
  */
-export async function GET() {
+export async function GET(req: Request) {
   let tasks;
   try {
     tasks = await listTasks();
@@ -26,7 +30,7 @@ export async function GET() {
     const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: "storage unavailable", detail: detail.slice(0, 200) }, { status: 503 });
   }
-  return NextResponse.json({ tasks });
+  return NextResponse.json(tasksForCaller(req, tasks));
 }
 
 export async function POST(req: NextRequest) {

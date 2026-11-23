@@ -95,6 +95,7 @@ function ApproveReject({ task, onAction, busy, actionError }: {
 
 export default function TaskDetails({ id }: { id: string }) {
   const [task, setTask] = useState<TaskRecord | null | "missing">(null);
+  const [restricted, setRestricted] = useState(false);
   const [activating, setActivating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -105,7 +106,11 @@ export default function TaskDetails({ id }: { id: string }) {
         setTask("missing");
         return;
       }
-      if (res.ok) setTask(((await res.json()) as { task: TaskRecord }).task);
+      if (res.ok) {
+        const body = (await res.json()) as { task: TaskRecord; redacted?: boolean };
+        setTask(body.task);
+        setRestricted(body.redacted === true);
+      }
     } catch {
       // retry on the next tick
     }
@@ -202,9 +207,15 @@ export default function TaskDetails({ id }: { id: string }) {
       </div>
 
       <h1 className="mt-4 text-[19px] font-semibold leading-snug tracking-tight text-ink">
-        {task.jobType === "terminal_request" ? activityTitle(task) : task.goal}
+        {task.jobType === "terminal_request" ? activityTitle(task) : task.goal || "Restricted record — sign in from Settings to view the objective"}
       </h1>
       <p className="mt-1.5 break-all tabular text-[11px] text-ink-faint">task {task.id}</p>
+      {restricted && (
+        <p className="mt-3 rounded-md border border-edge bg-panel-2 px-4 py-3 text-[12.5px] leading-relaxed text-ink-soft">
+          Restricted view: objectives, plans, reports, evidence and settlement proofs are operator-only.
+          Sign in from Settings (operator token or session) to see this record in full.
+        </p>
+      )}
 
       <ApproveReject task={task} onAction={(_, action) => act(action)} busy={activating} actionError={actionError} />
 

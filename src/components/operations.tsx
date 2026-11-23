@@ -403,7 +403,7 @@ function OperationMonitor({
               Starting…
             </span>
           )}
-          <span className="truncate text-[12px] text-ink-faint">{task ? task.goal : "your operation"}</span>
+          <span className="truncate text-[12px] text-ink-faint">{task ? task.goal || "restricted record" : "your operation"}</span>
         </div>
         <div className="flex items-center gap-3">
           {task && (
@@ -613,7 +613,7 @@ export default function Operations() {
         <JobConfig
           job={job}
           onStarted={refresh}
-          activeGoals={active.map((t) => t.goal)}
+          activeGoals={active.map((t) => t.goal).filter(Boolean)}
           onLaunched={(t) => {
             setLockedTaskId(t.id);
             if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -674,7 +674,7 @@ export default function Operations() {
                       {t.origin.source === "telegram" ? "via Telegram" : "via web"}
                     </span>
                   </div>
-                  <p className="mt-2 text-[13.5px] font-medium text-ink">{t.goal}</p>
+                  <p className="mt-2 text-[13.5px] font-medium text-ink">{t.goal || "restricted record"}</p>
                   <p className="mt-1.5 text-[12px] text-ink-soft">
                     <span className="tabular">{[`${money(limit)} ceiling`, spent > 0 ? `${money(spent)} spent` : null].filter(Boolean).join(" · ")}</span>
                     {isTestRun(t) ? " · test run" : ""}

@@ -384,9 +384,20 @@ export default function DevelopersPage() {
             <div className="rounded-lg border border-edge bg-panel px-4">
               <Api method="GET" path="/api/status" access="public">
                 Truthful status: which integrations are configured (names, never values) and store/connection health.
+                The database endpoint hostnames are operator-only (bearer token or session).
               </Api>
-              <Api method="GET" path="/api/tasks · /api/tasks/{id}" access="public">
-                Task records with full execution timelines, spend entries and evidence.
+              <Api method="GET" path="/api/tasks · /api/tasks/{id}" access="public summary · token full">
+                Anonymous callers get the discovery-level projection (kind, state, timestamps, aggregate spend).
+                The operator (bearer token or /api/session cookie) gets full records: objectives, timelines,
+                reports, evidence and spend-ledger entries.
+              </Api>
+              <Api method="GET" path="/api/mind/investigations" access="public summary · token full">
+                The investigation catalog (tool, modes) is public; investigation records follow the same
+                clearance rule as task reads.
+              </Api>
+              <Api method="POST" path="/api/session" access="operator">
+                Exchange the operator token for an HttpOnly session cookie so the browser console can read full
+                records without embedding the token in page code. DELETE signs out.
               </Api>
               <Api method="POST" path="/api/tasks" access="free public · paid token">
                 Submit a goal: goal, spendLimitUsdCents, mode (auto|free|paid). Free goals stay public; auto and

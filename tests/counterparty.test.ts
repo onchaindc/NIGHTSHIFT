@@ -61,7 +61,9 @@ describe("counterparty spec assembly", () => {
     const spec = buildCounterpartySpec({ company: "Equinor ASA", jurisdiction: " Norway " });
     expect(spec.intent).toBe(COUNTERPARTY_INTENT);
     expect(spec.minerId).toBe(COUNTERPARTY_PRIMARY_MINER);
-    expect(spec.params).toEqual({ company: "Equinor ASA", jurisdiction: "Norway" });
+    // d665996 routes registry lookups by ISO jurisdiction: the free-text
+    // jurisdiction normalizes to its two-letter ISO code before the ask.
+    expect(spec.params).toEqual({ company: "Equinor ASA", jurisdiction: "NO" });
   });
 
   it("omits the jurisdiction param when the user left it empty", () => {

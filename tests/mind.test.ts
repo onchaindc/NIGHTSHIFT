@@ -412,7 +412,8 @@ describe("investigations tool endpoint", () => {
 
   it("describes the tool on GET", async () => {
     const { GET } = await import("@/app/api/mind/investigations/route");
-    const res = await GET();
+    const { NextRequest } = await import("next/server");
+    const res = await GET(new NextRequest("http://localhost/api/mind/investigations"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { tool: string; modes: string[] };
     expect(body.tool).toBe("nightshift.investigation");

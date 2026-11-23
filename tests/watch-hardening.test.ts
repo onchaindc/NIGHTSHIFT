@@ -208,9 +208,12 @@ describe("watch creation rejects unsafe targets", () => {
 /* ------------------------------------------------------------------ */
 
 describe("watch-management api authorization", () => {
-  it("allows requests when the operator token is not configured (open mode)", () => {
+  it("denies requests when the operator token is not configured (fail closed, b7c7a6f)", () => {
     delete process.env.NIGHTSHIFT_API_TOKEN;
-    expect(requestAuthorized(new Request("http://localhost/api/watches", { method: "POST" }))).toBe(true);
+    // An unconfigured deployment cannot tell an operator from an anonymous
+    // caller, so the gate authorizes nobody — never an implicit "open mode".
+    expect(requestAuthorized(new Request("http://localhost/api/watches", { method: "POST" }))).toBe(false);
+    expect(requestAuthorized(new Request("http://localhost/api/watches", { method: "GET" }))).toBe(false);
   });
 
   it("requires a matching bearer token when NIGHTSHIFT_API_TOKEN is set", () => {

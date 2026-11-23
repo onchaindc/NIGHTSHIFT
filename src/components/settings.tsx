@@ -14,14 +14,21 @@ import type { StatusBody } from "@/components/shell-types";
 export default function Settings() {
   const [status, setStatus] = useState<StatusBody | null>(null);
   const [failed, setFailed] = useState(false);
+  const [token, setToken] = useState("");
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [busySession, setBusySession] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
         const res = await fetch("/api/status", { cache: "no-store" });
-        if (res.ok && !cancelled) setStatus((await res.json()) as StatusBody);
-        else if (!cancelled) setFailed(true);
+        if (res.ok && !cancelled) {
+          const body = (await res.json()) as StatusBody;
+          setStatus(body);
+          setSignedIn(body.operatorSession === true);
+        } else if (!cancelled) setFailed(true);
       } catch {
         if (!cancelled) setFailed(true);
       }
@@ -31,6 +38,40 @@ export default function Settings() {
       cancelled = true;
     };
   }, []);
+
+  async function signIn(e: React.FormEvent) {
+    e.preventDefault();
+    setBusySession(true);
+    setSessionError(null);
+    try {
+      const res = await fetch("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (res.ok) {
+        setSignedIn(true);
+        setToken("");
+      } else {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setSessionError(body.error ?? `Sign-in failed with status ${res.status}.`);
+      }
+    } catch {
+      setSessionError("Sign-in failed: the server could not be reached.");
+    } finally {
+      setBusySession(false);
+    }
+  }
+
+  async function signOut() {
+    setBusySession(true);
+    try {
+      await fetch("/api/session", { method: "DELETE" });
+      setSignedIn(false);
+    } finally {
+      setBusySession(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
@@ -123,6 +164,49 @@ export default function Settings() {
                 </span>
               </li>
             </ul>
+          </section>
+
+          <section className="overflow-hidden rounded-lg border border-edge bg-panel" aria-label="Operator session">
+            <div className="flex items-center justify-between gap-3 border-b border-edge px-4 py-3">
+              <h2 className="x-label">Operator session</h2>
+              {signedIn === true && (
+                <span className="rounded-md border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">Signed in</span>
+              )}
+            </div>
+            <div className="px-4 py-3.5">
+              <p className="text-[12px] leading-relaxed text-ink-soft">
+                Full task records — objectives, plans, reports, evidence and settlement proofs — are operator-only.
+                Sign in once per browser: the token is verified server-side and kept as an HttpOnly session cookie
+                holding a derived verifier, never the token itself. The token is never embedded in page code.
+              </p>
+              {signedIn === false && (
+                <form onSubmit={signIn} className="mt-3 flex flex-wrap items-center gap-2">
+                  <input
+                    type="password"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder="operator token"
+                    autoComplete="off"
+                    className="min-h-9 min-w-[16rem] flex-1 rounded-md border border-edge bg-panel-2 px-3 text-[13px] text-ink outline-none focus:border-amber"
+                  />
+                  <button
+                    type="submit"
+                    disabled={busySession || !token}
+                    className="btn-quiet !min-h-9 disabled:opacity-50"
+                  >
+                    {busySession ? "Signing in…" : "Sign in"}
+                  </button>
+                </form>
+              )}
+              {sessionError && (
+                <p role="alert" className="mt-2 text-[12px] text-risk">{sessionError}</p>
+              )}
+              {signedIn === true && (
+                <button onClick={signOut} disabled={busySession} className="btn-quiet mt-3 !min-h-9 disabled:opacity-50">
+                  Sign out
+                </button>
+              )}
+            </div>
           </section>
 
           <section className="rounded-lg border border-edge bg-panel px-4 py-3.5" aria-label="Data policy">

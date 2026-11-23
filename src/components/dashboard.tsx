@@ -219,7 +219,7 @@ function ActiveOperation({
       </div>
       <div className="px-4 py-3.5">
         <Link href={`/tasks/${task.id}`} className="text-[14.5px] font-medium leading-snug text-ink transition-colors hover:text-amber">
-          {task.goal}
+          {task.goal || "Restricted record — sign in from Settings to view the objective"}
         </Link>
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
           <PhaseRail task={task} />

@@ -649,7 +649,7 @@ export default function Watch() {
                   <tr key={t.id} className="border-b border-edge/60 last:border-0 transition-colors hover:bg-panel-2/60">
                     <td className="px-4 py-2.5"><StatusChip state={t.state} /></td>
                     <td className="max-w-[40ch] truncate px-4 py-2.5 text-[12.5px]">
-                      <Link href={`/tasks/${t.id}`} className="text-ink transition-colors hover:text-amber">{t.goal.replace(/^Protocol Watch check: /, "")}</Link>
+                      <Link href={`/tasks/${t.id}`} className="text-ink transition-colors hover:text-amber">{(t.goal || "watch run").replace(/^Protocol Watch check: /, "")}</Link>
                     </td>
                     <td className="px-4 py-2.5 tabular text-[11.5px] text-ink-faint">{t.watch?.triggeredBy ?? "manual"}</td>
                     <td className="px-4 py-2.5 text-right tabular text-[11.5px] text-ink-soft">{money(t.spend.spentUsdCents)}</td>
@@ -665,7 +665,7 @@ export default function Watch() {
                     <StatusChip state={t.state} />
                     <span className="tabular text-[11px] text-ink-faint">{timeOf(t.createdAt)}</span>
                   </div>
-                  <Link href={`/tasks/${t.id}`} className="mt-1 block text-[12.5px] text-ink">{t.goal.replace(/^Protocol Watch check: /, "")}</Link>
+                  <Link href={`/tasks/${t.id}`} className="mt-1 block text-[12.5px] text-ink">{(t.goal || "watch run").replace(/^Protocol Watch check: /, "")}</Link>
                   <p className="mt-0.5 tabular text-[11px] text-ink-faint">{t.watch?.triggeredBy ?? "manual"} · {money(t.spend.spentUsdCents)}</p>
                 </li>
               ))}

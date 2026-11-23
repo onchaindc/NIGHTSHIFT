@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { apiAuthMode } from "@/lib/api/auth";
+import { readAuthorized } from "@/lib/api/public";
 import {
   choosePersistence,
   dataDir,
@@ -49,7 +50,13 @@ async function probeStore(): Promise<{ store: "ok" | "unavailable"; connection: 
   return { store, connection };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  // Health (services, store verdict, persistence mode, scheduler state) stays
+  // public: it is what a status page is for. Infrastructure identifiers —
+  // which database ENDPOINT this deployment talks to (hostnames, tried
+  // endpoints) and the connect-target digest — are operator-only: they name
+  // the private backend and are of no use to an anonymous visitor.
+  const operatorView = readAuthorized(req);
   const configured = (key: string) => Boolean(process.env[key]);
   const services = {
     telegraph: configured("TELEGRAPH_EVM_PRIVATE_KEY"),
@@ -67,7 +74,9 @@ export async function GET() {
 
   /** Truthful persistence reporting: provider, backend mode, directory (file
    * backends only), and a live durability verdict backed by an actual
-   * round-trip-capable store check — never a fabricated "durable" claim. */
+   * round-trip-capable store check — never a fabricated "durable" claim.
+   * hosts/target (which database endpoint) are operator-only and omitted
+   * entirely from anonymous responses. */
   let persistenceReport: {
     mode: string;
     provider: "postgres" | "file";
@@ -75,12 +84,12 @@ export async function GET() {
     durable: boolean;
     connection: "ok" | "unreachable" | "unconfigured";
     reason: string | null;
-    hosts: string[];
+    hosts?: string[];
     /** Env variable NAMES that supplied candidates (never values). */
     sources: string[];
     /** Short digest of the connect target, so two deployments can be compared
-     *  without publishing a project id or a password. */
-    target: string | null;
+     *  without publishing a project id or a password. Operator-only. */
+    target?: string | null;
   };
   try {
     const decision = choosePersistence();
@@ -99,8 +108,10 @@ export async function GET() {
     // Which endpoint this deployment is actually talking to. Hostnames only,
     // never credentials: this is the one fact needed to tell "wrong database
     // configured" apart from "database is down" without opening a dashboard.
+    // Operator-only: an anonymous status page reports the connection verdict,
+    // not the endpoint behind it.
     let hosts: string[] = [];
-    if (isPostgres && isDatabaseConfigured()) {
+    if (operatorView && isPostgres && isDatabaseConfigured()) {
       try {
         const resolved = await resolveDatabase();
         hosts = resolved.ok
@@ -117,7 +128,7 @@ export async function GET() {
       Boolean(process.env[k]?.trim()),
     );
     let target: string | null = null;
-    if (isPostgres && isDatabaseConfigured()) {
+    if (operatorView && isPostgres && isDatabaseConfigured()) {
       try {
         const { databaseUrl } = await import("@/lib/db/client");
         const url = databaseUrl();
@@ -138,9 +149,11 @@ export async function GET() {
       durable: isPostgres,
       connection,
       reason: decision.reason,
-      hosts,
+      // JSON.stringify drops undefined keys: anonymous responses omit the
+      // endpoint identifiers entirely instead of sending empty values.
+      hosts: operatorView ? hosts : undefined,
       sources,
-      target,
+      target: operatorView ? target : undefined,
     };
   } catch (err) {
     persistenceReport = {
@@ -150,7 +163,7 @@ export async function GET() {
       durable: false,
       connection: "unreachable",
       reason: err instanceof Error ? err.message : String(err),
-      hosts: [],
+      hosts: operatorView ? [] : undefined,
       sources: [],
       target: null,
     };
@@ -206,6 +219,7 @@ export async function GET() {
       return Number.isFinite(env) && env > 0 ? env : 100;
     })(),
     apiAuth: apiAuthMode(),
+    operatorSession: operatorView,
     persistence: persistenceReport,
     watchScheduler,
   });
