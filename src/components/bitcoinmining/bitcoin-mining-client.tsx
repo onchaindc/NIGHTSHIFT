@@ -517,6 +517,16 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
                     one paid attempt per dimension, re-checked against each live offer. Pool concentration and fleet uptime are
                     not part of the plan.
                   </p>
+                  <ul className="mt-2 space-y-1 text-[11.5px] text-ink-soft">
+                    {guarantees.dimensions.filter((d) => d.status !== "gap").map((d) => (
+                      <li key={d.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                        <span>{d.label}</span>
+                        <span className="tabular text-[10.5px] text-ink-faint">
+                          {d.provider} · {fmtUsd((d.priceUsdCents ?? 1) / 100)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button type="button" onClick={() => void act("approve")} disabled={!!acting} className="btn-primary !min-h-9">
                       {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Check size={13} aria-hidden />}
