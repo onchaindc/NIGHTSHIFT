@@ -10,6 +10,7 @@ import { GET as mindsApi } from "@/app/api/minds/route";
 const REQUIRED = [
   "Bitcoin Mining Intelligence",
   "Index Reconstitution Desk",
+  "Counterparty Intelligence",
   "PortSentinel",
   "MineWatch",
   "ChainForensics",
@@ -21,8 +22,8 @@ const REQUIRED = [
 ];
 
 describe("Minds registry", () => {
-  it("contains exactly the ten specialist Minds in order", () => {
-    expect(MINDS).toHaveLength(10);
+  it("contains the ten specialists plus the live Counterparty Mind in order", () => {
+    expect(MINDS).toHaveLength(11);
     expect(MINDS.map((m) => m.name)).toEqual(REQUIRED);
   });
 
@@ -31,7 +32,7 @@ describe("Minds registry", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
     for (const slug of slugs) expect(slug).toMatch(/^[a-z0-9-]+$/);
     expect(mindIndex(MINDS[0].slug)).toBe("01");
-    expect(mindIndex(MINDS[9].slug)).toBe("10");
+    expect(mindIndex(MINDS[10].slug)).toBe("11");
   });
 
   it("gives every Mind a complete, non-placeholder definition", () => {
@@ -47,11 +48,14 @@ describe("Minds registry", () => {
     }
   });
 
-  it("only marks the Index Desk available, with a real investigation path", () => {
+  it("marks exactly the two live Minds available, each with a real investigation path", () => {
     const available = mindsByStatus("available");
-    expect(available.map((m) => m.slug)).toEqual(["index-reconstitution-desk"]);
-    expect(available[0].href).toBe("/minds/index-desk");
-    expect(available[0].coverage).toHaveLength(6);
+    expect(available.map((m) => m.slug)).toEqual(["index-reconstitution-desk", "counterparty-intelligence"]);
+    expect(available.every((m) => Boolean(m.href))).toBe(true);
+    expect(available.find((m) => m.slug === "index-reconstitution-desk")?.href).toBe("/minds/index-desk");
+    expect(available.find((m) => m.slug === "counterparty-intelligence")?.href).toBe("/minds/counterparty");
+    expect(available.find((m) => m.slug === "index-reconstitution-desk")?.coverage).toHaveLength(6);
+    expect(available.find((m) => m.slug === "counterparty-intelligence")?.coverage).toHaveLength(1);
     for (const mind of MINDS.filter((m) => m.status !== "available")) {
       expect(mind.href).toBeUndefined();
     }
@@ -102,16 +106,19 @@ describe("shared foundation", () => {
 });
 
 describe("catalogue API", () => {
-  it("publishes ten Minds, one investigation path and no invented coverage", async () => {
+  it("publishes every Mind, its real investigation path and no invented coverage", async () => {
     const res = await mindsApi();
     const body = (await res.json()) as {
       minds: Array<{ slug: string; status: string; investigation?: string; coverage?: unknown[] }>;
       foundation: unknown[];
     };
-    expect(body.minds).toHaveLength(10);
-    expect(body.minds.filter((m) => m.status === "available")).toHaveLength(1);
+    expect(body.minds).toHaveLength(11);
+    expect(body.minds.filter((m) => m.status === "available")).toHaveLength(2);
     expect(body.minds.find((m) => m.slug === "index-reconstitution-desk")?.investigation).toBe(
       "/minds/index-desk",
+    );
+    expect(body.minds.find((m) => m.slug === "counterparty-intelligence")?.investigation).toBe(
+      "/minds/counterparty",
     );
     expect(body.minds.find((m) => m.slug === "portsentinel")?.investigation).toBeUndefined();
     expect(body.minds.find((m) => m.slug === "portsentinel")?.coverage).toBeUndefined();
@@ -145,5 +152,11 @@ describe("catalogue rendering", () => {
     expect(bitcoin).toContain("not operational");
     expect(bitcoin).not.toContain("Open the investigation");
     expect(bitcoin).not.toContain("CORPORATE_REGISTRY_LOOKUP_GENERAL");
+
+    const counterparty = renderToStaticMarkup(
+      await MindProfilePage({ params: Promise.resolve({ slug: "counterparty-intelligence" }) }),
+    );
+    expect(counterparty).toContain("Open the investigation");
+    expect(counterparty).toContain("/minds/counterparty");
   });
 });
