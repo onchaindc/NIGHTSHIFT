@@ -247,6 +247,15 @@ export function deskSessionView(status: unknown): DeskSession {
   return body.operatorSession === true ? "authenticated" : "anonymous";
 }
 
+/** Map GET /api/session's { mode } to the desk's session view. */
+export function deskSessionMode(body: unknown): DeskSession {
+  if (!body || typeof body !== "object") return "unavailable";
+  const mode = (body as { mode?: unknown }).mode;
+  if (mode === "operator") return "authenticated";
+  if (mode === "anonymous") return "anonymous";
+  return "unavailable";
+}
+
 /**
  * Restricted messaging belongs only to a COMPLETED investigation whose
  * proposal was withheld. A running task is not a restricted view, and an

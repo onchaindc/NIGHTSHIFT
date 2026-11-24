@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { OPERATOR_COOKIE, expectedOperatorCookieValue, presentedTokenMatches } from "@/lib/api/auth";
+import {
+  OPERATOR_COOKIE,
+  expectedOperatorCookieValue,
+  operatorCookieFromHeader,
+  presentedTokenMatches,
+  requestAuthorizedFromParts,
+} from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +20,10 @@ export const dynamic = "force-dynamic";
  * token and sets an HttpOnly session cookie holding a DERIVED verifier —
  * never the token itself. The response carries no secret material.
  *
+ * GET /api/session - the CURRENT session from the cookie itself (never the
+ * token): { mode: "operator" | "anonymous" | "unavailable" }. The browser
+ * uses this to prove the HttpOnly cookie actually stuck after sign-in.
+ *
  * DELETE /api/session - sign out (clears the cookie).
  *
  * Both fail closed when no operator token is configured: an unconfigured
@@ -21,6 +31,13 @@ export const dynamic = "force-dynamic";
  */
 
 const SESSION_MAX_AGE_S = 8 * 60 * 60; // one working day
+
+export async function GET(req: NextRequest) {
+  if (!expectedOperatorCookieValue()) return NextResponse.json({ mode: "unavailable" });
+  const cookie = operatorCookieFromHeader(req.headers.get("cookie"));
+  const authorized = requestAuthorizedFromParts("", cookie);
+  return NextResponse.json({ mode: authorized ? "operator" : "anonymous" });
+}
 
 export async function POST(req: NextRequest) {
   const expectedCookie = expectedOperatorCookieValue();

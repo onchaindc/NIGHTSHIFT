@@ -29,11 +29,16 @@ function secretMatches(presented: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** Constant-time check of a presented operator token against the configured one. */
+/**
+ * Constant-time check of a presented operator token against the configured
+ * one. Both sides are trimmed: a token pasted into a dashboard or a phone
+ * keyboard commonly carries a trailing space or newline, and that whitespace
+ * must not be the difference between signing in and being refused.
+ */
 export function presentedTokenMatches(presented: string): boolean {
-  const expected = process.env.NIGHTSHIFT_API_TOKEN ?? "";
+  const expected = (process.env.NIGHTSHIFT_API_TOKEN ?? "").trim();
   if (!expected) return false;
-  return secretMatches(presented, expected);
+  return secretMatches(presented.trim(), expected);
 }
 
 /** The presented bearer token, or "" when the header is absent/malformed. */
@@ -57,7 +62,7 @@ const OPERATOR_COOKIE_CONTEXT = "ns-operator-session-v1";
 
 /** The cookie value a valid operator session presents, derived from the token. */
 export function expectedOperatorCookieValue(): string {
-  const token = process.env.NIGHTSHIFT_API_TOKEN ?? "";
+  const token = (process.env.NIGHTSHIFT_API_TOKEN ?? "").trim();
   if (!token) return "";
   return createHash("sha256").update(`${token}|${OPERATOR_COOKIE_CONTEXT}`).digest("hex");
 }
@@ -65,9 +70,9 @@ export function expectedOperatorCookieValue(): string {
 /** Authorization decision from already-parsed credentials. Always false when
  *  NIGHTSHIFT_API_TOKEN is unset — an unconfigured deployment authorizes nobody. */
 export function requestAuthorizedFromParts(presentedBearer: string, operatorCookie: string | undefined): boolean {
-  const expected = process.env.NIGHTSHIFT_API_TOKEN ?? "";
+  const expected = (process.env.NIGHTSHIFT_API_TOKEN ?? "").trim();
   if (!expected) return false;
-  if (presentedBearer && secretMatches(presentedBearer, expected)) return true;
+  if (presentedBearer && secretMatches(presentedBearer.trim(), expected)) return true;
   const expectedCookie = expectedOperatorCookieValue();
   if (expectedCookie && operatorCookie && secretMatches(operatorCookie, expectedCookie)) return true;
   return false;
