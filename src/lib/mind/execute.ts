@@ -7,7 +7,17 @@ import {
   type CounterpartyRequest,
 } from "@/lib/counterparty/intel";
 import { executeAsk, type ExecuteInput, type ExecuteOutcome } from "@/lib/terminal/ask";
-import { notifyMindReport } from "./builder";
+import {
+  MINDS_BUILDER_ENDPOINT,
+  mindsBuilderAlias,
+  notifyMindReport,
+  reportMessage,
+} from "./builder";
+import {
+  awaitAndRecordMindReply,
+  captureSendFingerprint,
+  receiveMindReply,
+} from "./builder-receive";
 import {
   buildBaseline,
   buildComparison,
@@ -46,6 +56,8 @@ export interface MindRunnerDeps {
   execute: (input: ExecuteInput) => Promise<ExecuteOutcome>;
   analyze: typeof analyzeCounterparty;
   notify: typeof notifyMindReport;
+  /** Two-way round trip: bounded reply wait on the bound conversation. */
+  receive: typeof receiveMindReply;
   now: () => number;
 }
 
@@ -58,6 +70,7 @@ export const mindDeps: MindRunnerDeps = {
   execute: defaultExecute,
   analyze: (signalHash, bodyResult, request) => analyzeCounterparty(signalHash, bodyResult, request),
   notify: (input, fetchImpl) => notifyMindReport(input, fetchImpl),
+  receive: (request) => receiveMindReply(request),
   now: () => Date.now(),
 };
 
@@ -70,6 +83,7 @@ export function resetMindDeps(): void {
   mindDeps.execute = defaultExecute;
   mindDeps.analyze = (signalHash, bodyResult, request) => analyzeCounterparty(signalHash, bodyResult, request);
   mindDeps.notify = (input, fetchImpl) => notifyMindReport(input, fetchImpl);
+  mindDeps.receive = (request) => receiveMindReply(request);
   mindDeps.now = () => Date.now();
 }
 
@@ -412,7 +426,13 @@ export async function executeMindReport(task: TaskRecord, stepTarget: string | u
   guardedTransition(task, "completed");
   await event(task, "task_completed", "Mind investigation complete.", { confidence, intelUsed });
 
-  // Optional Minds delivery: best-effort, config-gated, never hides a failure.
+  // Optional Minds delivery, now two-way: best-effort, config-gated, never
+  // hides a failure. The correlation fingerprint is captured BEFORE the send
+  // (documented getLatestHistoryFingerprint → afterFingerprint), the reply
+  // wait is bounded, and the whole round trip is persisted on the result.
+  const alias = mindsBuilderAlias();
+  const fingerprintBefore = await captureSendFingerprint(alias ?? "");
+  const sentMessageText = reportMessage({ task, report });
   const delivery = await mindDeps.notify({ task, report });
   await event(
     task,
@@ -421,4 +441,14 @@ export async function executeMindReport(task: TaskRecord, stepTarget: string | u
       ? `Investigation report delivered to the requesting Mind (${delivery.detail}).`
       : `Minds delivery skipped: ${delivery.detail}`,
   );
+  await awaitAndRecordMindReply({
+    task,
+    notify: delivery,
+    alias,
+    fingerprintBefore,
+    sentMessageText,
+    receive: (request) => mindDeps.receive(request),
+    now: mindDeps.now,
+    event: (type, message, data) => event(task, type, message, data),
+  });
 }

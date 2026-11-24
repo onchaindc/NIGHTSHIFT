@@ -74,7 +74,11 @@ export type ExecutionEventType =
   | "index_proposal_ready"
   // Generic capability run (verified dimensions, explicit gaps)
   | "capability_baseline_ready"
-  | "capability_report_ready";
+  | "capability_report_ready"
+  // Two-way Minds round trip (report delivered, Mind reply received/pending/failed)
+  | "mind_reply_received"
+  | "mind_reply_pending"
+  | "mind_reply_error";
 
 export interface ExecutionEvent {
   id: string;
@@ -175,6 +179,15 @@ export interface TaskResult {
   capabilityReport?: import("@/lib/minds/capability-runner").CapabilityReport;
   /** The Bitcoin Mining Intelligence product report, derived from committed answers. */
   bitcoinMiningReport?: import("@/lib/bitcoinmining/report").BitcoinMiningReport;
+  /**
+   * The two-way Minds by Animoca Brands round trip for this investigation,
+   * present only when the report was actually delivered to a connected Mind:
+   * the bound alias, the pre-send correlation fingerprint, the delivery/reply
+   * status and the Mind's reply. A reply is an LLM response (provenance
+   * "mind-reply") — recorded verbatim, never presented as a network-verified
+   * fact and never mixed into verified evidence.
+   */
+  mindsDelivery?: import("@/lib/mind/builder-receive").MindsDeliveryRecord;
 }
 
 export type Evidence =

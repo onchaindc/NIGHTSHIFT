@@ -21,6 +21,12 @@
  * build-mode validation error naming the x-api-key header, which is how the
  * route and auth boundary were verified without a credential. No message has
  * been delivered from this workspace.
+ *
+ * The receiving half of the round trip lives in `builder-receive.ts` and uses
+ * the official client library: pre-send fingerprint capture, the bounded
+ * `waitForReply`, and a deferred `getHistory` collect that correlates rows
+ * with the library's own reply matcher. Both halves share the same
+ * environment gate (MINDS_BUILDER_API_KEY + MINDS_BUILDER_ALIAS).
  */
 
 export interface MindNotifyInput {
@@ -50,7 +56,13 @@ export function mindsBuilderConfigured(): boolean {
   return !!(process.env.MINDS_BUILDER_API_KEY && process.env.MINDS_BUILDER_ALIAS);
 }
 
-function reportMessage(input: MindNotifyInput): string {
+/** The configured bound alias, trimmed; undefined when absent or blank. */
+export function mindsBuilderAlias(): string | undefined {
+  return process.env.MINDS_BUILDER_ALIAS?.trim() || undefined;
+}
+
+/** The exact text a report delivery carries — also the documented reply-correlation anchor. */
+export function reportMessage(input: MindNotifyInput): string {
   const lines = [
     "NIGHTSHIFT investigation report",
     `Task: ${input.task.id}`,
