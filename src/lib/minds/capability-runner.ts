@@ -322,7 +322,11 @@ export async function executeApprovedDimension(input: ApprovedDimensionInput): P
     return value === undefined || value === null;
   });
   const signalRecord = verification.kind === "unverified" ? null : (verification.record as Record<string, unknown> | null);
-  const verifiedAt = typeof signalRecord?.timestamp === "string" ? signalRecord.timestamp : undefined;
+  const signalPayload = signalRecord?.payload as Record<string, unknown> | undefined;
+  const verifiedAt =
+    (typeof signalRecord?.timestamp === "string" && signalRecord.timestamp) ||
+    (typeof signalPayload?.timestamp === "string" && signalPayload.timestamp) ||
+    undefined;
 
   return {
     dimension: dim.id,
