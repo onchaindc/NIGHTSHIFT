@@ -234,7 +234,7 @@ describe("real committed payload shapes", () => {
     verify: vi.fn(async () => ({
       kind: "verified" as const,
       signalHash: "0xsignal",
-      record: { payload: { response }, timestamp: "2026-11-24T00:55:02.341Z" },
+      record: { payload: { response, timestamp: "2026-11-24T00:55:02.341Z" } },
       note: "re-derived",
     })),
     now: () => Date.parse(PREPARED),
