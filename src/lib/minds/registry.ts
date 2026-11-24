@@ -110,6 +110,33 @@ export const MINDS: MindDefinition[] = [
     href: "/minds/index-desk",
   },
   {
+    slug: "counterparty-intelligence",
+    name: "Counterparty Intelligence",
+    domain: "Corporate · Counterparty diligence",
+    summary: "Corporate-registry facts for a named company, split into verified facts, gaps and conflicts.",
+    problem:
+      "Counterparty files are assembled from registry extracts that rarely say what is missing. A legal name, registration number or active status can be confidently wrong in a deck and impossible to trace afterwards.",
+    responsibilities: [
+      "Legal identity: registered name, registration ID, LEI and jurisdiction.",
+      "Status and address: active/inactive verdict, registered address and incorporation date.",
+      "Gaps and conflicts: fields the registry did not return, and disagreements between the answer and the request.",
+      "Verification: the hash-committed payload and signal receipt behind every fact.",
+    ],
+    capabilities: ["KYC refresh", "Supplier onboarding", "Registry evidence"],
+    status: "available",
+    statusNote:
+      "Live. The price check is free; the exact offer is shown and approved before a single ask is signed.",
+    nextStep: "Add group-structure traversal and scheduled re-checks; single-entity resolution is what runs today.",
+    boundaries: [
+      "One legal entity per investigation; group structures are OwnershipGraph's domain.",
+      "A registry answer is not a legal opinion.",
+    ],
+    coverage: [
+      { dimension: "Corporate registry record", intent: "CORPORATE_REGISTRY_LOOKUP_GENERAL", miner: "zk-corp-atlas" },
+    ],
+    href: "/minds/counterparty",
+  },
+  {
     slug: "portsentinel",
     name: "PortSentinel",
     domain: "Trade · Maritime",
