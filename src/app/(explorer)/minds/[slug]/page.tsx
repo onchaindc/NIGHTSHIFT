@@ -214,7 +214,12 @@ export default async function MindProfilePage({ params }: Params) {
                     <p className="mt-0.5 max-w-[80ch] text-[12px] leading-relaxed text-ink-soft">{dim.requirement}</p>
                     <p className="mt-1 break-words text-[10.5px] text-ink-faint">
                       {dim.status === "gap" ? (
-                        <span>Why it is unsupported: {dim.missingReason}</span>
+                        <>
+                          <span>Why it is unsupported: {dim.missingReason}</span>
+                          {dim.resolution ? (
+                            <span className="mt-1 block text-ink-soft">Route to close: {dim.resolution}</span>
+                          ) : null}
+                        </>
                       ) : (
                         <>
                           <span className="tabular">{dim.intent}</span> · {dim.provider}

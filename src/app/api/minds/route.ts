@@ -46,6 +46,7 @@ export async function GET() {
           ...(d.verification ? { verification: d.verification } : {}),
           ...(d.limitation ? { limitation: d.limitation } : {}),
           ...(d.missingReason ? { missingReason: d.missingReason } : {}),
+          ...(d.resolution ? { resolution: d.resolution } : {}),
         })),
         ...(caps?.plan
           ? {
