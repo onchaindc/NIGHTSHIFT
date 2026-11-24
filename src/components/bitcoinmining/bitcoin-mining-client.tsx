@@ -35,6 +35,7 @@ export interface BitcoinMiningGuarantees {
   nodeUrl: string;
   ceilingUsdCents: number;
   dimensions: BitcoinDimensionView[];
+  probedAt?: string;
 }
 
 type Session = "loading" | "anonymous" | "authenticated" | "unavailable";
@@ -136,6 +137,15 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const approveGraceUntil = useRef(0);
   const resultRef = useRef<HTMLDivElement>(null);
+  const opsRef = useRef<HTMLDetailsElement>(null);
+
+  // Opening the paid-run chooser while anonymous surfaces the sign-in box
+  // exactly when it becomes relevant, instead of leading the page with it.
+  useEffect(() => {
+    if (mode === "intel" && session === "anonymous") {
+      if (opsRef.current) opsRef.current.open = true;
+    }
+  }, [mode, session]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -333,72 +343,9 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
 
   return (
     <div className="mt-8 space-y-6">
-      <section className="overflow-hidden rounded-xl border border-edge bg-panel">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
-          <p className="x-label">Operator access</p>
-          {session === "authenticated" ? (
-            <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal">
-              <span aria-hidden className="size-1.5 rounded-full bg-teal" /> Signed in
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint">
-              <span aria-hidden className="size-1.5 rounded-full bg-ink-faint/60" /> Browsing anonymously
-            </span>
-          )}
-        </div>
-        <div className="px-4 py-3 sm:px-5">
-          {session === "authenticated" ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[12px] leading-relaxed text-ink-soft">
-                This browser can approve the three-cent plan and read the full evidence trail.
-              </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
-                  setSession("anonymous");
-                  if (taskId) void load(taskId);
-                }}
-                className="text-[11.5px] font-medium text-ink-faint transition-colors hover:text-ink"
-              >
-                Sign out
-              </button>
-            </div>
-          ) : (
-            <>
-              <p className="text-[12px] leading-relaxed text-ink-soft">
-                Free preflights are open. Approving a paid run and reading its full report need the operator token.
-              </p>
-              <form onSubmit={signIn} className="mt-2.5 flex flex-wrap items-end gap-2">
-                <label className="min-w-0 flex-1">
-                  <span className="x-label">Operator token</span>
-                  <input
-                    type="password"
-                    value={token}
-                    onChange={(e) => {
-                      setToken(e.target.value);
-                      setSignInError(null);
-                    }}
-                    placeholder="Paste the operator token"
-                    autoComplete="off"
-                    enterKeyHint="go"
-                    className="mt-1 h-9 w-full rounded-md border border-edge bg-panel-2 px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
-                  />
-                </label>
-                <button type="submit" disabled={signingIn} className="btn-secondary !min-h-9">
-                  {signingIn ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <LockKeyhole size={12} aria-hidden />}
-                  Sign in
-                </button>
-              </form>
-              {signInError && <p className="mt-1.5 text-[12px] text-risk">{signInError}</p>}
-            </>
-          )}
-        </div>
-      </section>
-
       <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-labelledby="objective">
         <div className="border-b border-edge px-4 py-3 sm:px-5">
-          <p className="x-label" id="objective">1 · Define the objective</p>
+          <p className="x-label" id="objective">The investigation</p>
         </div>
         <div className="space-y-5 px-4 py-4 sm:px-5">
           <div className="grid gap-4 sm:grid-cols-3">
@@ -442,7 +389,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
           </div>
 
           <div>
-            <p className="x-label">2 · Choose the run</p>
+            <p className="x-label">Run mode</p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               {[
                 { value: "free" as const, title: "Free preflight", body: "Probe all three routes, record live prices and the gap ledger. No payment." },
@@ -478,9 +425,22 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
               {mode === "free" ? "Run free preflight" : "Build plan & request approval"}
             </button>
             <p className="text-[11.5px] text-ink-faint">
-              {mode === "intel" && session !== "authenticated"
-                ? "Sign in above to request a paid plan."
-                : `Hard ceiling ${fmtUsd(guarantees.ceilingUsdCents / 100)} · one attempt per dimension.`}
+              {mode === "intel" && session !== "authenticated" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (opsRef.current) {
+                      opsRef.current.open = true;
+                      opsRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }}
+                  className="text-[11.5px] font-medium text-teal hover:underline"
+                >
+                  Sign in below — paid runs need the operator token
+                </button>
+              ) : (
+                `Hard ceiling ${fmtUsd(guarantees.ceilingUsdCents / 100)} · one attempt per dimension.`
+              )}
             </p>
           </div>
           {error && (
@@ -496,7 +456,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
           <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-live="polite">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
               <div className="flex items-center gap-2">
-                <p className="x-label !mt-0">3 · Investigation</p>
+                <p className="x-label !mt-0">Investigation</p>
                 <span className="rounded-full border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] text-ink-soft">
                   {stateLabel(state)}
                 </span>
@@ -566,7 +526,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
                 <div className="rounded-lg border border-dashed border-edge bg-panel-2 px-3.5 py-3">
                   <p className="text-[12.5px] font-medium text-ink">The report is withheld from anonymous readers.</p>
                   <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">
-                    Sign in with the operator token above to read the findings, hashes and receipts. No report is reconstructed from
+                    Sign in under Operator access below to read the findings, hashes and receipts. No report is reconstructed from
                     the public projection.
                   </p>
                 </div>
@@ -574,52 +534,142 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
             </div>
           </section>
         )}
+
+        {!task && !running && (
+          <p className="rounded-xl border border-dashed border-edge bg-panel-2 px-4 py-8 text-center text-[12.5px] leading-relaxed text-ink-faint">
+            The report lands here — set the investigation above and run it.
+          </p>
+        )}
+
+        {!redacted && report && state === "completed" && (
+          <MiningReportView report={report} capability={capabilityReport} />
+        )}
+
+        {!redacted && !report && state === "completed" && capabilityReport && (
+          <section className="rounded-xl border border-edge bg-panel p-5">
+            <p className="x-label !mt-0">Preflight complete</p>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
+              Three routes were priced. No paid answer was purchased, so there are no mining findings to report.
+            </p>
+          </section>
+        )}
       </div>
 
-      {!redacted && report && state === "completed" && (
-        <MiningReportView report={report} capability={capabilityReport} />
-      )}
-
-      {!redacted && !report && state === "completed" && capabilityReport && (
-        <section className="rounded-xl border border-edge bg-panel p-5">
-          <p className="x-label !mt-0">Preflight complete</p>
-          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-            Three routes were priced. No paid answer was purchased, so there are no mining findings to report.
-          </p>
-        </section>
-      )}
-
-      <section className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-xl border border-edge bg-panel p-5">
-          <p className="x-label !mt-0">What runs</p>
-          <ul className="mt-3 space-y-2.5">
-            {guarantees.dimensions.filter((d) => d.status !== "gap").map((d) => (
-              <li key={d.id} className="flex items-start gap-2 text-[12px] leading-relaxed text-ink-soft">
-                <Check size={13} className="mt-0.5 shrink-0 text-teal" aria-hidden />
-                <span>
-                  <span className="text-ink">{d.label}</span> · {d.provider} · {fmtUsd((d.priceUsdCents ?? 1) / 100)}
-                </span>
-              </li>
-            ))}
-          </ul>
+      <details ref={opsRef} className="overflow-hidden rounded-xl border border-edge bg-panel">
+        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5">
+          <span className="x-label !mt-0">Operator access</span>
+          {session === "authenticated" ? (
+            <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal">
+              <span aria-hidden className="size-1.5 rounded-full bg-teal" /> Signed in
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint">
+              <span aria-hidden className="size-1.5 rounded-full bg-ink-faint/60" /> Browsing anonymously
+            </span>
+          )}
+        </summary>
+        <div className="border-t border-edge px-4 py-3 sm:px-5">
+          {session === "authenticated" ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[12px] leading-relaxed text-ink-soft">
+                This browser can approve the three-cent plan and read the full evidence trail.
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
+                  setSession("anonymous");
+                  if (taskId) void load(taskId);
+                }}
+                className="text-[11.5px] font-medium text-ink-faint transition-colors hover:text-ink"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <>
+              <p className="text-[12px] leading-relaxed text-ink-soft">
+                Free preflights are open. Approving a paid run and reading its full report need the operator token.
+              </p>
+              <form onSubmit={signIn} className="mt-2.5 flex flex-wrap items-end gap-2">
+                <label className="min-w-0 flex-1">
+                  <span className="x-label">Operator token</span>
+                  <input
+                    type="password"
+                    value={token}
+                    onChange={(e) => {
+                      setToken(e.target.value);
+                      setSignInError(null);
+                    }}
+                    placeholder="Paste the operator token"
+                    autoComplete="off"
+                    enterKeyHint="go"
+                    className="mt-1 h-9 w-full rounded-md border border-edge bg-panel-2 px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                  />
+                </label>
+                <button type="submit" disabled={signingIn} className="btn-secondary !min-h-9">
+                  {signingIn ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <LockKeyhole size={12} aria-hidden />}
+                  Sign in
+                </button>
+              </form>
+              {signInError && <p className="mt-1.5 text-[12px] text-risk">{signInError}</p>}
+            </>
+          )}
         </div>
-        <div className="rounded-xl border border-edge bg-panel p-5">
-          <p className="x-label !mt-0">What remains unsupported</p>
-          <ul className="mt-3 space-y-2.5">
-            {guarantees.dimensions.filter((d) => d.status === "gap").map((d) => (
-              <li key={d.id} className="flex items-start gap-2 text-[12px] leading-relaxed text-ink-soft">
-                <CircleAlert size={13} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden />
-                <span>
-                  <span className="text-ink">{d.label}</span> — {d.missingReason ?? "no verified route"}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 border-t border-edge pt-2.5 text-[11px] leading-relaxed text-ink-faint">
-            Every report repeats the gap ledger. No gap is estimated from a neighbouring intent.
+      </details>
+
+      <details className="overflow-hidden rounded-xl border border-edge bg-panel">
+        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5">
+          <span className="x-label !mt-0">Coverage &amp; method</span>
+          <span className="text-[11px] text-ink-faint">What runs, what stays unsupported, how answers are verified</span>
+        </summary>
+        <div className="space-y-5 border-t border-edge px-4 py-4 sm:px-5">
+          <section className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-xl border border-edge bg-panel-2 p-5">
+              <p className="x-label !mt-0">What runs</p>
+              <ul className="mt-3 space-y-2.5">
+                {guarantees.dimensions.filter((d) => d.status !== "gap").map((d) => (
+                  <li key={d.id} className="flex items-start gap-2 text-[12px] leading-relaxed text-ink-soft">
+                    <Check size={13} className="mt-0.5 shrink-0 text-teal" aria-hidden />
+                    <span>
+                      <span className="text-ink">{d.label}</span> · {d.provider} · {fmtUsd((d.priceUsdCents ?? 1) / 100)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-xl border border-edge bg-panel-2 p-5">
+              <p className="x-label !mt-0">What remains unsupported</p>
+              <ul className="mt-3 space-y-2.5">
+                {guarantees.dimensions.filter((d) => d.status === "gap").map((d) => (
+                  <li key={d.id} className="flex items-start gap-2 text-[12px] leading-relaxed text-ink-soft">
+                    <CircleAlert size={13} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden />
+                    <span>
+                      <span className="text-ink">{d.label}</span> — {d.missingReason ?? "no verified route"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 border-t border-edge pt-2.5 text-[11px] leading-relaxed text-ink-faint">
+                Every report repeats the gap ledger. No gap is estimated from a neighbouring intent.
+              </p>
+            </div>
+          </section>
+          <p className="max-w-[78ch] text-[12.5px] leading-relaxed text-ink-soft">
+            Each ask settles through Telegraph x402 only after the engine approval gate. The committed payload is re-derived
+            against its node signal; a mismatch is recorded, never smoothed over. The provider&apos;s hashprice answer carries sats
+            and hashrate but explicitly leaves USD unavailable, so the report multiplies that committed sats value by the separately
+            committed BTC spot price and labels the result as a derivation.
+          </p>
+          <p className="flex flex-wrap gap-x-5 gap-y-1.5 text-[11px] text-ink-faint">
+            <span>Three routes probed unpaid {guarantees.probedAt?.slice(0, 10) ?? "—"}</span>
+            <span>Paid path exercised 2026-11-24</span>
+            <Link href="/minds/bitcoin-mining-intelligence" className="inline-flex items-center gap-1 text-ink-soft transition-colors hover:text-teal">
+              Full coverage profile <ArrowRight size={11} aria-hidden />
+            </Link>
           </p>
         </div>
-      </section>
+      </details>
     </div>
   );
 }
@@ -638,7 +688,7 @@ function MiningReportView({
     <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-labelledby="mining-report">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-edge px-4 py-4 sm:px-5">
         <div>
-          <p className="x-label !mt-0">{report.mode === "free" ? "4 · Preflight evidence" : "4 · Intelligence report"}</p>
+          <p className="x-label !mt-0">{report.mode === "free" ? "Preflight evidence" : "Intelligence report"}</p>
           <h2 id="mining-report" className="mt-1 text-[18px] font-medium tracking-[-0.01em] text-ink">
             {report.objective
               ? `${report.mode === "free" ? "Preflight" : "Block"} ${report.objective.blockHeight} · ${report.objective.zone}`
