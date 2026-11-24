@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { privateKeyToAccount } from "viem/accounts";
-import { privateKeyToAccount } from "viem/accounts";
 import { type TelegraphChallenge } from "@/lib/telegraph/client";
 import { executeAsk, railsOfChallenge, unionRails, type ApprovedRail } from "@/lib/terminal/ask";
 
