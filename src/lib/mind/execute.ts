@@ -6,7 +6,7 @@ import {
   probeCounterparty,
   type CounterpartyRequest,
 } from "@/lib/counterparty/intel";
-import { executeAsk, type ExecuteInput, type ExecuteOutcome } from "@/lib/terminal/ask";
+import { executeAsk, unionRails, type ApprovedRail, type ExecuteInput, type ExecuteOutcome } from "@/lib/terminal/ask";
 import {
   MINDS_BUILDER_ENDPOINT,
   mindsBuilderAlias,
@@ -149,8 +149,25 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
   // The Mind settles through executeAsk, which signs the exact EVM rail with
   // the deployment payer key. The escrow rail needs a personal_sign
   // authorization from the user's wallet and belongs to the interactive
-  // flows, so the autonomous run approves the offer it can actually pay.
+  // flows, so the autonomous run approves the offers it can actually pay.
+  // The provider's backend pool alternates rail compositions per request
+  // (observed live 2026-11-24: probes drew an Ethereum-Sepolia exact rail,
+  // the paid request drew Base Sepolia), so the pre-flight probes TWICE and
+  // the approval covers the UNION of the rails seen — displayed to the
+  // approver. Execution then accepts any one of them, never anything else.
   const outcome = await mindDeps.probe(req, { preferEscrow: false });
+  if (outcome.kind !== "challenge") {
+    // fall through: the probe object below carries the failure verbatim
+  }
+  let rails = outcome.kind === "challenge" ? outcome.rails ?? [] : [];
+  if (outcome.kind === "challenge") {
+    try {
+      const second = await mindDeps.probe(req, { preferEscrow: false });
+      if (second.kind === "challenge") rails = unionRails(rails, second.rails ?? []);
+    } catch {
+      // The union stands on the first probe; the second is best-effort only.
+    }
+  }
 
   const probe =
     outcome.kind === "challenge"
@@ -164,6 +181,7 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
             payTo: outcome.approvedOffer.payTo,
             amount: outcome.approvedOffer.amount,
           },
+          rails,
           intent: outcome.body.intent,
           miner: outcome.spec.minerId ?? "",
           detail: "the network validated the ask and returned the live x402 challenge",
@@ -173,12 +191,14 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
           status: "rejected" as const,
           intent: "",
           miner: "",
+          rails: [] as ApprovedRail[],
           detail: outcome.text || `the node refused the ask (HTTP ${outcome.status})`,
         }
       : {
           status: "unavailable" as const,
           intent: "",
           miner: "",
+          rails: [] as ApprovedRail[],
           detail: outcome.detail,
         };
 
@@ -186,10 +206,14 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
   outputs.mindBaseline = baseline;
 
   if (probe.status === "challenge") {
+    const railsText = probe.rails
+      .map((r) => `exact USDC on ${r.network} → ${r.payTo.slice(0, 10)}… ($${(Math.round(r.amountCents * 100) / 100).toFixed(2)})`)
+      .join("; ");
     await event(
       task,
       "mind_baseline_ready",
-      `Without-intelligence dossier assembled: 0/${baseline.unknownFields.length} registry fields known from free sources. The specialist ask is routable at $${probe.priceUsd?.toFixed(2)} (${probe.miner}); the paid plan awaits the human approval gate.`,
+      `Without-intelligence dossier assembled: 0/${baseline.unknownFields.length} registry fields known from free sources. The specialist ask is routable at $${probe.priceUsd?.toFixed(2)} (${probe.miner}); the paid plan awaits the human approval gate.` +
+        (railsText ? ` Approval covers ANY of the rails the node offered for this ask: ${railsText}.` : ""),
       { entity, priceUsd: probe.priceUsd },
     );
   } else {
@@ -240,6 +264,7 @@ export async function executeCounterpartyAsk(
     },
     approved: true,
     approvedOffer: baseline.probe.offer,
+    approvedRails: baseline.probe.rails,
   });
 
   if (outcome.kind !== "answered") {

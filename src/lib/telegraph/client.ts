@@ -340,7 +340,7 @@ export interface AskOptions {
  */
 export function selectTelegraphRequirement(
   accepts: Array<{ scheme?: string; network?: string; asset?: string; payTo?: string; amount?: string; price?: string; extra?: Record<string, unknown> }>,
-  offer: { network: string; asset?: string; payTo?: string; amountCents: number },
+  offer: { network: string; asset?: string; payTo?: string; amountCents: number; rails?: Array<{ network: string; asset?: string; payTo?: string; amount?: string; amountCents: number }> },
   remainingBudgetUsdCents: number,
 ): unknown /* x402 PaymentRequirements entry, returned as selected by the core client */ {
   const supported = accepts.filter(
@@ -356,10 +356,20 @@ export function selectTelegraphRequirement(
       `Telegraph offered no signable exact-payment option (schemes: ${accepts.map((a) => a.scheme).join(", ")}); refusing to pay through an unimplemented rail`,
     );
   }
-  const matches = (a: { network?: string; asset?: string; payTo?: string }) =>
-    canonicalNetwork(a.network ?? "") === canonicalNetwork(offer.network) &&
-    (!offer.asset || a.asset?.toLowerCase() === offer.asset.toLowerCase()) &&
-    (!offer.payTo || a.payTo?.toLowerCase() === offer.payTo.toLowerCase());
+  // A rail matches when EVERY approved field matches: canonical network,
+  // asset, recipient and atomic amount. With a rail SET approved (the
+  // provider's pool alternates rails per request), any ONE of them authorizes
+  // the signature; without the set, the single offer decides as before.
+  const approvedSet: Array<{ network: string; asset?: string; payTo?: string; amount?: string; amountCents: number }> =
+    offer.rails && offer.rails.length > 0 ? offer.rails : [offer];
+  const matches = (a: { network?: string; asset?: string; payTo?: string; amount?: string }) =>
+    approvedSet.some(
+      (r) =>
+        canonicalNetwork(a.network ?? "") === canonicalNetwork(r.network) &&
+        (!r.asset || a.asset?.toLowerCase() === r.asset.toLowerCase()) &&
+        (!r.payTo || a.payTo?.toLowerCase() === r.payTo.toLowerCase()) &&
+        (!r.amount || (a.amount !== undefined && Number(a.amount) === Math.round(r.amountCents * 10000))),
+    );
   const chosen = supported.find(matches) ?? supported[0];
   if (!matches(chosen)) {
     throw new Error(

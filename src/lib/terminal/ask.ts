@@ -60,12 +60,51 @@ export interface ApprovedOffer {
   escrowMessage?: string;
 }
 
+/**
+ * One signable exact-scheme EVM rail of a challenge, network canonicalized.
+ * The provider serves SEVERAL rails for the same ask and its backend pool
+ * alternates between them per request (observed live 2026-11-24: probes drew
+ * an Ethereum-Sepolia exact rail, the paid request drew Base Sepolia) — so an
+ * approval covers a SET of rails, never a single one, unless only one exists.
+ */
+export interface ApprovedRail {
+  network: string; // canonical CAIP-2
+  asset: string;
+  payTo: string;
+  amount: string; // atomic units, exactly as challenged
+  amountCents: number;
+}
+
+/** Extract the complete signable rails from a challenge (canonical networks). */
+export function railsOfChallenge(challenge: TelegraphChallenge | null): ApprovedRail[] {
+  return evmExactEntries(challenge)
+    .filter((a) => !!a.asset && !!a.payTo && !!a.amount && /^\d+$/.test(a.amount))
+    .map((a) => ({
+      network: a.network,
+      asset: a.asset as string,
+      payTo: a.payTo as string,
+      amount: a.amount as string,
+      amountCents: Number(a.amount) / 10000,
+    }));
+}
+
+/** Dedupe rails on the full contract identity (order preserved). */
+export function unionRails(a: ApprovedRail[], b: ApprovedRail[]): ApprovedRail[] {
+  const key = (r: ApprovedRail) =>
+    `${canonicalNetwork(r.network)}|${r.asset.toLowerCase()}|${r.payTo.toLowerCase()}|${Math.round(r.amountCents * 10000)}`;
+  const seen = new Map<string, ApprovedRail>();
+  for (const r of [...a, ...b]) seen.set(key(r), r);
+  return Array.from(seen.values());
+}
+
 export type ProbeOutcome =
   | {
       kind: "challenge";
       challenge: TelegraphChallenge;
       /** The offer exactly as the user will see/approve it. */
       approvedOffer: ApprovedOffer;
+      /** Every signable exact-scheme EVM rail this challenge offered. */
+      rails?: ApprovedRail[];
       /** The internally priced offer for the pay client's requirement selector. */
       pricedOffer: { network: string; asset: string; payTo: string; amountCents: number };
       /** Present when the approved offer uses Telegraph escrow. */
@@ -162,6 +201,7 @@ export async function probeAsk(
         return {
           kind: "challenge",
           challenge,
+          rails: railsOfChallenge(challenge),
           approvedOffer: {
             scheme: escrow.scheme,
             network: escrow.network,
@@ -189,6 +229,7 @@ export async function probeAsk(
       return {
         kind: "challenge",
         challenge,
+        rails: railsOfChallenge(challenge),
         approvedOffer: { scheme: priced.scheme, network: priced.network, asset: accepted.asset, payTo: accepted.payTo, amount: accepted.amount },
         pricedOffer: { network: priced.network, asset: priced.asset!, payTo: priced.payTo!, amountCents: priced.amountCents },
         escrow: escrow ?? undefined,
@@ -248,6 +289,13 @@ export interface ExecuteInput {
   /** The offer the user explicitly approved. Execution refuses without it. */
   approved: true;
   approvedOffer: ApprovedOffer;
+  /**
+   * The FULL set of rails the approval covers (the provider's backend pool
+   * serves different rails per request). Defaults to the single approved
+   * offer; the mind pre-flight passes the union it showed the approver.
+   * Signing stays pinned to these rails and nothing outside them.
+   */
+  approvedRails?: ApprovedRail[];
 }
 
 export type ExecuteOutcome =
@@ -296,24 +344,45 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
   if ("error" in assembled) return { kind: "refused", reason: assembled.error };
   const { body, urlPath } = assembled;
 
-  // The fresh probe must select the SAME rail the approval recorded, or the
-  // drift check below would refuse rails the human did approve (observed: the
-  // approval probe selected the Sepolia escrow entry while an unpinned fresh
-  // probe took the provider's first exact entry, on Base Sepolia). Scheme and
-  // network are therefore pinned to the approved offer.
+  // The approval covers a SET of rails (the provider's pool alternates them
+  // per request). The fresh probe must surface at least ONE approved rail;
+  // which of them it pins is irrelevant because the selector below signs only
+  // a challenge entry that equals an approved rail on every field.
+  const approvedRails: ApprovedRail[] =
+    input.approvedRails && input.approvedRails.length > 0
+      ? input.approvedRails
+      : [
+          {
+            network: canonicalNetwork(input.approvedOffer.network),
+            asset: input.approvedOffer.asset,
+            payTo: input.approvedOffer.payTo,
+            amount: input.approvedOffer.amount,
+            amountCents: Number(input.approvedOffer.amount) / 10000,
+          },
+        ];
   const fresh = await probeAsk(input.spec, {
     preferEscrow: input.approvedOffer.scheme === "escrow",
     preferNetwork: input.approvedOffer.scheme === "exact" ? input.approvedOffer.network : undefined,
   });
   if (fresh.kind === "challenge") {
-    const match = approvedOfferMatches(input.approvedOffer, {
-      network: fresh.approvedOffer.network,
-      asset: fresh.approvedOffer.asset,
-      payTo: fresh.approvedOffer.payTo,
-      amount: fresh.approvedOffer.amount,
-    });
-    if (!match.ok) {
-      return { kind: "refused", reason: `The live challenge drifted from what was approved (${match.reason}). Nothing was signed; review and approve the fresh offer to continue.`, fresh };
+    const offered = fresh.rails ?? railsOfChallenge(fresh.challenge);
+    const match = offered.find((live) =>
+      approvedRails.some(
+        (r) =>
+          canonicalNetwork(r.network) === canonicalNetwork(live.network) &&
+          r.asset.toLowerCase() === live.asset.toLowerCase() &&
+          r.payTo.toLowerCase() === live.payTo.toLowerCase() &&
+          Math.round(r.amountCents * 10000) === Math.round(live.amountCents * 10000),
+      ),
+    );
+    if (!match) {
+      const approvedNames = approvedRails.map((r) => `${canonicalNetwork(r.network)} (${r.asset.slice(0, 10)}… → ${r.payTo.slice(0, 8)}…)`).join("; ");
+      const offeredNames = offered.map((r) => `${canonicalNetwork(r.network)} (${r.asset.slice(0, 10)}… → ${r.payTo.slice(0, 8)}…)`, ).join("; ");
+      return {
+        kind: "refused",
+        reason: `The live challenge carries none of the approved rails (approved: ${approvedNames || "none"}; offered: ${offeredNames || "none"}). Nothing was signed; review and approve the fresh offer to continue.`,
+        fresh,
+      };
     }
   } else if (fresh.kind === "rejected") {
     return { kind: "unpaid_rejected", status: fresh.status, body: fresh.body };
@@ -323,28 +392,35 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
 
   const node = telegraphNodeUrl();
   const account = privateKeyToAccount(process.env.TELEGRAPH_EVM_PRIVATE_KEY as `0x${string}`);
-  const priced = fresh.pricedOffer;
-  const paymentNetwork = priced.network as `${string}:${string}`;
-  // One signer, registered under every known name form of the approved chain
-  // (CAIP-2 + v1 aliases): the pinned selector below remains the only gate
-  // that decides what gets signed, so extra registrations cannot widen it.
+  // One signer, registered under every approved rail's chain and every known
+  // name form of it (CAIP-2 + v1 aliases): the pinned selector below remains
+  // the only gate that decides what gets signed, so extra registrations
+  // cannot widen what may be signed.
   const evmScheme = new ExactEvmScheme(account);
-  const registrationNames = networkRegistrationNames(paymentNetwork);
+  const registrationNames = Array.from(
+    new Set(approvedRails.flatMap((r) => networkRegistrationNames(r.network))),
+  );
   const client = x402Client.fromConfig({
     schemes: registrationNames.map((network) => ({
       network: network as `${string}:${string}`,
       client: evmScheme,
     })),
     spendControls: {
-      allowedAssets: registrationNames.map((network) => ({ network: network as `${string}:${string}`, asset: priced.asset })),
+      allowedAssets: approvedRails.flatMap((r) =>
+        networkRegistrationNames(r.network).map((network) => ({
+          network: network as `${string}:${string}`,
+          asset: r.asset,
+        })),
+      ),
     },
-    // The human approved exactly this offer and the fresh challenge was
+    // The human approved exactly this rail set and the fresh challenge was
     // drift-checked against it above, so the budget ceiling is not re-derived
-    // here; the selector still pins the signed requirement to the priced entry.
+    // here; the selector still signs only a challenge entry that equals an
+    // approved rail on network, asset, recipient AND amount.
     paymentRequirementsSelector: (_version, accepts) =>
       selectTelegraphRequirement(
         accepts as never,
-        { network: priced.network, asset: priced.asset, payTo: priced.payTo, amountCents: priced.amountCents },
+        { network: approvedRails[0].network, asset: approvedRails[0].asset, payTo: approvedRails[0].payTo, amountCents: approvedRails[0].amountCents, rails: approvedRails },
         Number.POSITIVE_INFINITY,
       ) as never,
   });
@@ -352,12 +428,42 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
   // x402 client refuses to build a payload, the record must show what the
   // server actually received (header present? which rails?) and what our
   // registry held at that moment. Nothing here consumes the wrapped body.
-  const paidResponseCapture: { status?: number; headerPresent?: boolean; challenge?: unknown; bodyHead?: string } = {};
+  // ALSO rail-aware: the provider's pool alternates rail compositions per
+  // request, so an UNSIGNED challenge fetch that carries none of the approved
+  // rails is re-issued (bounded) until one does. A request that already
+  // carries a payment header is never retried — the signed attempt happens
+  // exactly once, and failures after a signature stay terminal.
+  const paidResponseCapture: { status?: number; headerPresent?: boolean; challenge?: unknown; bodyHead?: string; unsignedRetries?: number } = {};
+  const challengeCarriesApprovedRail = (headerValue: string | null): boolean => {
+    const decoded = decodeChallenge(headerValue);
+    if (!decoded) return false;
+    const offered = railsOfChallenge(decoded);
+    return offered.some((live) =>
+      approvedRails.some(
+        (r) =>
+          canonicalNetwork(r.network) === canonicalNetwork(live.network) &&
+          r.asset.toLowerCase() === live.asset.toLowerCase() &&
+          r.payTo.toLowerCase() === live.payTo.toLowerCase() &&
+          Math.round(r.amountCents * 10000) === Math.round(live.amountCents * 10000),
+      ),
+    );
+  };
   const capturingFetch: typeof fetch = async (input, init) => {
-    const res = await telegraphFetch(input as RequestInfo, init);
-    if (res.status === 402) {
+    const req = input instanceof Request ? input : new Request(input as RequestInfo, init);
+    const carriesPayment = req.headers.has("payment-signature") || req.headers.has("x-payment");
+    // Tee the request body BEFORE the first send: fetch() consumes a Request's
+    // body stream, so a retry must be rebuilt from the captured copy (cloning
+    // after the first send throws "unusable").
+    let rawBody: string | null = null;
+    try {
+      rawBody = req.body ? await req.clone().text() : null;
+    } catch {
+      rawBody = typeof init?.body === "string" ? init.body : null;
+    }
+    let res = await telegraphFetch(req as RequestInfo);
+    if (res.status === 402 && !carriesPayment) {
       paidResponseCapture.status = 402;
-      const headerValue = res.headers.get("payment-required");
+      let headerValue = res.headers.get("payment-required");
       paidResponseCapture.headerPresent = !!headerValue;
       const decoded = decodeChallenge(headerValue);
       if (decoded) {
@@ -366,6 +472,18 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
           accepts: (decoded.accepts ?? []).map((a) => ({ scheme: a.scheme, network: a.network, asset: a.asset, amount: a.amount, price: a.price })),
         };
       }
+      let attempts = 0;
+      while (!challengeCarriesApprovedRail(headerValue) && attempts < 3) {
+        attempts++;
+        res = await telegraphFetch(
+          new Request(req.url, { method: req.method, headers: req.headers, body: rawBody ?? undefined }),
+        );
+        if (res.status !== 402) break;
+        headerValue = res.headers.get("payment-required");
+      }
+      paidResponseCapture.unsignedRetries = attempts;
+    }
+    if (res.status === 402) {
       res.clone().text().then((t) => { paidResponseCapture.bodyHead = t.slice(0, 600); }).catch(() => {});
     }
     return res;
@@ -397,8 +515,10 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
     const diag =
       `registered: ${registry}; paid-response: HTTP ${paidResponseCapture.status ?? "?"}, ` +
       `payment-required header ${paidResponseCapture.headerPresent ? "present" : "ABSENT"}` +
+      (paidResponseCapture.unsignedRetries ? `, unsigned challenge re-fetches: ${paidResponseCapture.unsignedRetries}` : "") +
       (paidResponseCapture.challenge ? `, challenge: ${JSON.stringify(paidResponseCapture.challenge)}` : "") +
-      (paidResponseCapture.bodyHead ? `, body head: ${paidResponseCapture.bodyHead}` : "");
+      (paidResponseCapture.bodyHead ? `, body head: ${paidResponseCapture.bodyHead}` : "") +
+      (err instanceof Error && err.stack ? `, stack: ${err.stack.slice(0, 700)}` : "");
     return { kind: "failed", detail: `The paid request could not be completed: ${msg.slice(0, 600)} [post-mortem: ${diag.slice(0, 1500)}]` };
   }
 
