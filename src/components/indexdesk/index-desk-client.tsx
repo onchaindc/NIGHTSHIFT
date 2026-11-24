@@ -36,7 +36,7 @@ import type { IndexDeskReport } from "@/lib/indexdesk/report";
 import {
   DESK_STATE_META,
   deskHrefWithTask,
-  deskSessionView,
+  deskSessionMode,
   deskSnapshot,
   deskTaskParam,
   dimensionLabel,
@@ -141,10 +141,10 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   // Operator session state drives the sign-in panel and approval wording.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/status", { cache: "no-store" })
+    fetch("/api/session", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((body) => {
-        if (!cancelled) setSession(deskSessionView(body));
+        if (!cancelled) setSession(deskSessionMode(body));
       })
       .catch(() => {
         if (!cancelled) setSession("unavailable");
@@ -344,34 +344,49 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const signIn = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      const value = token.trim();
+      if (!value) {
+        setSignInError("Enter the operator token first.");
+        return;
+      }
       setSigningIn(true);
       setSignInError(null);
       try {
         const res = await fetch("/api/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
+          body: JSON.stringify({ token: value }),
         });
-        if (res.ok) {
-          setToken("");
-          setSession("authenticated");
-          setSignInError(null);
-          setActionError(null);
-          // Re-read the active investigation at full clearance immediately.
-          if (taskId) void load(taskId);
-        } else {
+        if (!res.ok) {
           setSignInError(
             res.status === 401
-              ? "That operator token was not accepted. Check it and try again."
+              ? "That operator token was not accepted. Use the exact value configured for this deployment (a trailing space or newline is tolerated)."
               : friendlyDeskError(res.status),
           );
+          return;
         }
+        // Do not claim success until the server confirms the HttpOnly cookie
+        // actually stuck: a blocked cookie would otherwise look like a dead
+        // button while every request stays anonymous.
+        const check = await fetch("/api/session", { cache: "no-store" });
+        const state = deskSessionMode(await check.json().catch(() => null));
+        if (state !== "authenticated") {
+          setSignInError(
+            "You were signed in, but this browser did not keep the session cookie. Allow cookies for this site and try again.",
+          );
+          return;
+        }
+        setToken("");
+        setSession("authenticated");
+        setActionError(null);
+        // Re-read the active investigation at full clearance immediately.
+        if (taskId) void load(taskId);
       } catch {
         setSignInError(friendlyDeskError(0));
       } finally {
         setSigningIn(false);
       }
-        },
+    },
     [token, taskId, load],
   );
 
@@ -470,16 +485,20 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                   <input
                     type="password"
                     value={token}
-                    onChange={(e) => setToken(e.target.value)}
+                    onChange={(e) => {
+                      setToken(e.target.value);
+                      setSignInError(null);
+                    }}
                     placeholder="Paste the operator token"
                     autoComplete="off"
+                    enterKeyHint="go"
                     className="mt-1 h-9 w-full rounded-md border border-edge bg-panel-2 px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
                   />
                 </label>
                 <button
                   type="submit"
-                  disabled={signingIn || !token}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink transition-colors hover:border-teal/50 hover:text-teal"
+                  disabled={signingIn}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink transition-colors hover:border-teal/50 hover:text-teal disabled:opacity-60"
                 >
                   {signingIn ? <Loader2 size={12} className="animate-spin" aria-hidden /> : null}
                   Sign in
@@ -713,6 +732,11 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
             {creating ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Play size={14} aria-hidden />}
             {creating ? "Starting the investigation…" : "Run the desk"}
           </button>
+          {!canRun && !creating && (
+            <p className="text-[11.5px] text-ink-faint">
+              Add an index name and at least two complete assets (symbol, registered legal name, jurisdiction) to run.
+            </p>
+          )}
           <p className="text-[11.5px] leading-relaxed text-ink-faint">
             The pre-flight probes are free. Intel mode plans one paid ask per asset per verified dimension and
             stops at the approval gate; each ask runs once, drift-checked and budget-guarded.

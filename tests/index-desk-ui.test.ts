@@ -4,6 +4,7 @@ import {
   deskActivityRows,
   deskHrefWithTask,
   deskSessionView,
+  deskSessionMode,
   deskSnapshot,
   deskTaskParam,
   displayMissingDimensions,
@@ -125,6 +126,15 @@ describe("task snapshot: spend, terminal states and polling", () => {
     });
     expect(snap.plan).toBeNull();
     expect(snap.evidence).toEqual([]);
+  });
+});
+
+describe("session view", () => {
+  it("maps GET /api/session modes and treats unknown shapes as unreadable", () => {
+    expect(deskSessionMode({ mode: "operator" })).toBe("authenticated");
+    expect(deskSessionMode({ mode: "anonymous" })).toBe("anonymous");
+    expect(deskSessionMode({ mode: "unavailable" })).toBe("unavailable");
+    expect(deskSessionMode(null)).toBe("unavailable");
   });
 });
 
