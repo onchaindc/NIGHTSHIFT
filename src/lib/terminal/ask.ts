@@ -336,7 +336,29 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
         Number.POSITIVE_INFINITY,
       ) as never,
   });
-  const fetchWithPayment = wrapFetchWithPayment(telegraphFetch, client);
+  // Tee the paid request's 402 response for the post-mortem below: if the
+  // x402 client refuses to build a payload, the record must show what the
+  // server actually received (header present? which rails?) and what our
+  // registry held at that moment. Nothing here consumes the wrapped body.
+  const paidResponseCapture: { status?: number; headerPresent?: boolean; challenge?: unknown; bodyHead?: string } = {};
+  const capturingFetch: typeof fetch = async (input, init) => {
+    const res = await telegraphFetch(input as RequestInfo, init);
+    if (res.status === 402) {
+      paidResponseCapture.status = 402;
+      const headerValue = res.headers.get("payment-required");
+      paidResponseCapture.headerPresent = !!headerValue;
+      const decoded = decodeChallenge(headerValue);
+      if (decoded) {
+        paidResponseCapture.challenge = {
+          x402Version: decoded.x402Version,
+          accepts: (decoded.accepts ?? []).map((a) => ({ scheme: a.scheme, network: a.network, asset: a.asset, amount: a.amount, price: a.price })),
+        };
+      }
+      res.clone().text().then((t) => { paidResponseCapture.bodyHead = t.slice(0, 600); }).catch(() => {});
+    }
+    return res;
+  };
+  const fetchWithPayment = wrapFetchWithPayment(capturingFetch, client);
 
   let res: Response;
   try {
@@ -348,7 +370,24 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { kind: "failed", detail: `The paid request could not be completed: ${msg.slice(0, 300)}` };
+    // Full post-mortem, stored with the failure (the node's rails and our
+    // registry as the server saw them — never guessable after the fact).
+    const registry = (() => {
+      try {
+        const reg = (client as unknown as { registeredClientSchemes: Map<number, Map<string, Map<string, unknown>>> }).registeredClientSchemes;
+        return Array.from(reg.entries())
+          .map(([v, nets]) => `v${v}:{${Array.from(nets.entries()).map(([n, s]) => `${n}:[${Array.from(s.keys()).join(",")}]`).join(", ")}}`)
+          .join(" | ") || "EMPTY";
+      } catch {
+        return "registry unreadable";
+      }
+    })();
+    const diag =
+      `registered: ${registry}; paid-response: HTTP ${paidResponseCapture.status ?? "?"}, ` +
+      `payment-required header ${paidResponseCapture.headerPresent ? "present" : "ABSENT"}` +
+      (paidResponseCapture.challenge ? `, challenge: ${JSON.stringify(paidResponseCapture.challenge)}` : "") +
+      (paidResponseCapture.bodyHead ? `, body head: ${paidResponseCapture.bodyHead}` : "");
+    return { kind: "failed", detail: `The paid request could not be completed: ${msg.slice(0, 600)} [post-mortem: ${diag.slice(0, 1500)}]` };
   }
 
   if (res.status === 402) {
