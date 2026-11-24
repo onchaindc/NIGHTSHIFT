@@ -236,16 +236,16 @@ export function canonEntityName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-/** Rebuild the ask params around the resolved identity (exact legal name + LEI). */
-export function withLegalIdentity(spec: AskRequestSpec, identity: LegalIdentity): AskRequestSpec {
-  return { ...spec, params: { ...spec.params, company: identity.legalName, lei: identity.lei } };
-}
+/** Which ladder candidate the node's unpaid validation accepted. */
+export type SpecVariant = "identifier" | "legal-name" | "as-typed";
 
 export type CounterpartyProbeOutcome =
   | {
       kind: "challenge";
       /** The exact spec the user is approving; paying resends it verbatim. */
       spec: AskRequestSpec;
+      /** Which ladder candidate won (identifier-first per the miner's contract). */
+      specVariant?: SpecVariant;
       urlPath: string;
       body: { intent: string; params: Record<string, unknown> };
       approvedOffer: ApprovedOffer;
@@ -271,35 +271,37 @@ export async function probeCounterparty(
   if (!valid.ok) {
     return { kind: "rejected", status: 0, body: { error: valid.error }, text: valid.error };
   }
-  // Free identity resolution BEFORE anything is paid: the miner's matcher is
-  // an exact GLEIF legal-identity match, and a colloquial name 404s AFTER the
-  // payment settles. The lei-augmented spec is probed first; if the node
-  // refuses the extra param, the plain (name-only) spec is probed as before.
+  // Free identity resolution BEFORE anything is paid: name-only searches are
+  // rejected by the pinned miner (observed live 2026-11-24: a colloquial name
+  // 404s NOT_FOUND and the exact legal name 422s SEARCH_TOO_BROAD — "supply a
+  // LEI or exact registry identifier"), and the payment settles before that
+  // verdict. GLEIF's free public registry resolves the identifier first.
   const base = buildCounterpartySpec(req);
   const identity = await resolveLegalIdentity(
     req.company,
     typeof base.params?.jurisdiction === "string" ? (base.params.jurisdiction as string) : undefined,
   );
-  // Spec ladder: (1) legal name + LEI for nodes that take an lei param,
-  // (2) the resolved legal name alone (the contract this intent validates
-  // today), (3) the raw input unchanged when nothing resolved. The paid
-  // request is whichever candidate the node's unpaid validation accepted.
-  const withLei = identity ? withLegalIdentity(base, identity) : null;
+  // Spec ladder, identifier FIRST (the miner's stated contract): (1) the LEI
+  // as the registry identifier, (2) the resolved legal name alone, (3) the
+  // raw input unchanged when nothing resolved. The intent's param allowlist
+  // is {company, jurisdiction}, so the identifier rides in `company`. The
+  // paid request is whichever candidate the node's unpaid validation accepted.
+  const withLei = identity ? { ...base, params: { ...base.params, company: identity.lei } } : null;
   const resolvedNameOnly = identity ? { ...base, params: { ...base.params, company: identity.legalName } } : null;
   const preferEscrow = opts.preferEscrow !== false;
-  const specs: Array<{ spec: AskRequestSpec; identity: LegalIdentity | null }> = [
-    ...(withLei ? [{ spec: withLei, identity }] : []),
-    ...(resolvedNameOnly ? [{ spec: resolvedNameOnly, identity }] : []),
-    { spec: base, identity: null },
+  const specs: Array<{ spec: AskRequestSpec; identity: LegalIdentity | null; variant: SpecVariant }> = [
+    ...(withLei ? [{ spec: withLei, identity, variant: "identifier" as const }] : []),
+    ...(resolvedNameOnly ? [{ spec: resolvedNameOnly, identity, variant: "legal-name" as const }] : []),
+    { spec: base, identity: null, variant: "as-typed" as const },
   ];
   let lastRejected: { kind: "rejected"; status: number; body: Record<string, unknown> | null; text: string } | null = null;
   for (const candidate of specs) {
     const outcome = await probeAsk(candidate.spec, { preferEscrow });
     if (outcome.kind === "rejected") {
       lastRejected = outcome;
-      // Retry only when the node refused the PARAMS (observed live: the lei
-      // param is not part of this intent's contract). Any other refusal is
-      // about the ask itself and must surface immediately.
+      // Retry only when the node refused the PARAMS (observed live: extra
+      // params outside {company, jurisdiction} are refused). Any other
+      // refusal is about the ask itself and must surface immediately.
       const rejection = JSON.stringify(outcome.body ?? {}).toLowerCase() + outcome.text.toLowerCase();
       if (!rejection.includes("unknown param") && !rejection.includes("invalid_params")) return outcome;
       continue;
@@ -308,6 +310,7 @@ export async function probeCounterparty(
     return {
       kind: "challenge",
       spec: candidate.spec,
+      specVariant: candidate.variant,
       urlPath: outcome.referencedUrl.replace(/^https?:\/\/[^/]+/, ""),
       body: { intent: COUNTERPARTY_INTENT, params: candidate.spec.params as Record<string, unknown> },
       approvedOffer: outcome.approvedOffer,

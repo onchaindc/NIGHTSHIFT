@@ -374,8 +374,9 @@ describe("intel-mode investigation (approval-gated paid ask)", () => {
     const execute = vi.fn(async (_input: ExecuteInput) => answeredOutcome());
     const resolvedProbe = {
       ...probeChallenge(),
-      body: { intent: COUNTERPARTY_INTENT, params: { company: "MARA HOLDINGS, INC.", jurisdiction: "US", lei: "549300M8ISKPTX2W7F94" } },
+      body: { intent: COUNTERPARTY_INTENT, params: { company: "549300M8ISKPTX2W7F94", jurisdiction: "US" } },
       resolvedIdentity: { lei: "549300M8ISKPTX2W7F94", legalName: "MARA HOLDINGS, INC.", country: "US", status: "ACTIVE" },
+      specVariant: "identifier" as const,
     };
     setMindDeps({
       probe: async () => resolvedProbe,
@@ -403,11 +404,13 @@ describe("intel-mode investigation (approval-gated paid ask)", () => {
     const done = await approveTask(task.id, defaultDeps());
     expect(done.state).toBe("completed");
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(execute.mock.calls[0][0].spec.params).toEqual({ company: "MARA HOLDINGS, INC.", jurisdiction: "US", lei: "549300M8ISKPTX2W7F94" });
-    // The approval trail names the resolved legal identity explicitly.
+    expect(execute.mock.calls[0][0].spec.params).toEqual({ company: "549300M8ISKPTX2W7F94", jurisdiction: "US" });
+    // The approval trail names the resolved legal identity and explains the
+    // identifier-first ask.
     const ready = done.events.find((e) => e.type === "mind_baseline_ready");
     expect(ready?.message).toContain("MARA HOLDINGS, INC.");
     expect(ready?.message).toContain("549300M8ISKPTX2W7F94");
+    expect(ready?.message).toContain("registry identifier");
   });
 });
 

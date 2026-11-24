@@ -38,6 +38,8 @@ export interface MindBaseline {
     params?: Record<string, unknown> | null;
     /** The free GLEIF identity the ask was pinned to, when resolution succeeded. */
     resolvedIdentity?: { lei: string; legalName: string; country: string; status: string } | null;
+    /** Which ladder candidate the node's unpaid validation accepted. */
+    specVariant?: "identifier" | "legal-name" | "as-typed";
     intent: string;
     miner: string;
     detail: string;
