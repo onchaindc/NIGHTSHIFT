@@ -55,7 +55,25 @@ export async function POST(req: NextRequest) {
   if (!task) return NextResponse.json({ error: `task ${taskId} not found` }, { status: 404 });
 
   const delivery = task.result?.mindsDelivery;
-  if (delivery?.status === "reply_received") {
+
+  // Anchor attribution on the report row when the transcript still holds it:
+  // several reports can interleave within seconds, so a fingerprint window
+  // alone cannot tell their replies apart (and has attached the wrong row).
+  let anchored: { record: MindsDeliveryRecord; reply: MindsReply | null } | null = null;
+  if (delivery) {
+    try {
+      anchored = await findDeliveredReport({ taskId, alias: delivery.alias });
+    } catch {
+      anchored = null; // transcript read trouble falls back to the recorded fingerprint walk
+    }
+  }
+
+  const misattributed =
+    !!delivery?.reply &&
+    !!anchored &&
+    (!anchored.reply || delivery.reply.fingerprint !== anchored.reply.fingerprint);
+
+  if (delivery?.status === "reply_received" && !misattributed) {
     return NextResponse.json(
       { error: `task ${taskId} already recorded the Mind reply (fingerprint ${delivery.reply?.fingerprint ?? "unknown"})`, delivery },
       { status: 409 },
@@ -65,10 +83,86 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `task ${taskId}'s send never completed, so there is nothing to collect` }, { status: 409 });
   }
 
+  if (delivery && anchored) {
+    if (misattributed) {
+      // Positive proof of mis-attribution: the window between this report and
+      // the next outbound message holds a different reply (or none). Replace
+      // the record's reply and document the correction; the summary keeps the
+      // wrong text for the audit trail, with the correction appended.
+      const wrong = delivery.reply;
+      if (anchored.reply) {
+        delivery.reply = anchored.reply;
+        delivery.replySource = "deferred_collect";
+        delivery.replyErrorDetail = undefined;
+        delivery.status = "reply_received";
+      } else {
+        delete delivery.reply;
+        delete delivery.replySource;
+        delivery.replyErrorDetail = "no Mind reply found between this report and the next transcript message";
+        delivery.status = "reply_timeout";
+      }
+      if (task.result) {
+        task.result.summary += `\n\nMind reply corrected (the previously attached row ${wrong?.fingerprint ?? "unknown"} was taken from a fingerprint-window walk and does not follow this report in the transcript; attribution re-anchored on the report row carrying Task: ${taskId}. The attached row now is ${anchored.reply ? anchored.reply.fingerprint : "none - no reply is attributable to this report yet"}).`;
+      }
+      task.events.push({
+        id: `${Date.now()}-mind-reply-corrected`,
+        ts: Date.now(),
+        type: "mind_reply_corrected",
+        message: `Mind reply re-attributed via the report row carrying Task: ${taskId}: removed ${wrong?.fingerprint ?? "unknown"}, attached ${anchored.reply ? anchored.reply.fingerprint : "none"}.`,
+        data: { removedFingerprint: wrong?.fingerprint ?? null, correctedFingerprint: anchored.reply?.fingerprint ?? null },
+      });
+      task.updatedAt = Date.now();
+      await saveTask(task);
+      return NextResponse.json({
+        detail: `Mind reply re-attributed via the report row carrying Task: ${taskId}`,
+        delivery,
+        status: delivery.status,
+      });
+    }
+    if (!delivery.reply && anchored.reply) {
+      // Fresh attach with correct attribution.
+      delivery.status = "reply_received";
+      delivery.reply = anchored.reply;
+      delivery.replySource = "deferred_collect";
+      delivery.replyErrorDetail = undefined;
+      if (task.result) {
+        const text = anchored.reply.messageText;
+        const clipped = text.length > 800 ? `${text.slice(0, 800)}… (truncated — the full text is in the delivery record)` : text;
+        task.result.summary += `\n\nMind reply (collected ${new Date(anchored.reply.receivedAt).toISOString()}; provenance "mind-reply" — an LLM response from the connected Mind, not a network-verified fact):\n"${clipped}"`;
+      }
+      task.events.push({
+        id: `${Date.now()}-mind-reply-collect`,
+        ts: Date.now(),
+        type: "mind_reply_received",
+        message: `Mind reply collected from conversation "${delivery.alias}" after the inline wait ended (fingerprint ${anchored.reply.fingerprint}) — provenance "mind-reply", not a network-verified fact.`,
+        data: { fingerprint: anchored.reply.fingerprint, source: "deferred_collect" },
+      });
+      task.updatedAt = Date.now();
+      await saveTask(task);
+      return NextResponse.json({
+        detail: `Mind reply attached from conversation "${delivery.alias}" (attributed via the report row carrying Task: ${taskId})`,
+        delivery,
+        status: delivery.status,
+      });
+    }
+    if (!delivery.reply && !anchored.reply) {
+      return NextResponse.json(
+        { detail: "no Mind reply has arrived for this report yet (attributed via the report row in the transcript)", delivery, status: delivery.status },
+        { status: 200 },
+      );
+    }
+    // delivery.reply exists and anchoring confirms it (fingerprint equal), or
+    // the row left the window: the conservative already-recorded answer.
+    return NextResponse.json(
+      { error: `task ${taskId} already recorded the Mind reply (fingerprint ${delivery.reply?.fingerprint ?? "unknown"})`, delivery },
+      { status: 409 },
+    );
+  }
+
   if (delivery) {
-    // Recorded round trip: pull the transcript and correlate Mind rows newer
-    // than the recorded pre-send fingerprint with the library's own matcher
-    // (the original deferred-collect contract).
+    // Recorded round trip, transcript window exhausted: pull the transcript
+    // and correlate Mind rows newer than the recorded pre-send fingerprint
+    // with the library's own matcher (the original deferred-collect contract).
     const outcome = await collectMindReply({
       alias: delivery.alias,
       fingerprintBefore: delivery.fingerprintBeforeSend,

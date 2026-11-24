@@ -243,6 +243,24 @@ export async function executeCounterpartyAsk(
   });
 
   if (outcome.kind !== "answered") {
+    // A drifted live offer is NOT terminal: never sign a rail the human did
+    // not approve, but also do not fail a task whose only problem is that the
+    // provider changed the offer between the pre-flight and the purchase.
+    // Re-park at the approval gate so the fresh offer is approved deliberately.
+    // Capped: two re-parks, then fail honestly instead of looping on a
+    // provider that keeps changing rails.
+    if (outcome.kind === "refused" && outcome.fresh?.kind === "challenge") {
+      const reparks = task.events.filter((e) => e.type === "approval_drift_repark").length;
+      if (reparks < 2) {
+        guardedTransition(task, "awaiting_approval");
+        await event(
+          task,
+          "approval_drift_repark",
+          `The live offer drifted from the approved one (${outcome.reason}). Nothing was signed. The task is parked at the approval gate again; approving re-runs the plan with a fresh pre-flight that captures the live offer for review. ${2 - reparks} re-approval(s) remain before this fails outright.`,
+        );
+        return;
+      }
+    }
     // Every non-answer is terminal for this attempt; the product's invariant
     // is one paid attempt, no retry. Diagnose honestly and stop.
     const detail =

@@ -125,7 +125,7 @@ function askPath(minerId?: string): string {
  */
 export async function probeAsk(
   spec: AskRequestSpec,
-  opts: { preferEscrow?: boolean } = {},
+  opts: { preferEscrow?: boolean; preferNetwork?: string } = {},
 ): Promise<ProbeOutcome> {
   const assembled = assembleAskBody(spec);
   if ("error" in assembled) {
@@ -143,8 +143,15 @@ export async function probeAsk(
     });
     if (res.status === 402) {
       const challenge = decodeChallenge(res.headers.get("payment-required"));
-      const accepted = challenge?.accepts?.find((a) => a.scheme === "exact" && a.network?.startsWith("eip155:"));
-      const priced = exactEvmOffer(challenge);
+      // Deterministic rail selection: the exact-scheme entries, preferring the
+      // network the approval recorded (providers list several chains and the
+      // order is theirs to change). Falls back to the first exact entry.
+      const exactEntries =
+        challenge?.accepts?.filter((a) => a.scheme === "exact" && a.network?.startsWith("eip155:")) ?? [];
+      const accepted =
+        (opts.preferNetwork ? exactEntries.find((a) => a.network === opts.preferNetwork) : undefined) ??
+        exactEntries[0];
+      const priced = exactEvmOffer(challenge, opts.preferNetwork);
       const escrow = escrowEvmOffer(challenge);
       if (!challenge) {
         return { kind: "unavailable", detail: "The node challenged this request without a readable payment contract." };
@@ -287,7 +294,15 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
   if ("error" in assembled) return { kind: "refused", reason: assembled.error };
   const { body, urlPath } = assembled;
 
-  const fresh = await probeAsk(input.spec);
+  // The fresh probe must select the SAME rail the approval recorded, or the
+  // drift check below would refuse rails the human did approve (observed: the
+  // approval probe selected the Sepolia escrow entry while an unpinned fresh
+  // probe took the provider's first exact entry, on Base Sepolia). Scheme and
+  // network are therefore pinned to the approved offer.
+  const fresh = await probeAsk(input.spec, {
+    preferEscrow: input.approvedOffer.scheme === "escrow",
+    preferNetwork: input.approvedOffer.scheme === "exact" ? input.approvedOffer.network : undefined,
+  });
   if (fresh.kind === "challenge") {
     const match = approvedOfferMatches(input.approvedOffer, {
       network: fresh.approvedOffer.network,
