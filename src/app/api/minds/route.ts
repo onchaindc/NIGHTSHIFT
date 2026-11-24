@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   return NextResponse.json({
     tool: "nightshift.minds",
-    note: "Only status=available Minds have a working investigation path. in_development and planned Minds cannot be run. probe_verified means schema, routing and price were verified unpaid; it is not an answer.",
+    note: "Only status=available Minds have a product investigation path. In-development Minds can be exercised through /api/minds/:slug/investigate over their verified dimensions, but they are not operational. probe_verified means schema, routing and price were verified unpaid; it is not an answer.",
     statuses: MIND_STATUS_LABEL,
     readiness: READINESS_LABEL,
     minds: MINDS.map((mind) => {
@@ -51,9 +51,12 @@ export async function GET() {
           ? {
               plan: {
                 order: caps.plan.order,
+                dependencies: caps.plan.dependencies,
+                evidenceRequirements: caps.plan.evidenceRequirements,
                 budgetCeilingUsdCents: caps.plan.budgetCeilingUsdCents,
                 approvalGate: caps.plan.approvalGate,
                 verification: caps.plan.verification,
+                reporting: caps.plan.reporting,
                 exclusions: caps.plan.exclusions,
               },
             }

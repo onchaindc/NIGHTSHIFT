@@ -56,9 +56,9 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Site and fleet diligence", "Treasury and hedging context", "Concentration risk"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for network hashprice/hashrate, BTC price and ERCOT grid price (unpaid probes). No executor is wired, and pool concentration and fleet uptime have no verified route, so it cannot be launched.",
+      "Schema and routing are verified for network hashprice/hashrate, BTC price and ERCOT grid price (unpaid probes). The shared capability API can execute these dimensions, but pool concentration and fleet uptime are unsupported and no paid answer has been verified, so there is no product launch.",
     nextStep:
-      "Wire the three verified dimensions into a probe → approve → ask → verify → report plan on the shared engine, then close the pool-share and fleet-telemetry gaps.",
+      "Run a paid capability pilot over the three verified dimensions, reconcile provider outputs, then close the pool-share and fleet-telemetry gaps.",
     boundaries: [
       "Pool concentration and fleet uptime are unsupported; no answer is inferred for them.",
       "No paid mining investigation has been executed. Verified routes are not live measurements.",
@@ -130,9 +130,9 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Supplier continuity", "Logistics diligence", "Disruption monitoring"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for port congestion, vessel telemetry, carrier identity, shipment rate, carrier scope, storm risk and route ETA (unpaid probes). Terminal schedules are unsupported and no executor is wired.",
+      "Schema and routing are verified for port congestion, vessel telemetry, carrier identity, shipment rate, carrier scope, storm risk and route ETA (unpaid probes). The shared capability API can execute them, but terminal schedules are unsupported and no paid answer has been verified, so there is no product launch.",
     nextStep:
-      "Wire the seven verified dimensions into a port-dependency plan, then replace the generic route-ETA fallback with a maritime schedule source or record it as a permanent limitation.",
+      "Run a paid pilot over the seven verified dimensions, then replace the generic route-ETA fallback with a maritime schedule source or record it as a permanent approximation.",
     boundaries: [
       "Terminal berth schedules and container-level status are unsupported.",
       "Verified routes are not live port or vessel measurements until a paid, verified answer exists.",
@@ -154,9 +154,9 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Asset diligence", "Counterparty screening", "Supply-chain provenance"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for owner identity, filings, operator sanctions and adverse media (unpaid probes). Production volumes and licences have no verified source, and no executor is wired.",
+      "Schema and routing are verified for owner identity, filings, operator sanctions and adverse media (unpaid probes). The shared capability API can execute them, but production volumes and licences have no verified source and no paid answer has been verified, so there is no product launch.",
     nextStep:
-      "Wire the verified dimensions into a mine dossier plan, then decide whether production and licence data can be sourced outside Telegraph or must remain an explicit gap.",
+      "Run a paid capability pilot over the four verified dimensions, then source production and licence data outside Telegraph or keep them as explicit gaps.",
     boundaries: [
       "Production volumes, guidance and licence tenure are unsupported.",
       "A registry identity is not the asset's ownership chain; the site-to-operator link must be supplied.",
@@ -178,9 +178,9 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Incident response", "Counterparty due diligence", "Treasury tracing"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for transaction lookup, balances, transaction risk, account metrics, holder counts and wash-trading signals (unpaid probes). Clustering, attribution and multi-hop tracing are unsupported, and no executor is wired.",
+      "Schema and routing are verified for transaction lookup, balances, transaction risk, account metrics, holder counts and wash-trading signals (unpaid probes). The shared capability API can execute them, but clustering, attribution and multi-hop tracing are unsupported and no paid answer has been verified, so there is no product launch.",
     nextStep:
-      "Wire the verified dimensions into a transaction dossier, then add a labelling/tracing source before claiming wallet attribution.",
+      "Run a paid pilot over the six verified dimensions, then add a labelling/tracing source before claiming wallet attribution.",
     boundaries: [
       "Wallet clustering, attribution and cross-chain fund-flow tracing are unsupported.",
       "A risk score is a provider judgment, not an identity; nothing here attributes an address to a person.",
@@ -202,7 +202,7 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["KYC escalation", "Group exposure", "M&A diligence"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for entity identity, firmographic enrichment, sanctions checks, filings and VAT identity (unpaid probes). Beneficial ownership and group traversal — the core claim — are unsupported, so it is not operational.",
+      "Schema and routing are verified for entity identity, firmographic enrichment, sanctions checks, filings and VAT identity (unpaid probes). The shared capability API can execute the single-entity dimensions, but beneficial ownership and group traversal — the core claim — are unsupported, so it is not operational.",
     nextStep:
       "Find a verifiable beneficial-ownership or shareholding source before building the graph; the verified single-entity dimensions are not a substitute.",
     boundaries: [
@@ -226,9 +226,9 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Pre-shipment checks", "Document diligence", "Discrepancy review"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for PO, invoice/ledger, commerce orders, counterparty identity, delivery windows and package status (unpaid probes). Bills of lading and cargo-document extraction are unsupported, and no executor is wired.",
+      "Schema and routing are verified for PO, invoice/ledger, commerce orders, counterparty identity, delivery windows and package status (unpaid probes). The shared capability API can execute them, but bills of lading and cargo-document extraction are unsupported and no paid answer has been verified, so there is no product launch.",
     nextStep:
-      "Wire the verified dimensions into a shipment dossier, then add document extraction before claiming document-to-document discrepancy review.",
+      "Run a paid pilot over the six verified dimensions, then add cargo-document extraction before claiming document-to-document discrepancy review.",
     boundaries: [
       "Bill-of-lading, cargo-document and customs parsing are unsupported.",
       "Verified routes are not a validation of any real shipment until paid answers are reconciled.",
@@ -250,9 +250,9 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Onboarding screening", "Transaction review", "Periodic re-screening"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for name screening, entity identity, enrichment and vessel-name screening (unpaid probes). IMO/MMSI vessel matching and related-party ownership are unsupported, so this is not yet a sanctions desk.",
+      "Schema and routing are verified for name screening, entity identity, enrichment and vessel-name screening (unpaid probes). The shared capability API can execute them, but IMO/MMSI vessel matching and related-party ownership are unsupported, so this is not yet a sanctions desk.",
     nextStep:
-      "Add an IMO/MMSI-based vessel screen and an ownership link before claiming exposure analysis; name screening alone is not enough.",
+      "Add an IMO/MMSI-based vessel screen and an ownership link before claiming exposure analysis; a paid name-screen pilot alone is not enough.",
     boundaries: [
       "Vessel screening is name-based only; there is no IMO/MMSI match.",
       "Related-party ownership exposure is unsupported; a screen is not a legal determination.",
@@ -274,7 +274,7 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Counterparty diligence", "Dispute monitoring", "Portfolio risk review"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for party identity, public filings, adverse coverage and claim checks (unpaid probes). Court dockets, judgments and multi-jurisdiction coverage are unsupported, so litigation history cannot be claimed.",
+      "Schema and routing are verified for party identity, public filings, adverse coverage and claim checks (unpaid probes). The shared capability API can execute them, but court dockets, judgments and multi-jurisdiction coverage are unsupported, so litigation history cannot be claimed.",
     nextStep:
       "Find a verifiable court-record source before calling this a case ledger; press coverage and filings are not a docket.",
     boundaries: [
@@ -298,9 +298,9 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Operational diligence", "Continuity planning", "Exposure monitoring"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for ERCOT grid price, operator identity, storm risk, current temperature and historical weather (unpaid probes). Outages, production and facility telemetry are unsupported, and no executor is wired.",
+      "Schema and routing are verified for ERCOT grid price, operator identity, storm risk, current temperature and historical weather (unpaid probes). The shared capability API can execute them, but outages, production and facility telemetry are unsupported and no paid answer has been verified, so there is no product launch.",
     nextStep:
-      "Wire the verified dimensions into an energy-site dossier, then source outage/production data before claiming operational monitoring.",
+      "Run a paid pilot over the grid, weather and operator dimensions, then source outage/production data before claiming operational monitoring.",
     boundaries: [
       "Outage notices, production volumes and facility power/PUE are unsupported.",
       "ERCOT price coverage is not a global energy market view.",
