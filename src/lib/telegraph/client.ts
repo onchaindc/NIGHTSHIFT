@@ -195,6 +195,59 @@ export function decodeChallenge(headerValue: string | null): TelegraphChallenge 
 }
 
 /**
+ * Network-name forms: the node's own challenges carry CAIP-2 ("eip155:84532")
+ * but x402 v1-style backends and docs also use plain names ("base-sepolia").
+ * Everything of ours compares and registers in the canonical CAIP-2 form, and
+ * the payment client registers every known alias of the approved chain so a
+ * v1-named requirement can never silently fail the scheme lookup.
+ */
+const NETWORK_ALIASES: Record<string, string> = {
+  "base-sepolia": "eip155:84532",
+  "sepolia": "eip155:11155111",
+  "ethereum-sepolia": "eip155:11155111",
+};
+
+/** The canonical CAIP-2 form of a network name (v1 aliases collapse into it). */
+export function canonicalNetwork(network: string): string {
+  const n = network.trim().toLowerCase();
+  return NETWORK_ALIASES[n] ?? n;
+}
+
+/** Every name the payment client should register for a canonical network. */
+export function networkRegistrationNames(canonical: string): string[] {
+  const c = canonicalNetwork(canonical);
+  const names = [c];
+  for (const [alias, target] of Object.entries(NETWORK_ALIASES)) {
+    if (target === c) names.push(alias);
+  }
+  return names;
+}
+
+/**
+ * The challenge's signable exact-scheme EVM entries, networks canonicalized.
+ * A v1-named entry (e.g. "base-sepolia") counts as EVM and collapses to its
+ * CAIP-2 form, so rail selection is identical no matter how the node names it.
+ */
+export function evmExactEntries(a: TelegraphChallenge | null): Array<{
+  scheme: string;
+  network: string;
+  asset?: string;
+  payTo?: string;
+  amount?: string;
+  price?: string;
+  extra?: Record<string, unknown>;
+}> {
+  return (a?.accepts ?? [])
+    .filter(
+      (x) =>
+        x.scheme === "exact" &&
+        !!x.network &&
+        (x.network.startsWith("eip155:") || NETWORK_ALIASES[x.network.trim().toLowerCase()] !== undefined),
+    )
+    .map((x) => ({ ...x, scheme: x.scheme as string, network: canonicalNetwork(x.network as string) }));
+}
+
+/**
  * The one priceable, signable EVM offer in a challenge: the exact-scheme
  * EIP-155 entry with an amount we can budget against. Telegraph's second
  * option (scheme "escrow" against its escrow balance on-chain) is NOT
@@ -203,8 +256,9 @@ export function decodeChallenge(headerValue: string | null): TelegraphChallenge 
 export function exactEvmOffer(a:
   | TelegraphChallenge
   | null, preferNetwork?: string): { scheme: string; network: string; asset?: string; payTo?: string; amountCents: number } | null {
-  const exactEntries = a?.accepts?.filter((x) => x.scheme === "exact" && x.network?.startsWith("eip155:")) ?? [];
-  const evm = (preferNetwork ? exactEntries.find((x) => x.network === preferNetwork) : undefined) ?? exactEntries[0];
+  const exactEntries = evmExactEntries(a);
+  const wanted = preferNetwork ? canonicalNetwork(preferNetwork) : undefined;
+  const evm = (wanted ? exactEntries.find((x) => x.network === wanted) : undefined) ?? exactEntries[0];
   if (!evm) { return null; }
   let amountCents: number | null = null;
   if (evm.amount) {
@@ -229,7 +283,7 @@ export function escrowEvmOffer(a: TelegraphChallenge | null): TelegraphEscrowOff
   const message = typeof escrow.extra?.message === "string" ? escrow.extra.message : null;
   const amount = message?.match(/Amount:\s*(\d+)\s*uUSDC/i)?.[1] ?? escrow.amount;
   if (!message || !amount || !/^\d+$/.test(amount)) return null;
-  if (escrow.network !== "eip155:11155111") return null;
+  if (canonicalNetwork(escrow.network) !== "eip155:11155111") return null;
   return {
     scheme: "escrow",
     network: escrow.network,
@@ -289,7 +343,13 @@ export function selectTelegraphRequirement(
   offer: { network: string; asset?: string; payTo?: string; amountCents: number },
   remainingBudgetUsdCents: number,
 ): unknown /* x402 PaymentRequirements entry, returned as selected by the core client */ {
-  const supported = accepts.filter((a) => a.scheme === "exact" && typeof a.network === "string" && a.network.startsWith("eip155:"));
+  const supported = accepts.filter(
+    (a) =>
+      a.scheme === "exact" &&
+      typeof a.network === "string" &&
+      (a.network.startsWith("eip155:") ||
+        ["base-sepolia", "sepolia", "ethereum-sepolia"].includes(a.network.trim().toLowerCase())),
+  );
   if (supported.length === 0) {
     // Preserve the structure in the message; never attempt an unsupported option.
     throw new Error(
@@ -297,7 +357,7 @@ export function selectTelegraphRequirement(
     );
   }
   const matches = (a: { network?: string; asset?: string; payTo?: string }) =>
-    a.network === offer.network &&
+    canonicalNetwork(a.network ?? "") === canonicalNetwork(offer.network) &&
     (!offer.asset || a.asset?.toLowerCase() === offer.asset.toLowerCase()) &&
     (!offer.payTo || a.payTo?.toLowerCase() === offer.payTo.toLowerCase());
   const chosen = supported.find(matches) ?? supported[0];
