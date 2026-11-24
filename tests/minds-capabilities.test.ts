@@ -224,7 +224,7 @@ describe("capability adapter", () => {
         ({
           kind: "verified",
           signalHash: "0xsignal",
-          record: { payload: { response: { price_usd: 64000, extra: "kept" } } },
+          record: { payload: { response: { data: { amount: 64000, base: "BTC", currency: "USD" }, extra: "kept" } } },
           note: "re-derived",
         }) as VerifyOutcome,
     );

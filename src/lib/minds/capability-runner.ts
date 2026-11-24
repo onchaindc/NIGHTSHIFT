@@ -30,11 +30,14 @@ import {
   DEFAULT_ASK_PRICE_USD_CENTS,
   type CapabilityDimension,
 } from "./capabilities";
+import { notifyMindReport } from "@/lib/mind/builder";
 
 export interface CapabilityRunnerDeps {
   probe: (spec: AskRequestSpec, opts?: { preferEscrow?: boolean }) => Promise<ProbeOutcome>;
   execute: (input: ExecuteInput) => Promise<ExecuteOutcome>;
   verify: (signalHash: string) => Promise<VerifyOutcome>;
+  /** Optional report delivery to a Minds account; config-gated and best-effort. */
+  notify?: typeof notifyMindReport;
   now: () => number;
 }
 
@@ -43,6 +46,7 @@ export function defaultCapabilityDeps(): CapabilityRunnerDeps {
     probe: probeAsk,
     execute: executeAsk,
     verify: verifySignal,
+    notify: (input, fetchImpl) => notifyMindReport(input, fetchImpl),
     now: () => Date.now(),
   };
 }
@@ -251,6 +255,8 @@ export interface CommittedDimension {
   provider: string;
   signalHash: string;
   receiptHash: string;
+  /** When the node recorded the committed signal, when it exposes one. */
+  verifiedAt?: string;
   costUsdCents: number;
   verification: "verified" | "recorded" | "unverified";
   verificationNote: string;
@@ -306,10 +312,17 @@ export async function executeApprovedDimension(input: ApprovedDimensionInput): P
   const values: Record<string, unknown> = {};
   if (committed) {
     for (const field of expected) {
-      if (committed[field] !== undefined) values[field] = committed[field];
+      const value = valueAtPath(committed, dim.valuePaths?.[field] ?? field);
+      // null is not an answer: keep it out of findings and report the field missing.
+      if (value !== undefined && value !== null) values[field] = value;
     }
   }
-  const missingFields = expected.filter((f) => committed?.[f] === undefined);
+  const missingFields = expected.filter((f) => {
+    const value = committed ? valueAtPath(committed, dim.valuePaths?.[f] ?? f) : undefined;
+    return value === undefined || value === null;
+  });
+  const signalRecord = verification.kind === "unverified" ? null : (verification.record as Record<string, unknown> | null);
+  const verifiedAt = typeof signalRecord?.timestamp === "string" ? signalRecord.timestamp : undefined;
 
   return {
     dimension: dim.id,
@@ -318,6 +331,7 @@ export async function executeApprovedDimension(input: ApprovedDimensionInput): P
     provider: dim.provider ?? "router",
     signalHash: outcome.signalHash,
     receiptHash: outcome.receipt.receipt_hash,
+    verifiedAt,
     costUsdCents: priceUsdCents,
     verification:
       verification.kind === "verified" ? "verified" : verification.kind === "recorded" ? "recorded" : "unverified",
@@ -331,6 +345,16 @@ export async function executeApprovedDimension(input: ApprovedDimensionInput): P
 /* ------------------------------------------------------------------ */
 /* Evidence + reporting                                                */
 /* ------------------------------------------------------------------ */
+
+/** Read one field, including a nested path such as `data.amount`. */
+export function valueAtPath(record: Record<string, unknown>, path: string): unknown {
+  let current: unknown = record;
+  for (const segment of path.split(".")) {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
 
 /** The hash-committed answer, always read from `payload.response`. */
 export function committedResponseOf(record: unknown): Record<string, unknown> | null {
@@ -357,6 +381,7 @@ export interface CapabilityReport {
     priceUsdCents?: number;
     signalHash?: string;
     receiptHash?: string;
+    verifiedAt?: string;
     values?: Record<string, unknown>;
     missingFields?: string[];
   }>;
@@ -404,6 +429,7 @@ export function buildCapabilityReport(input: {
       priceUsdCents: done.costUsdCents,
       signalHash: done.signalHash,
       receiptHash: done.receiptHash,
+      verifiedAt: done.verifiedAt,
       values: done.values,
       missingFields: done.missingFields,
     };

@@ -96,8 +96,8 @@ afterEach(() => {
   resetMindDeps();
   vi.restoreAllMocks();
   delete process.env.MINDS_BUILDER_API_KEY;
+  delete process.env.MINDS_BUILDER_ALIAS;
   delete process.env.MINDS_BUILDER_SEND_URL;
-  delete process.env.MINDS_BUILDER_ACCESS_KEY;
 });
 
 describe("objective parsing", () => {
@@ -339,17 +339,19 @@ describe("intel-mode investigation (approval-gated paid ask)", () => {
   });
 });
 
-describe("Minds Builder API adapter (verified surface only)", () => {
-  it("skips honestly when unconfigured", async () => {
+describe("Minds Builder API adapter (official interface)", () => {
+  it("skips honestly when the key or a bound alias is missing", async () => {
     expect(mindsBuilderConfigured()).toBe(false);
     const r = await notifyMindReport({ task: { id: "t1", goal: "g", state: "completed" }, report: { objective: "g", confidence: "none", intelUsed: false, reasoning: [] } });
     expect(r.ok).toBe(false);
     expect(r.detail).toContain("not_configured");
+    process.env.MINDS_BUILDER_API_KEY = "builder-key";
+    expect(mindsBuilderConfigured()).toBe(false);
   });
 
-  it("sends with the verified X-Builder-Api-Key header when configured", async () => {
+  it("posts {alias, messageText} with X-Api-Key to the documented endpoint", async () => {
     process.env.MINDS_BUILDER_API_KEY = "builder-key";
-    process.env.MINDS_BUILDER_SEND_URL = "https://api.build.hellominds.ai/v1/messages";
+    process.env.MINDS_BUILDER_ALIAS = "nightshift";
     expect(mindsBuilderConfigured()).toBe(true);
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => new Response("{}", { status: 200 }));
     const r = await notifyMindReport(
@@ -361,11 +363,15 @@ describe("Minds Builder API adapter (verified surface only)", () => {
     );
     expect(r.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("https://api.build.hellominds.ai/v1/messaging/message");
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
-    expect(headers.get("X-Builder-Api-Key")).toBe("builder-key");
+    expect(headers.get("X-Api-Key")).toBe("builder-key");
+    expect(headers.get("X-Builder-Api-Key")).toBeNull();
+    expect(headers.get("X-Access-Key")).toBeNull();
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    expect(body.kind).toBe("nightshift.investigation.report");
-    expect(body.confidence).toBe("signal-verified");
+    expect(body.alias).toBe("nightshift");
+    expect(body.messageText).toContain("signal-verified");
+    expect(body.kind).toBeUndefined();
   });
 });
 

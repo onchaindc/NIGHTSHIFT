@@ -54,15 +54,16 @@ export const MINDS: MindDefinition[] = [
       "Operating performance: uptime, fleet efficiency and the gap between reported and implied output.",
     ],
     capabilities: ["Site and fleet diligence", "Treasury and hedging context", "Concentration risk"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "Schema and routing are verified for network hashprice/hashrate, BTC price and ERCOT grid price (unpaid probes). The shared capability API can execute these dimensions, but pool concentration and fleet uptime are unsupported and no paid answer has been verified, so there is no product launch.",
+      "Live. A paid run on 2026-11-24 settled and signal-verified hashprice/hashrate, BTC spot price and ERCOT LMP for $0.03. The report derives USD hashprice from committed sats × committed BTC price because the provider leaves USD unavailable. Pool concentration and fleet uptime remain explicit gaps.",
     nextStep:
-      "Run a paid capability pilot over the three verified dimensions, reconcile provider outputs, then close the pool-share and fleet-telemetry gaps.",
+      "Close the two gaps with a purpose-built pool-attribution / telemetry route; until then, keep the declared-vs-verified line visible and do not infer either.",
     boundaries: [
-      "Pool concentration and fleet uptime are unsupported; no answer is inferred for them.",
-      "No paid mining investigation has been executed. Verified routes are not live measurements.",
+      "Pool concentration and fleet uptime are unsupported; every report names them and never infers them from network hashrate.",
+      "A historical block can be investigated, but the report flags timestamp misalignment with current BTC and grid prices rather than presenting it as a current operating picture.",
     ],
+    href: "/minds/bitcoin-mining",
   },
   {
     slug: "index-reconstitution-desk",

@@ -5,16 +5,16 @@
  * `/api/miners` and `/engine/v1/intents/:id`) read on 2026-11-24: 136
  * intents and 2,192 miner listings. Every non-gap dimension below was then
  * probed UNPAID against `/engine/v1/ask/:miner` with the canonical
- * `{intent, params}` body. All 42 probes returned a valid 402 x402
- * challenge with the pinned provider — the node validated the request
- * schema, routing and live price. No paid ask was executed while building
- * this matrix, so provider OUTPUT QUALITY is deliberately not claimed for
- * those dimensions.
+ * `{intent, params}` body. All 51 supported dimensions returned a valid 402
+ * x402 challenge with the pinned provider — the node validated the request
+ * schema, routing and live price. For every other Mind, no paid ask has been
+ * executed, so provider OUTPUT QUALITY is deliberately not claimed.
  *
  * `integration_verified` is used only where a real product path has already
- * produced verified answers on this deployment (the Index Desk and
- * Counterparty Intelligence). Everything else is `probe_verified`: the
- * route and contract are real, the answer is not yet exercised.
+ * produced verified answers on this deployment (the Index Desk, Counterparty
+ * Intelligence, and — as of 2026-11-24 — the three Bitcoin mining dimensions).
+ * Everything else is `probe_verified`: the route and contract are real, the
+ * answer is not yet exercised.
  *
  * Gaps are first-class. A dimension the network cannot answer is listed
  * with `status: "gap"` and a reason; it is never mapped onto a loosely
@@ -61,6 +61,11 @@ export interface CapabilityDimension {
   params?: Record<string, CapabilityParam>;
   /** Fields the verified committed payload is expected to carry. */
   responseFields?: string[];
+  /**
+   * Maps an expected field to its real path in the committed response when the
+   * provider nests it. The report keeps the business-facing field name.
+   */
+  valuePaths?: Record<string, string>;
   priceUsdCents?: number;
   verification?: CapabilityVerification;
   /** What a verified answer is expected to say, in business terms. */
@@ -71,6 +76,8 @@ export interface CapabilityDimension {
   limitation?: string;
   /** Required for a gap. */
   missingReason?: string;
+  /** How to close a gap without inventing a route. */
+  resolution?: string;
 }
 
 export interface CapabilityDependency {
@@ -146,7 +153,7 @@ function plan(
 export const CAPABILITIES: Record<string, MindCapabilities> = {
   "bitcoin-mining-intelligence": {
     slug: "bitcoin-mining-intelligence",
-    readiness: "partial_coverage",
+    readiness: "operational",
     dimensions: [
       {
         id: "hashprice_network",
@@ -156,12 +163,21 @@ export const CAPABILITIES: Record<string, MindCapabilities> = {
         intent: "MINING_HASHPRICE_VERIFY_GENERAL",
         provider: "zk-hashprice",
         params: { block_height: { type: "integer", required: true, description: "Bitcoin mainnet block height", sample: 870000 } },
-        responseFields: ["hashprice_sats_per_ph_day", "hashprice_usd_per_ph_day", "hashrate_eh_s"],
+        responseFields: [
+          "hashprice_sats_per_ph_day",
+          "hashprice_usd_per_ph_day",
+          "hashrate_eh_s",
+          "block_height",
+          "block_time",
+          "usd_unavailable_reason",
+        ],
         priceUsdCents: 1,
-        verification: "probe_verified",
+        verification: "integration_verified",
         output: "Hashprice in sats and USD per PH/s per day plus network hashrate at the requested block.",
-        evidence: PROBE_EVIDENCE,
-        limitation: "One block height per ask; producing a time series requires multiple approved asks.",
+        evidence:
+          "A live product path: a paid Bitcoin mining run on 2026-11-24 re-derived the committed payload against its signal. The provider returned sats and hashrate and explicitly left USD unavailable; the Mind derives USD from the separately committed BTC price and labels that derivation.",
+        limitation:
+          "One block height per ask; producing a time series requires multiple approved asks. USD hashprice is provider-null and must be derived from committed sats × a committed BTC price.",
       },
       {
         id: "btc_price",
@@ -172,10 +188,12 @@ export const CAPABILITIES: Record<string, MindCapabilities> = {
         provider: "cp-coinbase",
         params: { symbol: { type: "string", required: true, description: "Asset ticker", sample: "BTC" } },
         responseFields: ["price_usd"],
+        valuePaths: { price_usd: "data.amount" },
         priceUsdCents: 1,
-        verification: "probe_verified",
+        verification: "integration_verified",
         output: "Current USD price for the requested asset.",
-        evidence: PROBE_EVIDENCE,
+        evidence:
+          "A live product path: a paid Bitcoin mining run on 2026-11-24 re-derived the committed payload against its signal. The answer nests the price at data.amount rather than the business-facing top-level field, and the adapter maps it without rewriting the value.",
         limitation: "A point-in-time price, not an execution quote.",
       },
       {
@@ -189,11 +207,20 @@ export const CAPABILITIES: Record<string, MindCapabilities> = {
           node_or_zone: { type: "string", required: true, description: "ERCOT hub or load zone", sample: "HB_WEST" },
           interval_start: { type: "datetime", required: true, description: "Settlement interval start (RFC 3339 with timezone)", sample: "2026-11-23T00:00:00-06:00" },
         },
-        responseFields: ["lmp_usd_per_mwh", "node_or_zone", "market", "interval_start", "currency"],
+        responseFields: [
+          "lmp_usd_per_mwh",
+          "node_or_zone",
+          "market",
+          "interval_start",
+          "currency",
+          "iso",
+          "source_report",
+        ],
         priceUsdCents: 1,
-        verification: "probe_verified",
+        verification: "integration_verified",
         output: "Locational marginal price in USD per MWh for the requested ERCOT node and interval.",
-        evidence: PROBE_EVIDENCE,
+        evidence:
+          "A live product path: a paid Bitcoin mining run on 2026-11-24 re-derived the committed ERCOT answer against its signal. It returned the real-time LMP and settlement interval for the requested zone.",
         limitation: "ERCOT only; it is not a global tariff and does not include a site's retail contract.",
       },
       {
@@ -202,6 +229,8 @@ export const CAPABILITIES: Record<string, MindCapabilities> = {
         requirement: "Which pools control the hashrate, and how concentrated is a fleet's dependency on them?",
         status: "gap",
         missingReason: "The catalogue has no pool-share or block-producer attribution intent. Hashing a guess from general mining intents would fabricate the answer.",
+        resolution:
+          "Add a purpose-built block-template / pool-attribution intent with a canonical schema and pinned provider, or import a labelled dataset as an operator-declared input. Never infer pool share from a generic mining intent.",
       },
       {
         id: "fleet_uptime",
@@ -209,6 +238,8 @@ export const CAPABILITIES: Record<string, MindCapabilities> = {
         requirement: "How does reported fleet output compare with nameplate capacity and implied uptime?",
         status: "gap",
         missingReason: "No verified facility/fleet telemetry route was found for a specific operator. Data-centre telemetry intents exist, but none accepted a facility, operator or machine identifier with a purpose-built schema.",
+        resolution:
+          "Require a facility-telemetry intent that accepts an operator/site identifier and interval, or let the operator declare fleet efficiency and uptime and label the resulting output as declared. Do not infer uptime from network hashrate.",
       },
     ],
     plan: plan(
