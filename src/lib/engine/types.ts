@@ -71,7 +71,10 @@ export type ExecutionEventType =
   | "mind_report_ready"
   // Index Reconstitution Desk events (per-asset dossier + proposal)
   | "index_baseline_ready"
-  | "index_proposal_ready";
+  | "index_proposal_ready"
+  // Generic capability run (verified dimensions, explicit gaps)
+  | "capability_baseline_ready"
+  | "capability_report_ready";
 
 export interface ExecutionEvent {
   id: string;
@@ -168,6 +171,8 @@ export interface TaskResult {
    * missing-dimension ledger.
    */
   indexDeskReport?: IndexDeskReport;
+  /** A completed generic capability report for a Mind (probe/paid/mixed). */
+  capabilityReport?: import("@/lib/minds/capability-runner").CapabilityReport;
 }
 
 export type Evidence =
@@ -285,7 +290,11 @@ export type PlanStepKind =
   // Index Reconstitution Desk steps (first specialist Mind over verified market-data intents)
   | "index_baseline"
   | "index_data_ask"
-  | "index_report";
+  | "index_report"
+  // Generic capability runs over the verified Mind matrix
+  | "capability_baseline"
+  | "capability_ask"
+  | "capability_report";
 
 export interface PlanStep {
   id: string;
@@ -335,7 +344,7 @@ export interface TerminalRunInfo {
 /** A task is either an ordinary goal, a protocol-watch check run, or a
  * durably recorded interactive Terminal ask (jobTypes share one store so the
  * Activity centre reads a single history). */
-export type JobType = "goal" | "protocol_watch" | "terminal_request" | "mind_investigation" | "index_desk";
+export type JobType = "goal" | "protocol_watch" | "terminal_request" | "mind_investigation" | "index_desk" | "capability_run";
 
 export interface TaskRecord {
   id: string;

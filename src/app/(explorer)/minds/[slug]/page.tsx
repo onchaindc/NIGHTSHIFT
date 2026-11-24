@@ -3,6 +3,13 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, CircleAlert } from "lucide-react";
 
 import { MINDS, MIND_STATUS_LABEL, mindBySlug, mindIndex } from "@/lib/minds/registry";
+import {
+  CAPABILITIES,
+  CAPABILITY_PROBED_AT,
+  READINESS_LABEL,
+  readinessFor,
+  type CapabilityDimension,
+} from "@/lib/minds/capabilities";
 import { MIND_FOUNDATION, MIND_PIPELINE } from "@/lib/minds/foundation";
 import { MindStatusChip } from "@/components/minds/status-chip";
 
@@ -24,16 +31,34 @@ export async function generateMetadata({ params }: Params) {
   };
 }
 
+const STATUS_TONE: Record<CapabilityDimension["status"], string> = {
+  verified: "bg-teal",
+  partial: "bg-amber",
+  gap: "bg-ink-faint/40",
+};
+
+const STATUS_WORD: Record<CapabilityDimension["status"], string> = {
+  verified: "Route verified",
+  partial: "Partial",
+  gap: "Unsupported",
+};
+
 /**
- * A Mind's profile. It states the domain, the problem, what the Mind is
- * responsible for, its boundaries and its real development status. Only an
- * available Mind gets a launch action; the rest say plainly that they cannot
- * be run yet.
+ * A Mind's profile. It separates three facts that are easy to blur:
+ * the Mind's product status (available / in development), the network's
+ * verified coverage (schema, provider and price), and whether output has
+ * actually been exercised. Only an available Mind gets a launch action.
  */
 export default async function MindProfilePage({ params }: Params) {
   const { slug } = await params;
   const mind = mindBySlug(slug);
   if (!mind) notFound();
+
+  const caps = CAPABILITIES[mind.slug];
+  const readiness = readinessFor(mind.slug, mind.status);
+  const verified = caps?.dimensions.filter((d) => d.status === "verified").length ?? 0;
+  const partial = caps?.dimensions.filter((d) => d.status === "partial").length ?? 0;
+  const gaps = caps?.dimensions.filter((d) => d.status === "gap").length ?? 0;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12">
@@ -53,6 +78,11 @@ export default async function MindProfilePage({ params }: Params) {
         </div>
         <h1 className="x-display-1 mt-3 max-w-[24ch] text-ink">{mind.name}</h1>
         <p className="mt-3 max-w-[68ch] text-[14px] leading-relaxed text-ink-soft">{mind.summary}</p>
+        <p className="mt-3 text-[11.5px] text-ink-faint">
+          {READINESS_LABEL[readiness]} · {verified} verified {verified === 1 ? "route" : "routes"}
+          {partial > 0 ? ` · ${partial} partial` : ""}
+          {gaps > 0 ? ` · ${gaps} ${gaps === 1 ? "gap" : "gaps"}` : ""}
+        </p>
       </header>
 
       <div className="mt-8 grid gap-10 lg:grid-cols-[1.5fr_1fr] lg:gap-12">
@@ -78,10 +108,7 @@ export default async function MindProfilePage({ params }: Params) {
             <h2 id="uses" className="x-label !mt-0">Business uses</h2>
             <ul className="mt-2 flex flex-wrap gap-2">
               {mind.capabilities.map((c) => (
-                <li
-                  key={c}
-                  className="rounded-full border border-edge bg-panel px-3 py-1 text-[11.5px] text-ink-soft"
-                >
+                <li key={c} className="rounded-full border border-edge bg-panel px-3 py-1 text-[11.5px] text-ink-soft">
                   {c}
                 </li>
               ))}
@@ -122,7 +149,7 @@ export default async function MindProfilePage({ params }: Params) {
             ) : (
               <div className="mt-4 rounded-lg border border-dashed border-edge bg-panel-2 px-3 py-2.5">
                 <p className="text-[11.5px] leading-relaxed text-ink-faint">
-                  This Mind is not operational. There is no launch action because no investigation path exists
+                  This Mind is not operational. There is no launch action because no investigation executor exists
                   yet — not because it is hidden.
                 </p>
               </div>
@@ -134,29 +161,122 @@ export default async function MindProfilePage({ params }: Params) {
             </div>
           </section>
 
-          {mind.coverage && (
-            <section className="rounded-xl border border-edge bg-panel p-5" aria-labelledby="coverage">
-              <h2 id="coverage" className="x-label !mt-0">Verified coverage</h2>
-              <ul className="mt-2 divide-y divide-edge">
-                {mind.coverage.map((c) => (
-                  <li key={c.intent} className="py-2">
-                    <p className="text-[12px] text-ink">{c.dimension}</p>
-                    <p className="tabular mt-0.5 break-words text-[10.5px] text-ink-faint">
-                      {c.intent} <span className="text-ink-soft">@ {c.miner}</span>
-                    </p>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-                Each intent was probed live and priced before integration.
-              </p>
-            </section>
-          )}
+          <section className="rounded-xl border border-edge bg-panel p-5" aria-labelledby="readiness">
+            <h2 id="readiness" className="x-label !mt-0">Network readiness</h2>
+            <dl className="mt-2 space-y-2 text-[12px]">
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-ink-faint">Verified routes</dt>
+                <dd className="tabular text-ink">{verified}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-ink-faint">Partial</dt>
+                <dd className="tabular text-ink">{partial}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-ink-faint">Unsupported</dt>
+                <dd className="tabular text-ink">{gaps}</dd>
+              </div>
+            </dl>
+            <p className="mt-3 border-t border-edge pt-3 text-[11px] leading-relaxed text-ink-faint">
+              {readiness === "operational"
+                ? "This Mind has a live investigation path; verified dimensions below are part of it."
+                : "Verified means the node accepted the canonical schema, pinned provider and live price. It does not mean a paid answer exists."}
+            </p>
+          </section>
         </aside>
       </div>
 
+      {/* Capability matrix */}
+      <section className="mt-12 border-t border-edge pt-8" aria-labelledby="coverage">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 id="coverage" className="x-label !mt-0">Network coverage</h2>
+          <span className="text-[11px] text-ink-faint">
+            Probed unpaid {CAPABILITY_PROBED_AT.slice(0, 10)} · no payment signed
+          </span>
+        </div>
+        <p className="mt-2 max-w-[82ch] text-[12px] leading-relaxed text-ink-soft">
+          Every supported dimension below was checked against the live Telegraph catalogue and probed with its
+          canonical request body. Unsupported dimensions are named, not filled with a loosely related intent.
+        </p>
+
+        {caps ? (
+          <>
+            <ul className="mt-4 border-t border-edge">
+              {caps.dimensions.map((dim) => (
+                <li key={dim.id} className="grid gap-1.5 border-b border-edge py-3.5 sm:grid-cols-[10px_1fr_auto] sm:items-baseline sm:gap-3">
+                  <span aria-hidden className={`mt-1.5 size-1.5 rounded-full ${STATUS_TONE[dim.status]}`} />
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="text-[13px] font-medium text-ink">{dim.label}</span>
+                      <span className="text-[10.5px] text-ink-faint">{STATUS_WORD[dim.status]}</span>
+                    </p>
+                    <p className="mt-0.5 max-w-[80ch] text-[12px] leading-relaxed text-ink-soft">{dim.requirement}</p>
+                    <p className="mt-1 break-words text-[10.5px] text-ink-faint">
+                      {dim.status === "gap" ? (
+                        <span>Why it is unsupported: {dim.missingReason}</span>
+                      ) : (
+                        <>
+                          <span className="tabular">{dim.intent}</span> · {dim.provider}
+                          {dim.limitation ? <span> — {dim.limitation}</span> : null}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  <span className="tabular text-[11px] text-ink-faint">
+                    {dim.status === "gap" ? "—" : `$${((dim.priceUsdCents ?? 1) / 100).toFixed(2)}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-6 rounded-xl border border-edge bg-panel p-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="text-[13.5px] font-medium text-ink">Investigation plan</h3>
+                <span className="tabular text-[11px] text-ink-faint">
+                  ceiling ${(caps.plan.budgetCeilingUsdCents / 100).toFixed(2)}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-5 sm:grid-cols-2">
+                <div>
+                  <p className="text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">Execution order</p>
+                  <ol className="mt-1.5 space-y-1.5">
+                    {caps.plan.order.map((id, i) => {
+                      const dim = caps.dimensions.find((d) => d.id === id);
+                      return (
+                        <li key={id} className="grid grid-cols-[20px_1fr] gap-2 text-[12px] text-ink-soft">
+                          <span className="tabular text-[10.5px] text-ink-faint">{String(i + 1).padStart(2, "0")}</span>
+                          <span>{dim?.label ?? id}</span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">Approval gate</p>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">{caps.plan.approvalGate}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">Verification</p>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">{caps.plan.verification}</p>
+                  </div>
+                </div>
+              </div>
+              {caps.plan.exclusions.length > 0 && (
+                <div className="mt-4 border-t border-edge pt-3">
+                  <p className="text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">Not in this plan</p>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">{caps.plan.exclusions.join(" · ")}</p>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="mt-3 text-[12px] text-ink-faint">No capability matrix has been built for this Mind yet.</p>
+        )}
+      </section>
+
       {/* Shared foundation */}
-      <section className="mt-12 border-t border-edge pt-8" aria-labelledby="pipeline">
+      <section className="mt-10 border-t border-edge pt-8" aria-labelledby="pipeline">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h2 id="pipeline" className="x-label !mt-0">The run every Mind shares</h2>
           <Link href="/minds#foundation" className="text-[11.5px] text-teal hover:underline">
@@ -168,10 +288,7 @@ export default async function MindProfilePage({ params }: Params) {
             <li key={stage.id} className="bg-panel px-4 py-3.5">
               <p className="flex items-center gap-2 text-[11px] uppercase tracking-[0.1em] text-ink-faint">
                 <span className="tabular">{String(i + 1).padStart(2, "0")}</span>
-                <span
-                  aria-hidden
-                  className={`size-1.5 rounded-full ${stage.state === "ready" ? "bg-teal" : "bg-amber"}`}
-                />
+                <span aria-hidden className={`size-1.5 rounded-full ${stage.state === "ready" ? "bg-teal" : "bg-amber"}`} />
                 {stage.state === "ready" ? "Ready" : "Partial"}
               </p>
               <p className="mt-1.5 text-[12.5px] font-medium text-ink">{stage.name}</p>

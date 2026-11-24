@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { MINDS, MIND_STATUS_LABEL, mindIndex, mindsByStatus } from "@/lib/minds/registry";
+import { CAPABILITIES } from "@/lib/minds/capabilities";
 import { MIND_FOUNDATION } from "@/lib/minds/foundation";
 import { MindStatusChip } from "@/components/minds/status-chip";
 
@@ -42,10 +43,12 @@ export default function MindsPage() {
           <span aria-hidden className="size-1.5 rounded-full bg-amber" />
           {inDevelopment.length} in development
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="size-1.5 rounded-full bg-ink-faint/50" />
-          {planned.length} planned
-        </span>
+        {planned.length > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="size-1.5 rounded-full bg-ink-faint/50" />
+            {planned.length} planned
+          </span>
+        )}
       </div>
 
       {/* Available */}
@@ -98,57 +101,68 @@ export default function MindsPage() {
         <section className="mt-10" aria-label="Minds in development">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="x-label !mt-0">In development</h2>
-            <span className="text-[11px] text-ink-faint">Definition complete · no launch yet</span>
+            <span className="text-[11px] text-ink-faint">Verified routes · no executor yet</span>
           </div>
           <div className="mt-2 border-t border-edge">
-            {inDevelopment.map((mind) => (
-              <Link
-                key={mind.slug}
-                href={`/minds/${mind.slug}`}
-                className="group flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-edge py-4 transition-colors hover:bg-panel/50 sm:px-1"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-[14.5px] font-medium text-ink transition-colors group-hover:text-teal">
-                      {mind.name}
+            {inDevelopment.map((mind) => {
+              const dims = CAPABILITIES[mind.slug]?.dimensions ?? [];
+              const routes = dims.filter((d) => d.status !== "gap").length;
+              const gaps = dims.filter((d) => d.status === "gap").length;
+              return (
+                <Link
+                  key={mind.slug}
+                  href={`/minds/${mind.slug}`}
+                  className="group flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-edge py-4 transition-colors hover:bg-panel/50 sm:px-1"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="text-[14.5px] font-medium text-ink transition-colors group-hover:text-teal">
+                        {mind.name}
+                      </span>
                     </span>
-                    <MindStatusChip status={mind.status} />
+                    <span className="mt-1 block max-w-[72ch] text-[12.5px] leading-relaxed text-ink-soft">
+                      {mind.summary}
+                    </span>
                   </span>
-                  <span className="mt-1 block max-w-[72ch] text-[12.5px] leading-relaxed text-ink-soft">
-                    {mind.summary}
+                  <span className="text-right text-[11px] leading-relaxed text-ink-faint">
+                    <span className="block">{mind.domain}</span>
+                    <span className="tabular mt-0.5 block">
+                      {routes} routes · {gaps} {gaps === 1 ? "gap" : "gaps"}
+                    </span>
                   </span>
-                </span>
-                <span className="text-[11px] text-ink-faint">{mind.domain}</span>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         </section>
       )}
 
       {/* Planned */}
-      <section className="mt-10" aria-label="Planned Minds">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="x-label !mt-0">Planned</h2>
-          <span className="text-[11px] text-ink-faint">Domains defined · not built</span>
-        </div>
-        <div className="mt-2 grid border-t border-edge sm:grid-cols-2 sm:gap-x-8">
-          {planned.map((mind) => (
-            <Link
-              key={mind.slug}
-              href={`/minds/${mind.slug}`}
-              className="group flex items-baseline gap-3 border-b border-edge py-3 transition-colors hover:bg-panel/50 sm:px-1"
-            >
-              <span className="tabular w-5 shrink-0 text-[10.5px] text-ink-faint">{mindIndex(mind.slug)}</span>
-              <span className="min-w-0">
-                <span className="block text-[13.5px] text-ink transition-colors group-hover:text-teal">
-                  {mind.name}
+      {planned.length > 0 && (
+        <section className="mt-10" aria-label="Planned Minds">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="x-label !mt-0">Planned</h2>
+            <span className="text-[11px] text-ink-faint">Domains defined · not built</span>
+          </div>
+          <div className="mt-2 grid border-t border-edge sm:grid-cols-2 sm:gap-x-8">
+            {planned.map((mind) => (
+              <Link
+                key={mind.slug}
+                href={`/minds/${mind.slug}`}
+                className="group flex items-baseline gap-3 border-b border-edge py-3 transition-colors hover:bg-panel/50 sm:px-1"
+              >
+                <span className="tabular w-5 shrink-0 text-[10.5px] text-ink-faint">{mindIndex(mind.slug)}</span>
+                <span className="min-w-0">
+                  <span className="block text-[13.5px] text-ink transition-colors group-hover:text-teal">
+                    {mind.name}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11px] text-ink-faint">{mind.domain}</span>
                 </span>
-                <span className="mt-0.5 block truncate text-[11px] text-ink-faint">{mind.domain}</span>
-              </span>
-            </Link>
-          ))}
-        </div>
-      </section>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Shared foundation */}
       <section id="foundation" className="mt-12 scroll-mt-20 border-t border-edge pt-8" aria-label="Shared foundation">
