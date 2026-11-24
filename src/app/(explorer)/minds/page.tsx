@@ -191,9 +191,9 @@ export default function MindsPage() {
       </section>
 
       <p className="mt-8 text-[11px] leading-relaxed text-ink-faint">
-        {MINDS.length} specialists defined. Statuses reflect what runs in this deployment — a Mind marked{" "}
-        {MIND_STATUS_LABEL.in_development.toLowerCase()} or {MIND_STATUS_LABEL.planned.toLowerCase()} cannot be
-        launched.
+        {MINDS.length} specialists defined. Statuses reflect what has a product launch path in this deployment — a
+        Mind marked {MIND_STATUS_LABEL.in_development.toLowerCase()} or {MIND_STATUS_LABEL.planned.toLowerCase()} has
+        no launch action, though its verified dimensions can be exercised through the capability API.
       </p>
     </div>
   );
