@@ -1311,7 +1311,7 @@ export function readinessFor(slug: string, status: MindStatus): MindCapabilities
 
 export const READINESS_LABEL: Record<MindCapabilities["readiness"], string> = {
   operational: "Operational",
-  partial_coverage: "Coverage verified · execution not wired",
+  partial_coverage: "Partial coverage · no launch path",
   definition_only: "Definition only",
 };
 

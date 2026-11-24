@@ -101,7 +101,7 @@ export default function MindsPage() {
         <section className="mt-10" aria-label="Minds in development">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="x-label !mt-0">In development</h2>
-            <span className="text-[11px] text-ink-faint">Verified routes · no executor yet</span>
+            <span className="text-[11px] text-ink-faint">Verified routes · no launch path</span>
           </div>
           <div className="mt-2 border-t border-edge">
             {inDevelopment.map((mind) => {

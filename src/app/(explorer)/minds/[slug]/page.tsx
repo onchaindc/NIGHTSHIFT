@@ -149,8 +149,9 @@ export default async function MindProfilePage({ params }: Params) {
             ) : (
               <div className="mt-4 rounded-lg border border-dashed border-edge bg-panel-2 px-3 py-2.5">
                 <p className="text-[11.5px] leading-relaxed text-ink-faint">
-                  This Mind is not operational. There is no launch action because no investigation executor exists
-                  yet — not because it is hidden.
+                  This Mind is not operational. There is no launch action because coverage is incomplete and no paid
+                  answer has been verified for it; the shared capability API can still execute its verified
+                  dimensions.
                 </p>
               </div>
             )}
