@@ -374,6 +374,7 @@ export async function executeCapabilityReport(
       receive: capabilityDeps.receive,
       now: capabilityDeps.now,
       event: (type, message, data) => event(task, type, message, data),
+      persist: () => saveTask(task),
     });
   }
 }

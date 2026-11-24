@@ -36,7 +36,7 @@ import {
   type MindsClient,
 } from "@animocabrands/minds-client-lib";
 
-import { MINDS_BUILDER_ENDPOINT, type MindNotifyResult } from "./builder";
+import { MINDS_BUILDER_ENDPOINT, mindsBuilderAlias, type MindNotifyResult } from "./builder";
 import type { ExecutionEventType, TaskRecord } from "@/lib/engine/types";
 
 /** The Mind's reply, verbatim, with its conversation coordinates. */
@@ -276,6 +276,58 @@ export async function collectMindReply(request: {
   }
 }
 
+/**
+ * Locate THIS task's delivered report row in the conversation transcript and
+ * attribute its reply correctly. The report message embeds "Task: <uuid>";
+ * the reply is the first usable Mind row between that report and the next
+ * outbound message. A fingerprint-window walk alone cannot tell interleaved
+ * reports apart (several reports can land within seconds of each other), so
+ * attribution is anchored on the report row itself. Also rebuilds the
+ * delivery record when the live-send record was never persisted (observed on
+ * serverless: the in-memory assignment died with the invocation before any
+ * later save).
+ */
+export async function findDeliveredReport(request: {
+  taskId: string;
+  alias?: string;
+}): Promise<{ record: MindsDeliveryRecord; reply: MindsReply | null } | null> {
+  const alias = request.alias ?? mindsBuilderAlias();
+  const client = mindsReceiveDeps.client();
+  if (!alias || !client) return null;
+  const history = await client.getHistory(alias, { limit: 50 });
+  // Newest-first; the report message embeds "Task: <full uuid>".
+  const reportIdx = history.findIndex((r) => (r.messageText ?? "").includes(`Task: ${request.taskId}`));
+  if (reportIdx < 0) return null;
+  const reportRow = history[reportIdx];
+  const fingerprintBefore = reportIdx + 1 < history.length ? history[reportIdx + 1].fingerprint : undefined;
+  // Walk the newer rows (indices below the report) until the next outbound
+  // message: the first usable Mind row in between is this report's reply.
+  let reply: MindsReply | null = null;
+  for (let i = reportIdx - 1; i >= 0; i--) {
+    const row = history[i];
+    if (row.senderType === 1) break;
+    if (usableMindRow(row)) {
+      reply = toReply(row, mindsReceiveDeps.now());
+      break;
+    }
+  }
+  const record: MindsDeliveryRecord = {
+    alias,
+    endpoint: MINDS_BUILDER_ENDPOINT,
+    sentAt: reportRow.createdAt ? Date.parse(reportRow.createdAt) || mindsReceiveDeps.now() : mindsReceiveDeps.now(),
+    status: reply ? "reply_received" : "reply_timeout",
+    sendDetail: "delivery record reconstructed from the conversation transcript",
+  };
+  if (fingerprintBefore) record.fingerprintBeforeSend = fingerprintBefore;
+  if (reply) {
+    record.reply = reply;
+    record.replySource = "deferred_collect";
+  } else {
+    record.replyErrorDetail = "no Mind reply found between this report and the next transcript message";
+  }
+  return { record, reply };
+}
+
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}… (truncated — the full text is in the delivery record)` : text;
 }
@@ -301,8 +353,10 @@ export async function awaitAndRecordMindReply(args: {
   receive?: (request: ReplyRequest) => Promise<ReplyOutcome>;
   now: () => number;
   event: (type: ExecutionEventType, message: string, data?: Record<string, unknown>) => Promise<void>;
+  /** Called after the record is assigned: the caller's sequential task save. */
+  persist?: () => Promise<void>;
 }): Promise<void> {
-  const { task, notify, alias, fingerprintBefore, sentMessageText, receive, now, event } = args;
+  const { task, notify, alias, fingerprintBefore, sentMessageText, receive, now, event, persist } = args;
   if (!notify.ok) return;
 
   const record: MindsDeliveryRecord = {
@@ -346,5 +400,12 @@ export async function awaitAndRecordMindReply(args: {
     if (outcome.status === "not_configured") record.replyErrorDetail = outcome.detail;
   }
 
-  if (task.result) task.result.mindsDelivery = record;
+  if (task.result) {
+    task.result.mindsDelivery = record;
+    // The record is assigned after the awaited event-saves above; without an
+    // explicit sequential persist here it never reaches the store (observed
+    // on serverless: the in-memory task dies with the invocation) and the
+    // deferred collect later finds no delivery record.
+    if (persist) await persist();
+  }
 }

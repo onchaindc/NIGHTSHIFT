@@ -450,5 +450,6 @@ export async function executeMindReport(task: TaskRecord, stepTarget: string | u
     receive: (request) => mindDeps.receive(request),
     now: mindDeps.now,
     event: (type, message, data) => event(task, type, message, data),
+    persist: () => saveTask(task),
   });
 }
