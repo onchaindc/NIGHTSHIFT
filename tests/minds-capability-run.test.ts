@@ -177,10 +177,11 @@ describe("capability run executor", () => {
     const verify = vi.fn(async () => ({
       kind: "verified",
       signalHash: "0xsignal",
-      record: { payload: { response: { price_usd: 64000, hashprice_sats_per_ph_day: 50000, hashrate_eh_s: 700 } } },
+      record: { payload: { response: { data: { amount: 64000 }, hashprice_sats_per_ph_day: 50000, hashrate_eh_s: 700 } } },
       note: "re-derived",
     }) as VerifyOutcome);
-    setCapabilityDeps(fakeDeps({ execute, verify }));
+    const notify = vi.fn(async () => ({ ok: true, detail: "accepted" }));
+    setCapabilityDeps(fakeDeps({ execute, verify, notify }));
 
     const plan = planCapabilityRun("bitcoin-mining-intelligence", inputsFor("bitcoin-mining-intelligence"), "intel");
     const task = taskFor(plan);
@@ -197,6 +198,12 @@ describe("capability run executor", () => {
     expect(task.state).toBe("completed");
     expect(task.result?.capabilityReport?.counts.verified).toBe(3);
     expect(task.result?.evidence.length).toBe(6);
+    expect(task.result?.bitcoinMiningReport?.gaps.map((g) => g.dimension)).toEqual([
+      "pool_concentration",
+      "fleet_uptime",
+    ]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(task.events.some((e) => e.type === "delivery_succeeded")).toBe(true);
   });
 
   it("does not mark a recorded signal as verified", async () => {

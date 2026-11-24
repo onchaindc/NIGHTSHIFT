@@ -63,24 +63,26 @@ Report     →  reasoned report with the with/without-Telegraph comparison,
   fields intelligence added, what stayed unknown, which conflicts remain
   unresolved, and the verified cost.
 
-### Minds (Animoca) integration — verified surface only
+### Minds (Animoca) integration — official Builder API
 
-Verified as of 2026-11-23 and used, without invention:
+Verified 2026-11-24 from the official builder documentation and live host:
 
-- Minds by Animoca Brands (`hellominds.ai`) is a persistent agentic AI platform;
-  capabilities extend through the Bazaar as "Tools (API-connected apps)" — the
-  pattern the investigations endpoint implements.
-- Builder API keys come from `build.hellominds.ai/console` and travel as the
-  `X-Builder-Api-Key` header (deprecated `X-Access-Key` may accompany).
+- Base host `api.build.hellominds.ai`; auth uses `X-Api-Key` with a Builder API
+  key from `build.hellominds.ai/console` (OAuth access tokens use
+  `Authorization: Bearer`). `X-Access-Key` and `X-Builder-Api-Key` are not sent.
+- A stable alias must be bound to a Mind first, with
+  `POST /v1/messaging/conversation` or `minds chat create`.
+- Sending is `POST /v1/messaging/message` with `{ alias, messageText }`.
+  There is no guessed path and no mocked delivery.
 
-Deliberately NOT implemented because it cannot be verified today: the exact
-Builder API messaging paths. The June-2026 documented surface ("list Minds /
-send message / SSE", spec at `/docs/openapi.json`) now returns 404, and the
-official npm client is unlicensed. Outbound report delivery therefore runs
-only when the operator supplies both `MINDS_BUILDER_API_KEY` and the full
-`MINDS_BUILDER_SEND_URL`; otherwise delivery is skipped and reported honestly.
-The path to full messaging access is the builder programme
-(`build.hellominds.ai/program`) — a human step, not a code change.
+Outbound report delivery is environment-gated: set `MINDS_BUILDER_API_KEY` and
+`MINDS_BUILDER_ALIAS` (already bound to a Mind). Without both, delivery is
+skipped and reported honestly. `MINDS_BUILDER_SEND_URL` is only an optional
+proxy/enterprise override. A live unauthenticated POST returns the API's
+structured auth-required error, which verifies the route and auth boundary;
+no message has been delivered from this workspace because no key is configured.
+
+Docs: https://build.hellominds.ai/docs/get-started/client-library
 
 ## Storage
 

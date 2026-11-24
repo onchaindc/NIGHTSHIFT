@@ -29,6 +29,8 @@ import {
   type MindCoverageProbe,
 } from "@/lib/minds/capability-runner";
 import type { CapabilityRunConfig } from "@/lib/minds/capability-plan";
+import { BITCOIN_MINING_SLUG } from "@/lib/bitcoinmining/intel";
+import { buildBitcoinMiningReport } from "@/lib/bitcoinmining/report";
 
 /* ------------------------------------------------------------------ */
 /* Injectable deps (tests override; production uses the real rails)    */
@@ -45,6 +47,7 @@ export function resetCapabilityDeps(): void {
   capabilityDeps.probe = real.probe;
   capabilityDeps.execute = real.execute;
   capabilityDeps.verify = real.verify;
+  capabilityDeps.notify = real.notify;
   capabilityDeps.now = real.now;
 }
 
@@ -245,6 +248,18 @@ export async function executeCapabilityReport(
     spendUsdCents,
   });
 
+  const bitcoinReport =
+    config.slug === BITCOIN_MINING_SLUG
+      ? buildBitcoinMiningReport({
+          mode: config.mode,
+          inputs: config.inputs,
+          committed,
+          preparedAt: new Date(capabilityDeps.now()).toISOString(),
+          spendUsdCents,
+          capabilityReport: report,
+        })
+      : undefined;
+
   if (config.mode === "free" && task.spend.entries.length > 0) {
     throw new Error("free-mode capability run recorded spend entries — impossible by construction");
   }
@@ -280,9 +295,20 @@ export async function executeCapabilityReport(
     { kind: "telegraph_receipt" as const, receiptHash: c.receiptHash, amountUsdCents: c.costUsdCents },
   ]);
 
+  if (bitcoinReport) {
+    const f = bitcoinReport.findings;
+    parts.push(
+      `Mining findings: hashprice ${f.hashpriceUsdPerPhDay === null ? "unavailable" : `$${f.hashpriceUsdPerPhDay.toFixed(2)}/PH/day (${f.hashpriceUsdBasis === "derived_from_btc" ? "derived from committed sats × committed BTC" : "provider"})`}, BTC ${f.btcPriceUsd === null ? "unavailable" : `$${f.btcPriceUsd.toLocaleString("en-US")}`}, ERCOT ${f.energyZone ?? "zone"} ${f.lmpUsdPerMwh === null ? "unavailable" : `$${f.lmpUsdPerMwh.toFixed(2)}/MWh`}${bitcoinReport.breakEven ? `, break-even ${bitcoinReport.breakEven.efficiencyJPerTh.toFixed(1)} J/TH` : ""}.`,
+      bitcoinReport.alignment.aligned
+        ? "Timestamps are aligned for an operational read."
+        : "Timestamp alignment is not clean; read the explicit alignment notes before treating this as a current operating picture.",
+    );
+  }
+
   task.result = {
     summary: parts.join("\n"),
     capabilityReport: report,
+    bitcoinMiningReport: bitcoinReport,
     evidence,
     completedAt: capabilityDeps.now(),
   };
@@ -291,4 +317,35 @@ export async function executeCapabilityReport(
   guardedTransition(task, "completed");
   await event(task, "task_completed", "Capability run complete.", { confidence, verified, gaps: report.counts.gap });
   await event(task, "capability_report_ready", `Report recorded for ${config.slug}: ${verified} verified, ${report.counts.gap} unsupported.`);
+
+  // Bitcoin Mining Intelligence is the first Mind wired for report delivery to
+  // Minds by Animoca Brands. Delivery is environment-gated, best-effort, and
+  // recorded as skipped when the key or a bound alias is absent. A failed
+  // delivery never changes the investigation result.
+  if (bitcoinReport && config.mode === "intel" && capabilityDeps.notify) {
+    const objective = bitcoinReport.objective
+      ? `Bitcoin mining economics · block ${bitcoinReport.objective.blockHeight} · ${bitcoinReport.objective.zone} · ${bitcoinReport.objective.intervalStart}`
+      : `Bitcoin mining economics · ${config.slug}`;
+    const delivery = await capabilityDeps.notify({
+      task: {
+        id: task.id,
+        goal: task.goal,
+        state: task.state,
+        summary: task.result?.summary,
+      },
+      report: {
+        objective,
+        confidence,
+        intelUsed: true,
+        reasoning: parts,
+      },
+    });
+    await event(
+      task,
+      delivery.ok ? "delivery_succeeded" : "delivery_skipped",
+      delivery.ok
+        ? `Bitcoin mining report delivered to the connected Mind (${delivery.detail}).`
+        : `Minds delivery skipped: ${delivery.detail}`,
+    );
+  }
 }

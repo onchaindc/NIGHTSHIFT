@@ -9,6 +9,7 @@ const ROUTES: Array<{ path: string; priority: number }> = [
   { path: "/terminal", priority: 0.9 },
   { path: "/minds", priority: 0.9 },
   { path: "/minds/counterparty", priority: 0.9 },
+  { path: "/minds/bitcoin-mining", priority: 0.9 },
   // Every Mind profile is public; only available Minds outrank the catalogue's
   // supporting pages, because the rest are product definitions, not tools.
   ...MINDS.map((mind) => ({

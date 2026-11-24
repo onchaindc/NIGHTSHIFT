@@ -173,6 +173,8 @@ export interface TaskResult {
   indexDeskReport?: IndexDeskReport;
   /** A completed generic capability report for a Mind (probe/paid/mixed). */
   capabilityReport?: import("@/lib/minds/capability-runner").CapabilityReport;
+  /** The Bitcoin Mining Intelligence product report, derived from committed answers. */
+  bitcoinMiningReport?: import("@/lib/bitcoinmining/report").BitcoinMiningReport;
 }
 
 export type Evidence =
