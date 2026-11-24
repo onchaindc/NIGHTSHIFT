@@ -78,6 +78,8 @@ export type ExecutionEventType =
   // Two-way Minds round trip (report delivered, Mind reply received/pending/failed)
   | "mind_reply_received"
   | "mind_reply_pending"
+  | "mind_reply_corrected"
+  | "approval_drift_repark"
   | "mind_reply_error";
 
 export interface ExecutionEvent {
@@ -409,7 +411,9 @@ export const ALLOWED_TRANSITIONS: Record<TaskState, TaskState[]> = {
   created: ["planning", "blocked", "failed"],
   planning: ["awaiting_approval", "executing", "blocked", "failed"],
   awaiting_approval: ["executing", "rejected"],
-  executing: ["verifying", "failed", "blocked"],
+  // executing → awaiting_approval: a drifted live offer re-parks the task at
+  // the approval gate (never sign silently a rail the human did not approve).
+  executing: ["verifying", "awaiting_approval", "failed", "blocked"],
   verifying: ["completed", "failed"],
   completed: [],
   failed: [],

@@ -202,8 +202,9 @@ export function decodeChallenge(headerValue: string | null): TelegraphChallenge 
  */
 export function exactEvmOffer(a:
   | TelegraphChallenge
-  | null): { scheme: string; network: string; asset?: string; payTo?: string; amountCents: number } | null {
-  const evm = a?.accepts?.find((x) => x.scheme === "exact" && x.network?.startsWith("eip155:"));
+  | null, preferNetwork?: string): { scheme: string; network: string; asset?: string; payTo?: string; amountCents: number } | null {
+  const exactEntries = a?.accepts?.filter((x) => x.scheme === "exact" && x.network?.startsWith("eip155:")) ?? [];
+  const evm = (preferNetwork ? exactEntries.find((x) => x.network === preferNetwork) : undefined) ?? exactEntries[0];
   if (!evm) { return null; }
   let amountCents: number | null = null;
   if (evm.amount) {

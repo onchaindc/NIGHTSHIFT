@@ -294,7 +294,7 @@ export async function findDeliveredReport(request: {
   const alias = request.alias ?? mindsBuilderAlias();
   const client = mindsReceiveDeps.client();
   if (!alias || !client) return null;
-  const history = await client.getHistory(alias, { limit: 50 });
+  const history = await client.getHistory(alias, { limit: 200 });
   // Newest-first; the report message embeds "Task: <full uuid>".
   const reportIdx = history.findIndex((r) => (r.messageText ?? "").includes(`Task: ${request.taskId}`));
   if (reportIdx < 0) return null;
