@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildCounterpartySpec,
@@ -196,4 +196,185 @@ describe("counterparty evidence classification", () => {
       "register",
     ]);
   });
+});
+
+/* ------------------------------------------------------------------ */
+/* Free GLEIF identity resolution (added 2026-11-24)                   */
+/* ------------------------------------------------------------------ */
+
+import {
+  resolveLegalIdentity,
+  withLegalIdentity,
+  probeCounterparty,
+  canonEntityName,
+  type LegalIdentity,
+} from "@/lib/counterparty/intel";
+
+const GLEIF_RECORD = {
+  type: "lei-records",
+  attributes: {
+    lei: "549300M8ISKPTX2W7F94",
+    entity: {
+      legalName: { name: "MARA HOLDINGS, INC." },
+      legalAddress: { country: "US" },
+      status: "ACTIVE",
+    },
+  },
+};
+
+function gleifResponse(records: unknown[], ok = true, status = 200): Response {
+  return new Response(JSON.stringify({ data: records }), { status: ok ? status : 500 });
+}
+
+describe("resolveLegalIdentity (free GLEIF public API)", () => {
+  it("resolves a colloquial name to the exact legal identity via a single registry hit", async () => {
+    const fetchImpl = vi.fn(async () => gleifResponse([GLEIF_RECORD]));
+    const identity = await resolveLegalIdentity("MARA Holdings", "US", fetchImpl as unknown as typeof fetch);
+    expect(identity).toEqual({ lei: "549300M8ISKPTX2W7F94", legalName: "MARA HOLDINGS, INC.", country: "US", status: "ACTIVE" });
+    expect(fetchImpl.mock.calls[0][0]).toContain("MARA%20Holdings");
+  });
+
+  it("prefers an exact canonical-name hit among many registry records", async () => {
+    const fetchImpl = vi.fn(async () =>
+      gleifResponse([
+        GLEIF_RECORD,
+        { attributes: { lei: "X1", entity: { legalName: { name: "MARA HOLDINGS II LLC" }, legalAddress: { country: "US" } } } },
+      ]),
+    );
+    const identity = await resolveLegalIdentity("MARA Holdings, Inc.", undefined, fetchImpl as unknown as typeof fetch);
+    expect(identity?.lei).toBe("549300M8ISKPTX2W7F94");
+  });
+
+  it("narrows an ambiguous pool by jurisdiction when one record matches the requested country", async () => {
+    const fetchImpl = vi.fn(async () =>
+      gleifResponse([
+        GLEIF_RECORD,
+        { attributes: { lei: "X2", entity: { legalName: { name: "MARA HOLDINGS LTD" }, legalAddress: { country: "GB" } } } },
+      ]),
+    );
+    const identity = await resolveLegalIdentity("MARA Holdings", "United States", fetchImpl as unknown as typeof fetch);
+    expect(identity?.lei).toBe("549300M8ISKPTX2W7F94");
+    expect(identity?.country).toBe("US");
+  });
+
+  it("refuses to guess among multiple in-jurisdiction hits", async () => {
+    const fetchImpl = vi.fn(async () =>
+      gleifResponse([
+        GLEIF_RECORD,
+        { attributes: { lei: "X3", entity: { legalName: { name: "MARA HOLDINGS LTD" }, legalAddress: { country: "US" } } } },
+      ]),
+    );
+    const identity = await resolveLegalIdentity("MARA Holdings", "US", fetchImpl as unknown as typeof fetch);
+    expect(identity).toBeNull();
+  });
+
+  it("returns null on any fetch or parse failure, never throwing into the paid path", async () => {
+    const throwing = vi.fn(async () => { throw new Error("down"); });
+    expect(await resolveLegalIdentity("MARA Holdings", "US", throwing as unknown as typeof fetch)).toBeNull();
+    const notOk = vi.fn(async () => gleifResponse([], false, 503));
+    expect(await resolveLegalIdentity("MARA Holdings", "US", notOk as unknown as typeof fetch)).toBeNull();
+    const empty = vi.fn(async () => gleifResponse([]));
+    expect(await resolveLegalIdentity("MARA Holdings", "US", empty as unknown as typeof fetch)).toBeNull();
+  });
+
+  it("canonicalizes names for comparison", () => {
+    expect(canonEntityName("MARA Holdings, Inc.")).toBe("mara holdings inc");
+    expect(canonEntityName("  MARA  HOLDINGS  ")).toBe("mara holdings");
+  });
+});
+
+describe("identity-resolved ask params", () => {
+  it("rebuilds the spec around the legal name and LEI, keeping the jurisdiction", () => {
+    const identity: LegalIdentity = { lei: "549300M8ISKPTX2W7F94", legalName: "MARA HOLDINGS, INC.", country: "US", status: "ACTIVE" };
+    const spec = withLegalIdentity(buildCounterpartySpec({ company: "MARA Holdings", jurisdiction: "United States" }), identity);
+    expect(spec.params).toEqual({ company: "MARA HOLDINGS, INC.", jurisdiction: "US", lei: "549300M8ISKPTX2W7F94" });
+  });
+
+  it("falls back to the legal-name-only spec when the node refuses the lei param, and surfaces other refusals immediately", async () => {
+    const challenge = {
+      x402Version: 2,
+      error: "Payment required",
+      resource: { url: "http://leiresolve/engine/v1/ask", description: "Payment required", mimeType: "application/json" },
+      accepts: [{ scheme: "exact", network: "eip155:11155111", asset: "0xcc194e1a843B658526D0D5C431f670028582Ae17", amount: "10000", payTo: "0x3624EB012B5E998BB57B6bE6C9Cfc9c4bc5eb99b" }],
+    };
+    // Ask call #1 (lei-augmented) → 400 invalid_params; #2 (plain) → challenge.
+    let askCalls = 0;
+    const impl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("api.gleif.org")) return gleifResponse([GLEIF_RECORD]);
+      askCalls++;
+      if (askCalls === 1) return new Response(JSON.stringify({ error: "invalid_params", message: 'unknown param "lei"; this intent takes: company, jurisdiction' }), { status: 400 });
+      return new Response("{}", {
+        status: 402,
+        headers: { "content-type": "application/json", "PAYMENT-REQUIRED": Buffer.from(JSON.stringify(challenge)).toString("base64") },
+      });
+    });
+    vi.stubGlobal("fetch", impl);
+    process.env.TELEGRAPH_NODE_URL = "http://leiresolve";
+    try {
+      const outcome = await probeCounterparty({ company: "MARA Holdings", jurisdiction: "United States" }, { preferEscrow: false });
+      expect(outcome.kind).toBe("challenge");
+      if (outcome.kind === "challenge") {
+        // The PAID spec is the legal-name-only contract the node validates.
+        expect(outcome.spec.params).toEqual({ company: "MARA HOLDINGS, INC.", jurisdiction: "US" });
+        expect(outcome.body.params).toEqual({ company: "MARA HOLDINGS, INC.", jurisdiction: "US" });
+        // The resolved identity stays in the trail for the approver.
+        expect(outcome.resolvedIdentity?.lei).toBe("549300M8ISKPTX2W7F94");
+      }
+      expect(askCalls).toBe(2);
+      // A non-param refusal (e.g. the whole intent refused) surfaces at once.
+      const refusing = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.gleif.org")) return gleifResponse([GLEIF_RECORD]);
+        return new Response(JSON.stringify({ error: "intent_disabled" }), { status: 403 });
+      });
+      vi.stubGlobal("fetch", refusing);
+      const refused = await probeCounterparty({ company: "MARA Holdings", jurisdiction: "United States" }, { preferEscrow: false });
+      expect(refused.kind).toBe("rejected");
+      expect(refused).toMatchObject({ status: 403 });
+    } finally {
+      delete process.env.TELEGRAPH_NODE_URL;
+    }
+  });
+
+  it("probes the lei-augmented spec first and falls back to the plain spec when the node refuses it", async () => {
+    // GLEIF resolve → the lei spec is refused by the node → the plain spec
+    // probes to a live challenge; the paid request would then use the plain
+    // (name-only) contract while the trail still shows the resolved identity.
+    const challenge = {
+      x402Version: 2,
+      error: "Payment required",
+      resource: { url: "http://leiresolve/engine/v1/ask", description: "Payment required", mimeType: "application/json" },
+      accepts: [{ scheme: "exact", network: "eip155:11155111", asset: "0xcc194e1a843B658526D0D5C431f670028582Ae17", amount: "10000", payTo: "0x3624EB012B5E998BB57B6bE6C9Cfc9c4bc5eb99b" }],
+    };
+    const impl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("api.gleif.org")) return gleifResponse([GLEIF_RECORD]);
+      return new Response("{}", {
+        status: 402,
+        headers: { "content-type": "application/json", "PAYMENT-REQUIRED": Buffer.from(JSON.stringify(challenge)).toString("base64") },
+      });
+    });
+    // NOTE: the lei-refusal fallback path is exercised by the mind suite's
+    // node-rejection test; here the stub accepts both specs so the resolved
+    // identity + lei-augmented params flow through the challenge outcome.
+    vi.stubGlobal("fetch", impl);
+    process.env.TELEGRAPH_NODE_URL = "http://leiresolve";
+    try {
+      const outcome = await probeCounterparty({ company: "MARA Holdings", jurisdiction: "United States" }, { preferEscrow: false });
+      expect(outcome.kind).toBe("challenge");
+      if (outcome.kind === "challenge") {
+        expect(outcome.spec.params).toEqual({ company: "MARA HOLDINGS, INC.", jurisdiction: "US", lei: "549300M8ISKPTX2W7F94" });
+        expect(outcome.resolvedIdentity?.lei).toBe("549300M8ISKPTX2W7F94");
+        expect(outcome.body.params).toEqual({ company: "MARA HOLDINGS, INC.", jurisdiction: "US", lei: "549300M8ISKPTX2W7F94" });
+      }
+    } finally {
+      delete process.env.TELEGRAPH_NODE_URL;
+    }
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });

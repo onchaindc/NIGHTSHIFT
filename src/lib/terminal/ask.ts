@@ -324,7 +324,7 @@ export type ExecuteOutcome =
   | { kind: "refused"; reason: string; fresh?: ProbeOutcome }
   | { kind: "unpaid_rejected"; status: number; body: Record<string, unknown> | null }
   | { kind: "payment_rejected"; detail: string }
-  | { kind: "failed"; status?: number; detail: string }
+  | { kind: "failed"; status?: number; detail: string; paymentSettled?: boolean }
   | { kind: "integrity"; detail: string };
 
 /**
@@ -531,7 +531,10 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    return { kind: "failed", status: res.status, detail: `The paid request failed after settlement may have begun: HTTP ${res.status} ${text.slice(0, 300)}` };
+    // A non-402 error AFTER the signed payload means the x402 layer already
+    // processed past payment verification: settlement may have begun. The
+    // caller books the approved amount conservatively when this flag is set.
+    return { kind: "failed", status: res.status, paymentSettled: true, detail: `The paid request failed after settlement may have begun: HTTP ${res.status} ${text.slice(0, 300)}` };
   }
 
   const parsed = (await res.json().catch(() => null)) as Record<string, unknown> | null;

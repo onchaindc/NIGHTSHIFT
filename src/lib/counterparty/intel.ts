@@ -162,6 +162,85 @@ export function buildCounterpartySpec(req: CounterpartyRequest): AskRequestSpec 
   return { intent: COUNTERPARTY_INTENT, params, minerId: COUNTERPARTY_PRIMARY_MINER };
 }
 
+/* ------------------------------------------------------------------ */
+/* Free legal-identity resolution (GLEIF public API)                   */
+/* ------------------------------------------------------------------ */
+
+/** The exact legal identity, resolved on GLEIF's free public registry. */
+export interface LegalIdentity {
+  lei: string;
+  legalName: string;
+  country: string;
+  status: string;
+}
+
+/**
+ * Resolve the colloquial company name the user typed into the EXACT legal
+ * identity the paid miner's matcher requires ("MARA Holdings" → "MARA
+ * HOLDINGS, INC.", LEI 549300M8ISKPTX2W7F94). Observed live 2026-11-24: the
+ * miner 404s ("no exact GLEIF legal-identity match in the requested
+ * jurisdiction; absence is not an inactive verdict") when sent a colloquial
+ * name, and the request still settles — so the identity is resolved for FREE
+ * before anything is paid. Deterministic: an exact canonical-name hit wins;
+ * otherwise a single in-jurisdiction hit is accepted; anything ambiguous or
+ * empty returns null and the ask is sent as the user wrote it (the miner's
+ * own verdict is then about the registry, not about our guesswork). Never
+ * throws: any failure returns null and the paid path proceeds unchanged.
+ */
+export async function resolveLegalIdentity(
+  company: string,
+  jurisdiction: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LegalIdentity | null> {
+  const name = company.trim();
+  if (!name) return null;
+  try {
+    const url = `https://api.gleif.org/api/v1/lei-records?filter%5Bentity.legalName%5D=${encodeURIComponent(name)}&page%5Bsize%5D=10`;
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(8000), cache: "no-store" });
+    if (!res.ok) return null;
+    const parsed = (await res.json().catch(() => null)) as {
+      data?: Array<{
+        attributes?: {
+          lei?: string;
+          entity?: { legalName?: { name?: string }; legalAddress?: { country?: string }; status?: string };
+        };
+      }>;
+    } | null;
+    const records: Array<{ lei: string; legalName: string; country: string; status: string }> = [];
+    for (const r of parsed?.data ?? []) {
+      const a = r.attributes;
+      if (!a?.lei || !a.entity?.legalName?.name || !a.entity?.legalAddress?.country) continue;
+      records.push({ lei: a.lei, legalName: a.entity.legalName.name, country: a.entity.legalAddress.country, status: a.entity.status ?? "" });
+    }
+    if (!records.length) return null;
+    const target = canonEntityName(name);
+    const wanted = jurisdiction ? normalizeJurisdiction(jurisdiction).toUpperCase() : "";
+    const inJurisdiction = (r: (typeof records)[number]) => !wanted || r.country.toUpperCase() === wanted;
+    const exact = records.filter((r) => inJurisdiction(r) && canonEntityName(r.legalName) === target);
+    const pool = exact.length ? exact : records.filter(inJurisdiction);
+    if (pool.length !== 1) return null;
+    const hit = pool[0];
+    return {
+      lei: hit.lei,
+      legalName: hit.legalName,
+      country: hit.country,
+      status: hit.status,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Loose canonical form for identity-name comparison. */
+export function canonEntityName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** Rebuild the ask params around the resolved identity (exact legal name + LEI). */
+export function withLegalIdentity(spec: AskRequestSpec, identity: LegalIdentity): AskRequestSpec {
+  return { ...spec, params: { ...spec.params, company: identity.legalName, lei: identity.lei } };
+}
+
 export type CounterpartyProbeOutcome =
   | {
       kind: "challenge";
@@ -172,6 +251,8 @@ export type CounterpartyProbeOutcome =
       approvedOffer: ApprovedOffer;
       /** Every signable exact-scheme EVM rail the challenge offered. */
       rails?: ApprovedRail[];
+      /** The free GLEIF identity the ask was pinned to, when resolution succeeded. */
+      resolvedIdentity?: LegalIdentity | null;
       priceUsd: number;
     }
   | { kind: "rejected"; status: number; body: Record<string, unknown> | null; text: string }
@@ -190,23 +271,52 @@ export async function probeCounterparty(
   if (!valid.ok) {
     return { kind: "rejected", status: 0, body: { error: valid.error }, text: valid.error };
   }
-  const spec = buildCounterpartySpec(req);
-  // Interactive flows sign with the user's wallet, so they approve the escrow
-  // rail the node offers on Ethereum Sepolia. Autonomous callers that settle
-  // server-side pass preferEscrow:false and approve the exact offer instead.
-  const outcome = await probeAsk(spec, { preferEscrow: opts.preferEscrow !== false });
-  if (outcome.kind === "challenge") {
+  // Free identity resolution BEFORE anything is paid: the miner's matcher is
+  // an exact GLEIF legal-identity match, and a colloquial name 404s AFTER the
+  // payment settles. The lei-augmented spec is probed first; if the node
+  // refuses the extra param, the plain (name-only) spec is probed as before.
+  const base = buildCounterpartySpec(req);
+  const identity = await resolveLegalIdentity(
+    req.company,
+    typeof base.params?.jurisdiction === "string" ? (base.params.jurisdiction as string) : undefined,
+  );
+  // Spec ladder: (1) legal name + LEI for nodes that take an lei param,
+  // (2) the resolved legal name alone (the contract this intent validates
+  // today), (3) the raw input unchanged when nothing resolved. The paid
+  // request is whichever candidate the node's unpaid validation accepted.
+  const withLei = identity ? withLegalIdentity(base, identity) : null;
+  const resolvedNameOnly = identity ? { ...base, params: { ...base.params, company: identity.legalName } } : null;
+  const preferEscrow = opts.preferEscrow !== false;
+  const specs: Array<{ spec: AskRequestSpec; identity: LegalIdentity | null }> = [
+    ...(withLei ? [{ spec: withLei, identity }] : []),
+    ...(resolvedNameOnly ? [{ spec: resolvedNameOnly, identity }] : []),
+    { spec: base, identity: null },
+  ];
+  let lastRejected: { kind: "rejected"; status: number; body: Record<string, unknown> | null; text: string } | null = null;
+  for (const candidate of specs) {
+    const outcome = await probeAsk(candidate.spec, { preferEscrow });
+    if (outcome.kind === "rejected") {
+      lastRejected = outcome;
+      // Retry only when the node refused the PARAMS (observed live: the lei
+      // param is not part of this intent's contract). Any other refusal is
+      // about the ask itself and must surface immediately.
+      const rejection = JSON.stringify(outcome.body ?? {}).toLowerCase() + outcome.text.toLowerCase();
+      if (!rejection.includes("unknown param") && !rejection.includes("invalid_params")) return outcome;
+      continue;
+    }
+    if (outcome.kind !== "challenge") return outcome;
     return {
       kind: "challenge",
-      spec,
+      spec: candidate.spec,
       urlPath: outcome.referencedUrl.replace(/^https?:\/\/[^/]+/, ""),
-      body: { intent: COUNTERPARTY_INTENT, params: (spec.params ?? {}) as Record<string, unknown> },
+      body: { intent: COUNTERPARTY_INTENT, params: candidate.spec.params as Record<string, unknown> },
       approvedOffer: outcome.approvedOffer,
       rails: outcome.rails ?? railsOfChallenge(outcome.challenge),
+      resolvedIdentity: candidate.identity,
       priceUsd: outcome.pricedOffer.amountCents / 100,
     };
   }
-  return outcome;
+  return lastRejected as NonNullable<typeof lastRejected>;
 }
 
 /* ------------------------------------------------------------------ */

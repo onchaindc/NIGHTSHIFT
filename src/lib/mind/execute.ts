@@ -7,6 +7,7 @@ import {
   type CounterpartyRequest,
 } from "@/lib/counterparty/intel";
 import { executeAsk, unionRails, type ApprovedRail, type ExecuteInput, type ExecuteOutcome } from "@/lib/terminal/ask";
+import type { LegalIdentity } from "@/lib/counterparty/intel";
 import {
   MINDS_BUILDER_ENDPOINT,
   mindsBuilderAlias,
@@ -182,6 +183,9 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
             amount: outcome.approvedOffer.amount,
           },
           rails,
+          /** The FINAL ask params (identity-resolved); the paid step resends these verbatim. */
+          params: outcome.body.params as Record<string, unknown>,
+          resolvedIdentity: outcome.resolvedIdentity ?? null,
           intent: outcome.body.intent,
           miner: outcome.spec.minerId ?? "",
           detail: "the network validated the ask and returned the live x402 challenge",
@@ -192,6 +196,8 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
           intent: "",
           miner: "",
           rails: [] as ApprovedRail[],
+          params: null as Record<string, unknown> | null,
+          resolvedIdentity: null as LegalIdentity | null,
           detail: outcome.text || `the node refused the ask (HTTP ${outcome.status})`,
         }
       : {
@@ -199,6 +205,8 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
           intent: "",
           miner: "",
           rails: [] as ApprovedRail[],
+          params: null as Record<string, unknown> | null,
+          resolvedIdentity: null as LegalIdentity | null,
           detail: outcome.detail,
         };
 
@@ -209,11 +217,15 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
     const railsText = probe.rails
       .map((r) => `exact USDC on ${r.network} → ${r.payTo.slice(0, 10)}… ($${(Math.round(r.amountCents * 100) / 100).toFixed(2)})`)
       .join("; ");
+    const identityText = probe.resolvedIdentity
+      ? ` The ask targets the exact legal identity ${probe.resolvedIdentity.legalName} (LEI ${probe.resolvedIdentity.lei}, ${probe.resolvedIdentity.country}${probe.resolvedIdentity.status ? `, ${probe.resolvedIdentity.status}` : ""}), resolved on GLEIF's free registry before anything is paid — the miner's matcher requires the exact legal name.`
+      : "";
     await event(
       task,
       "mind_baseline_ready",
       `Without-intelligence dossier assembled: 0/${baseline.unknownFields.length} registry fields known from free sources. The specialist ask is routable at $${probe.priceUsd?.toFixed(2)} (${probe.miner}); the paid plan awaits the human approval gate.` +
-        (railsText ? ` Approval covers ANY of the rails the node offered for this ask: ${railsText}.` : ""),
+        (railsText ? ` Approval covers ANY of the rails the node offered for this ask: ${railsText}.` : "") +
+        identityText,
       { entity, priceUsd: probe.priceUsd },
     );
   } else {
@@ -259,7 +271,11 @@ export async function executeCounterpartyAsk(
   const outcome = await mindDeps.execute({
     spec: {
       intent: baseline.probe.intent,
-      params: { company: entity.company, ...(entity.jurisdiction ? { jurisdiction: entity.jurisdiction } : {}) },
+      // The FINAL params from the pre-flight (identity-resolved legal name and
+      // LEI when GLEIF resolved them): the paid request must be the exact one
+      // the pre-flight validated and the human approved, not a rebuild from
+      // the raw entity text.
+      params: baseline.probe.params ?? { company: entity.company, ...(entity.jurisdiction ? { jurisdiction: entity.jurisdiction } : {}) },
       minerId: baseline.probe.miner || undefined,
     },
     approved: true,
@@ -298,6 +314,29 @@ export async function executeCounterpartyAsk(
         : outcome.kind === "unpaid_rejected"
         ? `the node rejected the request (HTTP ${outcome.status})`
         : `the ask failed: ${outcome.detail}`;
+    // Conservative spend accounting: when the paid request reached the node
+    // past payment verification (miner-side failure or unverifiable answer),
+    // the settlement may have begun even though no receipt came back. The
+    // approved amount is booked against the ceiling — the honest worst case —
+    // while the refusal and bare-402 paths provably moved nothing.
+    const settledAmbiguous = outcome.kind === "integrity" || (outcome.kind === "failed" && outcome.paymentSettled === true);
+    if (settledAmbiguous) {
+      const approvedCents = Math.round((baseline.probe.priceUsd ?? 0) * 100);
+      if (approvedCents > 0 && task.spend.spentUsdCents + approvedCents <= task.spend.limitUsdCents) {
+        task.spend.spentUsdCents += approvedCents;
+        task.spend.entries.push({
+          ts: mindDeps.now(),
+          description: `Counterparty intelligence — payment settled but the ask failed (${entity.company}); booked conservatively`,
+          amountUsdCents: approvedCents,
+          source: "telegraph",
+        });
+        await event(
+          task,
+          "spend_recorded",
+          `A payment of up to $${(approvedCents / 100).toFixed(2)} may have settled on the failed ask (no receipt came back to prove otherwise); the approved amount is booked against the task's spend ceiling.`,
+        );
+      }
+    }
     await event(task, "step_failed", `Specialist purchase did not complete: ${detail}`);
     throw new Error(detail);
   }
