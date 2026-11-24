@@ -10,6 +10,7 @@ import {
   Loader2,
   LockKeyhole,
   Radio,
+  RefreshCw,
   ShieldCheck,
   Zap,
 } from "lucide-react";
@@ -43,6 +44,17 @@ type Session = "loading" | "anonymous" | "authenticated" | "unavailable";
 const ZONES = ["HB_WEST", "HB_NORTH", "HB_SOUTH", "HB_HOUSTON", "LZ_WEST", "LZ_NORTH", "LZ_SOUTH", "LZ_HOUSTON"];
 
 const TERMINAL = new Set(["completed", "failed", "rejected", "blocked"]);
+
+// Operator handoff: the three investigations whose Mind replies arrived after
+// the 20 s window and still need deferred collection, plus the exact objective
+// of the completed free baseline (task 6437381a) for the intel comparison arm.
+const MIND_HANDOFF_COLLECT_IDS = [
+  "6aa47a1a-c8a2-4757-af1e-b5f047d82659",
+  "8b61777a-836f-4180-ac43-16ba2d0e7e90",
+  "58694c0d-bc18-49f8-a1f5-a0478882d53e",
+];
+const MIND_HANDOFF_OBJECTIVE =
+  'Investigate "MARA Holdings" in United States: Bitcoin mining economics — network hashrate trajectory, miner cost curves, and public miner margin outlook entering 2026';
 
 function sessionMode(body: unknown): Session {
   if (!body || typeof body !== "object") return "unavailable";
@@ -322,6 +334,71 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
     }
   }, [token, taskId, load]);
 
+  const [handoffBusy, setHandoffBusy] = useState<"collect" | "create" | null>(null);
+  const [handoffLog, setHandoffLog] = useState<string[]>([]);
+
+  // Attach the Mind replies that arrived after the original capture window
+  // closed. No task changes state; only the result record gains the reply.
+  const collectMindReplies = useCallback(async () => {
+    setHandoffBusy("collect");
+    setHandoffLog([]);
+    try {
+      for (const id of MIND_HANDOFF_COLLECT_IDS) {
+        try {
+          const res = await fetch("/api/mind/minds-delivery", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId: id }),
+          });
+          const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+          setHandoffLog((l) => [
+            ...l,
+            `${id.slice(0, 8)}… — ${res.ok ? body.detail ?? "Mind reply attached" : body.error ?? `HTTP ${res.status}`}`,
+          ]);
+        } catch {
+          setHandoffLog((l) => [...l, `${id.slice(0, 8)}… — network error, retry`]);
+        }
+      }
+    } finally {
+      setHandoffBusy(null);
+    }
+  }, []);
+
+  // Create the intel arm of the founder comparison with the identical free
+  // baseline objective and the same $0.03 hard ceiling. The task parks at the
+  // approval gate; the existing progress panel below takes over from there.
+  const createMaraIntel = useCallback(async () => {
+    setHandoffBusy("create");
+    setError(null);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/mind/investigations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objective: MIND_HANDOFF_OBJECTIVE,
+          mode: "intel",
+          spendLimitUsdCents: 3,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { task?: TaskRecord; error?: string };
+      if (!res.ok || !body.task) {
+        setHandoffLog((l) => [...l, `create failed — ${body.error ?? `HTTP ${res.status}`}`]);
+        return;
+      }
+      setHandoffLog((l) => [...l, `${body.task!.id.slice(0, 8)}… created — parked at the approval gate below; nothing paid yet`]);
+      setTask(body.task);
+      setTaskId(body.task.id);
+      writeUrl(body.task.id);
+      poll(body.task.id);
+      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    } catch {
+      setHandoffLog((l) => [...l, "create failed — network error, retry"]);
+    } finally {
+      setHandoffBusy(null);
+    }
+  }, [poll]);
+
   const state = task?.state ?? null;
   const awaiting = state === "awaiting_approval";
   const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
@@ -553,6 +630,20 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
             </p>
           </section>
         )}
+
+        {!redacted && state === "completed" && !report && !capabilityReport && task?.result?.mindsDelivery && (
+          <section className="rounded-xl border border-edge bg-panel p-5">
+            <p className="x-label !mt-0">Mind roundtrip complete</p>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
+              The investigation report was delivered to the connected Mind. Delivery status{" "}
+              <span className="text-ink">{task.result.mindsDelivery.status}</span>
+              {task.result.mindsDelivery.reply
+                ? " — the Mind reply was captured inline and is attached to this task."
+                : " — no reply arrived inside the capture window; attach it via the collect control in Operator access."}{" "}
+              Spent {fmtUsd((task.spend?.spentUsdCents ?? 0) / 100)}.
+            </p>
+          </section>
+        )}
       </div>
 
       <details ref={opsRef} className="overflow-hidden rounded-xl border border-edge bg-panel">
@@ -570,22 +661,50 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
         </summary>
         <div className="border-t border-edge px-4 py-3 sm:px-5">
           {session === "authenticated" ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[12px] leading-relaxed text-ink-soft">
-                This browser can approve the three-cent plan and read the full evidence trail.
-              </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
-                  setSession("anonymous");
-                  if (taskId) void load(taskId);
-                }}
-                className="text-[11.5px] font-medium text-ink-faint transition-colors hover:text-ink"
-              >
-                Sign out
-              </button>
-            </div>
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[12px] leading-relaxed text-ink-soft">
+                  This browser can approve the three-cent plan and read the full evidence trail.
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
+                    setSession("anonymous");
+                    if (taskId) void load(taskId);
+                  }}
+                  className="text-[11.5px] font-medium text-ink-faint transition-colors hover:text-ink"
+                >
+                  Sign out
+                </button>
+              </div>
+
+              <div className="mt-3 border-t border-edge pt-3">
+                <p className="x-label">Mind handoff</p>
+                <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">
+                  Collect the three outstanding Animoca Mind replies (attaches each to its originating task), and create the
+                  intel arm of the founder comparison — identical objective to the completed free baseline, $0.03 hard ceiling,
+                  parked at the approval gate until you approve it below.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void collectMindReplies()} disabled={!!handoffBusy} className="btn-secondary !min-h-9">
+                    {handoffBusy === "collect" ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <RefreshCw size={12} aria-hidden />}
+                    Collect 3 deferred Mind replies
+                  </button>
+                  <button type="button" onClick={() => void createMaraIntel()} disabled={!!handoffBusy} className="btn-secondary !min-h-9">
+                    {handoffBusy === "create" ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <ArrowRight size={12} aria-hidden />}
+                    Create MARA intel investigation
+                  </button>
+                </div>
+                {handoffLog.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-[11.5px] leading-relaxed text-ink-soft">
+                    {handoffLog.map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </>
           ) : (
             <>
               <p className="text-[12px] leading-relaxed text-ink-soft">
