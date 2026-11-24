@@ -97,12 +97,20 @@ export function parseInvestigationObjective(objective: string): ParsedObjective 
     if (framed) company = framed[1].trim().replace(/^(?:on|of|into|for|up|about)\s+/i, "");
   }
 
-  // Jurisdiction: a trailing "in <jurisdiction>" clause on the objective (a
-  // quoted company name is preserved verbatim, while a verb-framed or bare
-  // name loses the clause).
+  // Jurisdiction: a trailing "in <jurisdiction>" clause on the objective, or
+  // one immediately after a quoted company name mid-objective (Investigate
+  // "MARA Holdings" in United States: <details>). A quoted company name is
+  // preserved verbatim; a verb-framed or bare name loses the clause.
+  let jRaw: string | undefined;
   const textJ = /\bin\s+([A-Za-z][A-Za-z .'-]{2,40})\s*$/.exec(text);
   if (textJ) {
-    const jRaw = textJ[1].trim().replace(/[.!?]+$/, "");
+    jRaw = textJ[1].trim().replace(/[.!?]+$/, "");
+  } else if (quoted) {
+    const after = text.slice(quoted.index + quoted[0].length);
+    const midJ = /^\s+in\s+([A-Za-z][A-Za-z .'-]{2,40}?)(?=\s*[:;,.\u2014\u2013]|\s*$)/.exec(after);
+    if (midJ) jRaw = midJ[1].trim();
+  }
+  if (jRaw) {
     const key = jRaw.toLowerCase();
     if (key in JURISDICTION_CODES) {
       jurisdiction = JURISDICTION_CODES[key];

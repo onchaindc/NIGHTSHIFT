@@ -602,6 +602,9 @@ describe("POST /api/mind/minds-delivery", () => {
 
   it("answers 409 for a task with no Minds round trip", async () => {
     process.env.NIGHTSHIFT_API_TOKEN = "test-token-value";
+    // Deterministic transcript: reconstruction is attempted for record-less
+    // tasks, and this transcript holds no delivered report for the task.
+    setMindsReceiveDeps(receiveDeps(fakeClient()));
     const { POST } = await import("@/app/api/mind/minds-delivery/route");
     const plan = planMindInvestigation('Investigate "Equinor ASA"', "free");
     const task = await createTask({
