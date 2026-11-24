@@ -28,6 +28,12 @@ export interface MindBaseline {
     /** Live price when the node challenged; the offer the human would approve. */
     priceUsd?: number;
     offer?: { scheme: string; network: string; asset: string; payTo: string; amount: string };
+    /**
+     * The rails the approval covers: the union of the signable exact-scheme
+     * EVM rails the pre-flight's probes drew from the provider's alternating
+     * pool. Empty for non-challenge outcomes and single-offer callers.
+     */
+    rails?: Array<{ network: string; asset: string; payTo: string; amount: string; amountCents: number }>;
     intent: string;
     miner: string;
     detail: string;

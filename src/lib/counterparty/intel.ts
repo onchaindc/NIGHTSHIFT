@@ -31,8 +31,10 @@
 
 import {
   probeAsk,
+  railsOfChallenge,
   verifySignal,
   type ApprovedOffer,
+  type ApprovedRail,
   type AskRequestSpec,
   type ProbeOutcome,
   type VerifyOutcome,
@@ -168,6 +170,8 @@ export type CounterpartyProbeOutcome =
       urlPath: string;
       body: { intent: string; params: Record<string, unknown> };
       approvedOffer: ApprovedOffer;
+      /** Every signable exact-scheme EVM rail the challenge offered. */
+      rails?: ApprovedRail[];
       priceUsd: number;
     }
   | { kind: "rejected"; status: number; body: Record<string, unknown> | null; text: string }
@@ -198,6 +202,7 @@ export async function probeCounterparty(
       urlPath: outcome.referencedUrl.replace(/^https?:\/\/[^/]+/, ""),
       body: { intent: COUNTERPARTY_INTENT, params: (spec.params ?? {}) as Record<string, unknown> },
       approvedOffer: outcome.approvedOffer,
+      rails: outcome.rails ?? railsOfChallenge(outcome.challenge),
       priceUsd: outcome.pricedOffer.amountCents / 100,
     };
   }
