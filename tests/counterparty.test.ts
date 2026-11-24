@@ -228,10 +228,10 @@ function gleifResponse(records: unknown[], ok = true, status = 200): Response {
 
 describe("resolveLegalIdentity (free GLEIF public API)", () => {
   it("resolves a colloquial name to the exact legal identity via a single registry hit", async () => {
-    const fetchImpl = vi.fn(async () => gleifResponse([GLEIF_RECORD]));
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL) => gleifResponse([GLEIF_RECORD]));
     const identity = await resolveLegalIdentity("MARA Holdings", "US", fetchImpl as unknown as typeof fetch);
     expect(identity).toEqual({ lei: "549300M8ISKPTX2W7F94", legalName: "MARA HOLDINGS, INC.", country: "US", status: "ACTIVE" });
-    expect(fetchImpl.mock.calls[0][0]).toContain("MARA%20Holdings");
+    expect(String(fetchImpl.mock.calls[0][0])).toContain("MARA%20Holdings");
   });
 
   it("prefers an exact canonical-name hit among many registry records", async () => {
