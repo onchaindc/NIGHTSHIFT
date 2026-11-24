@@ -34,6 +34,10 @@ export interface MindBaseline {
      * pool. Empty for non-challenge outcomes and single-offer callers.
      */
     rails?: Array<{ network: string; asset: string; payTo: string; amount: string; amountCents: number }>;
+    /** The FINAL ask params (identity-resolved); the paid step resends these verbatim. */
+    params?: Record<string, unknown> | null;
+    /** The free GLEIF identity the ask was pinned to, when resolution succeeded. */
+    resolvedIdentity?: { lei: string; legalName: string; country: string; status: string } | null;
     intent: string;
     miner: string;
     detail: string;

@@ -336,6 +336,78 @@ describe("intel-mode investigation (approval-gated paid ask)", () => {
     expect(done.state).toBe("failed");
     expect(execute).toHaveBeenCalledTimes(1);
     expect(done.error).toContain("NEVER");
+    // Conservative accounting: the settlement may have begun, so the approved
+    // price is booked even though no receipt came back.
+    expect(done.spend.spentUsdCents).toBe(100);
+    expect(done.events.map((e) => e.type)).toContain("spend_recorded");
+  });
+
+  it("a settled-but-failed paid ask books the approved amount conservatively", async () => {
+    const execute = vi.fn(async () => ({
+      kind: "failed" as const,
+      status: 500,
+      paymentSettled: true,
+      detail: 'The paid request failed after settlement may have begun: HTTP 500 {"error":"miner error 404 [NOT_FOUND]"}',
+    }));
+    setMindDeps({ probe: async () => probeChallenge(), execute, notify: async () => ({ ok: false, detail: "not_configured" }) });
+    const plan = planMindInvestigation('Investigate "Equinor ASA"', "intel");
+    const task = await createTask({
+      goal: 'Investigate "Equinor ASA"',
+      origin: { source: "web" },
+      jobType: "mind_investigation",
+      plan: plan.steps,
+      criteria: plan.criteria,
+      assumptions: plan.assumptions,
+      requiresApproval: true,
+      spendLimitUsdCents: 300,
+    });
+    const done = await approveTask(task.id, defaultDeps());
+    expect(done.state).toBe("failed");
+    expect(execute).toHaveBeenCalledTimes(1); // one paid attempt, no retry
+    expect(done.spend.spentUsdCents).toBe(100); // the approved $1.00, booked conservatively
+    const types = done.events.map((e) => e.type);
+    expect(types).toContain("spend_recorded");
+    expect(types).toContain("step_failed");
+  });
+
+  it("the paid ask resends the identity-resolved params from the pre-flight, not a rebuild from the entity", async () => {
+    const execute = vi.fn(async (_input: ExecuteInput) => answeredOutcome());
+    const resolvedProbe = {
+      ...probeChallenge(),
+      body: { intent: COUNTERPARTY_INTENT, params: { company: "MARA HOLDINGS, INC.", jurisdiction: "US", lei: "549300M8ISKPTX2W7F94" } },
+      resolvedIdentity: { lei: "549300M8ISKPTX2W7F94", legalName: "MARA HOLDINGS, INC.", country: "US", status: "ACTIVE" },
+    };
+    setMindDeps({
+      probe: async () => resolvedProbe,
+      execute,
+      analyze: async () => ({
+        kind: "analyzed" as const,
+        signalHash: SIGNAL,
+        verification: { kind: "verified" as const, signalHash: SIGNAL, record: {}, note: "keccak match" },
+        committed: { legal_name: "EQUINOR ASA" },
+        classification: classification(),
+      }),
+      notify: async () => ({ ok: false, detail: "not_configured" }),
+    });
+    const plan = planMindInvestigation('Investigate "MARA Holdings" in United States', "intel");
+    const task = await createTask({
+      goal: 'Investigate "MARA Holdings" in United States',
+      origin: { source: "web" },
+      jobType: "mind_investigation",
+      plan: plan.steps,
+      criteria: plan.criteria,
+      assumptions: plan.assumptions,
+      requiresApproval: true,
+      spendLimitUsdCents: 300,
+    });
+    const done = await approveTask(task.id, defaultDeps());
+    expect(done.state).toBe("completed");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0][0].spec.params).toEqual({ company: "MARA HOLDINGS, INC.", jurisdiction: "US", lei: "549300M8ISKPTX2W7F94" });
+    // The approval trail names the resolved legal identity explicitly.
+    const ready = done.events.find((e) => e.type === "mind_baseline_ready");
+    expect(ready?.message).toContain("MARA HOLDINGS, INC.");
+    expect(ready?.message).toContain("549300M8ISKPTX2W7F94");
   });
 });
 
