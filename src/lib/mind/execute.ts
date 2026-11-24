@@ -186,6 +186,7 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
           /** The FINAL ask params (identity-resolved); the paid step resends these verbatim. */
           params: outcome.body.params as Record<string, unknown>,
           resolvedIdentity: outcome.resolvedIdentity ?? null,
+          specVariant: outcome.specVariant,
           intent: outcome.body.intent,
           miner: outcome.spec.minerId ?? "",
           detail: "the network validated the ask and returned the live x402 challenge",
@@ -218,7 +219,9 @@ export async function executeMindBaseline(task: TaskRecord, stepTarget: string |
       .map((r) => `exact USDC on ${r.network} → ${r.payTo.slice(0, 10)}… ($${(Math.round(r.amountCents * 100) / 100).toFixed(2)})`)
       .join("; ");
     const identityText = probe.resolvedIdentity
-      ? ` The ask targets the exact legal identity ${probe.resolvedIdentity.legalName} (LEI ${probe.resolvedIdentity.lei}, ${probe.resolvedIdentity.country}${probe.resolvedIdentity.status ? `, ${probe.resolvedIdentity.status}` : ""}), resolved on GLEIF's free registry before anything is paid — the miner's matcher requires the exact legal name.`
+      ? probe.specVariant === "identifier"
+        ? ` The ask carries the resolved registry identifier — the LEI ${probe.resolvedIdentity.lei} (${probe.resolvedIdentity.legalName}, ${probe.resolvedIdentity.country}${probe.resolvedIdentity.status ? `, ${probe.resolvedIdentity.status}` : ""}) — because the pinned miner refuses name-only GLEIF searches (observed: SEARCH_TOO_BROAD / NOT_FOUND). The intent's param contract takes company + jurisdiction only, so the LEI rides in the company field.`
+        : ` The ask targets the resolved legal identity ${probe.resolvedIdentity.legalName} (LEI ${probe.resolvedIdentity.lei}, ${probe.resolvedIdentity.country}${probe.resolvedIdentity.status ? `, ${probe.resolvedIdentity.status}` : ""}), resolved on GLEIF's free registry before anything is paid.`
       : "";
     await event(
       task,
