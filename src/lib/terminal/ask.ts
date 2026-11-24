@@ -36,6 +36,9 @@ import {
   diagnosePaymentRejection,
   escrowEvmOffer,
   exactEvmOffer,
+  evmExactEntries,
+  canonicalNetwork,
+  networkRegistrationNames,
   extractReceipt,
   paidCredentialsConfigured,
   selectTelegraphRequirement,
@@ -143,14 +146,13 @@ export async function probeAsk(
     });
     if (res.status === 402) {
       const challenge = decodeChallenge(res.headers.get("payment-required"));
-      // Deterministic rail selection: the exact-scheme entries, preferring the
-      // network the approval recorded (providers list several chains and the
-      // order is theirs to change). Falls back to the first exact entry.
-      const exactEntries =
-        challenge?.accepts?.filter((a) => a.scheme === "exact" && a.network?.startsWith("eip155:")) ?? [];
+      // Deterministic rail selection: the exact-scheme EVM entries (networks
+      // canonicalized), preferring the network the approval recorded (the
+      // provider serves several rails and the order is theirs to change).
+      const exactEntries = evmExactEntries(challenge);
+      const wantedNetwork = opts.preferNetwork ? canonicalNetwork(opts.preferNetwork) : undefined;
       const accepted =
-        (opts.preferNetwork ? exactEntries.find((a) => a.network === opts.preferNetwork) : undefined) ??
-        exactEntries[0];
+        (wantedNetwork ? exactEntries.find((a) => a.network === wantedNetwork) : undefined) ?? exactEntries[0];
       const priced = exactEvmOffer(challenge, opts.preferNetwork);
       const escrow = escrowEvmOffer(challenge);
       if (!challenge) {
@@ -218,7 +220,7 @@ export function approvedOfferMatches(
   approved: ApprovedOffer,
   live: { network: string; asset?: string; payTo?: string; amount?: string },
 ): { ok: boolean; reason?: string } {
-  if (approved.network !== live.network) return { ok: false, reason: `network changed (approved ${approved.network}, live ${live.network})` };
+  if (canonicalNetwork(approved.network) !== canonicalNetwork(live.network)) return { ok: false, reason: `network changed (approved ${approved.network}, live ${live.network})` };
   if (approved.payTo && live.payTo && approved.payTo.toLowerCase() !== live.payTo.toLowerCase()) {
     return { ok: false, reason: `the recipient changed (approved ${approved.payTo}, live ${live.payTo})` };
   }
@@ -323,9 +325,19 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
   const account = privateKeyToAccount(process.env.TELEGRAPH_EVM_PRIVATE_KEY as `0x${string}`);
   const priced = fresh.pricedOffer;
   const paymentNetwork = priced.network as `${string}:${string}`;
+  // One signer, registered under every known name form of the approved chain
+  // (CAIP-2 + v1 aliases): the pinned selector below remains the only gate
+  // that decides what gets signed, so extra registrations cannot widen it.
+  const evmScheme = new ExactEvmScheme(account);
+  const registrationNames = networkRegistrationNames(paymentNetwork);
   const client = x402Client.fromConfig({
-    schemes: [{ network: paymentNetwork, client: new ExactEvmScheme(account) }],
-    spendControls: { allowedAssets: [{ network: paymentNetwork, asset: priced.asset }] },
+    schemes: registrationNames.map((network) => ({
+      network: network as `${string}:${string}`,
+      client: evmScheme,
+    })),
+    spendControls: {
+      allowedAssets: registrationNames.map((network) => ({ network: network as `${string}:${string}`, asset: priced.asset })),
+    },
     // The human approved exactly this offer and the fresh challenge was
     // drift-checked against it above, so the budget ceiling is not re-derived
     // here; the selector still pins the signed requirement to the priced entry.
