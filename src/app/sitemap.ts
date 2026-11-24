@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 
 import { SITE_URL } from "@/lib/site";
+import { MINDS } from "@/lib/minds/registry";
 
 const ROUTES: Array<{ path: string; priority: number }> = [
   { path: "", priority: 1 },
@@ -8,6 +9,12 @@ const ROUTES: Array<{ path: string; priority: number }> = [
   { path: "/terminal", priority: 0.9 },
   { path: "/minds", priority: 0.9 },
   { path: "/minds/counterparty", priority: 0.9 },
+  // Every Mind profile is public; only available Minds outrank the catalogue's
+  // supporting pages, because the rest are product definitions, not tools.
+  ...MINDS.map((mind) => ({
+    path: `/minds/${mind.slug}`,
+    priority: mind.status === "available" ? 0.8 : 0.4,
+  })),
   { path: "/intents", priority: 0.8 },
   { path: "/evaluators", priority: 0.8 },
   { path: "/validators", priority: 0.7 },
