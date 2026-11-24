@@ -10,6 +10,13 @@ import type { WatchRunState } from "@/lib/watch/types";
 import { executeCounterpartyAsk, executeMindBaseline, executeMindReport } from "@/lib/mind/execute";
 import type { MindBaseline, MindIntelResult } from "@/lib/mind/report";
 import { executeIndexBaseline, executeIndexDataAsk, executeIndexReport } from "@/lib/mind/indexdesk-execute";
+import {
+  executeCapabilityAsk,
+  executeCapabilityBaseline,
+  executeCapabilityReport,
+  type CapabilityAsksOutput,
+  type CapabilityBaselineOutput,
+} from "@/lib/mind/capability-execute";
 import type { IndexDeskBaselineOutput, IndexDeskAsksOutput } from "@/lib/mind/indexdesk-execute";
 import { getGasPrice, getTransactionReceipt, rpcForChainId } from "@/lib/chain/rpc";
 import type { ChainReceipt, ChainGasPrice } from "@/lib/chain/rpc";
@@ -50,6 +57,10 @@ export interface ExecutionOutputs {
   indexDeskBaseline?: IndexDeskBaselineOutput;
   /** Index desk: the collected per-asset evidence from the paid asks. */
   indexDeskAsks?: IndexDeskAsksOutput;
+  /** Generic capability run: the unpaid per-dimension pre-flight + offers. */
+  capabilityBaseline?: CapabilityBaselineOutput;
+  /** Generic capability run: verified committed dimensions from paid asks. */
+  capabilityAsks?: CapabilityAsksOutput;
 }
 
 export interface EngineDeps {
@@ -384,6 +395,16 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "index_report") {
         // Completes the task itself (verification invariants run inside).
         await executeIndexReport(task, step.target, outputs);
+        return task;
+      } else if (step.kind === "capability_baseline") {
+        await executeCapabilityBaseline(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "capability_ask") {
+        await executeCapabilityAsk(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "capability_report") {
+        // Completes the task itself (verification invariants run inside).
+        await executeCapabilityReport(task, step.target, outputs);
         return task;
       } else if (step.kind === "free_chain_read") {
         outputs.freeRead = await executeFreeChainRead(task, deps);

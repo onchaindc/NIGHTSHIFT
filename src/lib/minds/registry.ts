@@ -13,15 +13,6 @@
 
 export type MindStatus = "available" | "in_development" | "planned";
 
-export interface MindCoverage {
-  /** What the dimension is called in business terms. */
-  dimension: string;
-  /** The Telegraph intent that answers it. */
-  intent: string;
-  /** The pinned miner (or "router" when no pin is used). */
-  miner: string;
-}
-
 export interface MindDefinition {
   /** URL identifier for the profile page. */
   slug: string;
@@ -43,8 +34,6 @@ export interface MindDefinition {
   nextStep: string;
   /** What the Mind does not claim or cover. */
   boundaries: string[];
-  /** Verified network coverage; only present for available Minds. */
-  coverage?: MindCoverage[];
   /** Where the investigation actually runs. Only for available Minds. */
   href?: string;
 }
@@ -67,12 +56,12 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Site and fleet diligence", "Treasury and hedging context", "Concentration risk"],
     status: "in_development",
     statusNote:
-      "Investigation design is defined. No mining provider has been verified and pinned, so this Mind cannot be run yet.",
+      "Schema and routing are verified for network hashprice/hashrate, BTC price and ERCOT grid price (unpaid probes). No executor is wired, and pool concentration and fleet uptime have no verified route, so it cannot be launched.",
     nextStep:
-      "Verify Telegraph intents for hashrate, pool share and energy data, pin their miners, then wire the plan → approval → report pipeline on the shared engine.",
+      "Wire the three verified dimensions into a probe → approve → ask → verify → report plan on the shared engine, then close the pool-share and fleet-telemetry gaps.",
     boundaries: [
-      "No hashrate, pool or energy feed is connected to this deployment.",
-      "Nothing on this page is a live mining measurement.",
+      "Pool concentration and fleet uptime are unsupported; no answer is inferred for them.",
+      "No paid mining investigation has been executed. Verified routes are not live measurements.",
     ],
   },
   {
@@ -99,14 +88,6 @@ export const MINDS: MindDefinition[] = [
       "Circulating float and trading volumes have no network intent; they remain declared inputs and are labelled as such.",
       "A proposal is not investment advice and does not execute a rebalance.",
     ],
-    coverage: [
-      { dimension: "Issuer registry record", intent: "CORPORATE_REGISTRY_LOOKUP_GENERAL", miner: "zk-corp-atlas" },
-      { dimension: "USD price", intent: "CRYPTO_PRICE_USD", miner: "cp-coinbase" },
-      { dimension: "Total supply", intent: "TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL", miner: "verifywire-token-total-supply" },
-      { dimension: "DEX pool liquidity", intent: "LIQUIDITY_DEPTH_VERIFY_GENERAL", miner: "verifywire-liquidity-depth" },
-      { dimension: "Holder count", intent: "TOKEN_HOLDER_COUNT_GENERAL", miner: "router (no pin)" },
-      { dimension: "Regulatory filings (12m)", intent: "REGULATORY_FILING_MONITOR_GENERAL", miner: "verireceipt" },
-    ],
     href: "/minds/index-desk",
   },
   {
@@ -131,9 +112,6 @@ export const MINDS: MindDefinition[] = [
       "One legal entity per investigation; group structures are OwnershipGraph's domain.",
       "A registry answer is not a legal opinion.",
     ],
-    coverage: [
-      { dimension: "Corporate registry record", intent: "CORPORATE_REGISTRY_LOOKUP_GENERAL", miner: "zk-corp-atlas" },
-    ],
     href: "/minds/counterparty",
   },
   {
@@ -150,11 +128,15 @@ export const MINDS: MindDefinition[] = [
       "Counterparty exposure: carriers, terminal operators and port authorities involved.",
     ],
     capabilities: ["Supplier continuity", "Logistics diligence", "Disruption monitoring"],
-    status: "planned",
-    statusNote: "Product definition only. No port, vessel or terminal provider has been selected.",
+    status: "in_development",
+    statusNote:
+      "Schema and routing are verified for port congestion, vessel telemetry, carrier identity, shipment rate, carrier scope, storm risk and route ETA (unpaid probes). Terminal schedules are unsupported and no executor is wired.",
     nextStep:
-      "Verify and pin port-call, vessel and terminal-status intents, then define the dependency-map input each investigation needs.",
-    boundaries: ["No AIS, port or terminal feed is connected.", "No live vessel or congestion data is shown."],
+      "Wire the seven verified dimensions into a port-dependency plan, then replace the generic route-ETA fallback with a maritime schedule source or record it as a permanent limitation.",
+    boundaries: [
+      "Terminal berth schedules and container-level status are unsupported.",
+      "Verified routes are not live port or vessel measurements until a paid, verified answer exists.",
+    ],
   },
   {
     slug: "minewatch",
@@ -170,11 +152,15 @@ export const MINDS: MindDefinition[] = [
       "Operational risk: suspensions, incidents and regulatory or community disputes.",
     ],
     capabilities: ["Asset diligence", "Counterparty screening", "Supply-chain provenance"],
-    status: "planned",
-    statusNote: "Product definition only. No production or licence source has been pinned.",
+    status: "in_development",
+    statusNote:
+      "Schema and routing are verified for owner identity, filings, operator sanctions and adverse media (unpaid probes). Production volumes and licences have no verified source, and no executor is wired.",
     nextStep:
-      "Pin production, licence and corporate-registry intents, and agree how a site identifier maps to its legal owner.",
-    boundaries: ["No production, licence or cadastre feed is connected.", "No mining asset is assessed on this page."],
+      "Wire the verified dimensions into a mine dossier plan, then decide whether production and licence data can be sourced outside Telegraph or must remain an explicit gap.",
+    boundaries: [
+      "Production volumes, guidance and licence tenure are unsupported.",
+      "A registry identity is not the asset's ownership chain; the site-to-operator link must be supplied.",
+    ],
   },
   {
     slug: "chainforensics",
@@ -190,13 +176,14 @@ export const MINDS: MindDefinition[] = [
       "Evidence: every hop tied to a transaction hash and the source that labelled it.",
     ],
     capabilities: ["Incident response", "Counterparty due diligence", "Treasury tracing"],
-    status: "planned",
-    statusNote: "Product definition only. No chain-analytics or labelling provider is connected.",
+    status: "in_development",
+    statusNote:
+      "Schema and routing are verified for transaction lookup, balances, transaction risk, account metrics, holder counts and wash-trading signals (unpaid probes). Clustering, attribution and multi-hop tracing are unsupported, and no executor is wired.",
     nextStep:
-      "Verify chain-analytics intents and a labelling source, then fix the tracing depth and evidentiary standard before any paid ask.",
+      "Wire the verified dimensions into a transaction dossier, then add a labelling/tracing source before claiming wallet attribution.",
     boundaries: [
-      "No chain-analytics or labelling provider is connected.",
-      "Attribution is never inferred from this page; an address alone is not an identity.",
+      "Wallet clustering, attribution and cross-chain fund-flow tracing are unsupported.",
+      "A risk score is a provider judgment, not an identity; nothing here attributes an address to a person.",
     ],
   },
   {
@@ -213,14 +200,14 @@ export const MINDS: MindDefinition[] = [
       "Gaps: entities the available registers cannot resolve.",
     ],
     capabilities: ["KYC escalation", "Group exposure", "M&A diligence"],
-    status: "planned",
+    status: "in_development",
     statusNote:
-      "Product definition only. The live Counterparty Mind resolves single entities; group-structure traversal is not built.",
+      "Schema and routing are verified for entity identity, firmographic enrichment, sanctions checks, filings and VAT identity (unpaid probes). Beneficial ownership and group traversal — the core claim — are unsupported, so it is not operational.",
     nextStep:
-      "Pin corporate-registry and beneficial-ownership intents across priority jurisdictions, and define how unresolved entities are reported.",
+      "Find a verifiable beneficial-ownership or shareholding source before building the graph; the verified single-entity dimensions are not a substitute.",
     boundaries: [
-      "No beneficial-ownership register is connected.",
-      "The Counterparty intelligence tool is not a group-structure graph.",
+      "Beneficial ownership, parent/subsidiary links and shared-director analysis are unsupported.",
+      "The Counterparty intelligence tool resolves one entity; it is not this graph.",
     ],
   },
   {
@@ -237,11 +224,15 @@ export const MINDS: MindDefinition[] = [
       "Discrepancies: conflicting values, missing documents and the evidence for each.",
     ],
     capabilities: ["Pre-shipment checks", "Document diligence", "Discrepancy review"],
-    status: "planned",
-    statusNote: "Product definition only. No document-parsing or shipment source is connected.",
+    status: "in_development",
+    statusNote:
+      "Schema and routing are verified for PO, invoice/ledger, commerce orders, counterparty identity, delivery windows and package status (unpaid probes). Bills of lading and cargo-document extraction are unsupported, and no executor is wired.",
     nextStep:
-      "Pin corporate-registry and shipment intents, then define the document schema and the rules that count as a discrepancy.",
-    boundaries: ["No document-parsing or shipment feed is connected.", "Nothing here validates a real shipment."],
+      "Wire the verified dimensions into a shipment dossier, then add document extraction before claiming document-to-document discrepancy review.",
+    boundaries: [
+      "Bill-of-lading, cargo-document and customs parsing are unsupported.",
+      "Verified routes are not a validation of any real shipment until paid answers are reconciled.",
+    ],
   },
   {
     slug: "sanctionsdesk",
@@ -257,11 +248,15 @@ export const MINDS: MindDefinition[] = [
       "Evidence: the list, entry and match basis for every hit.",
     ],
     capabilities: ["Onboarding screening", "Transaction review", "Periodic re-screening"],
-    status: "planned",
-    statusNote: "Product definition only. No sanctions list is bundled or queried by this deployment.",
+    status: "in_development",
+    statusNote:
+      "Schema and routing are verified for name screening, entity identity, enrichment and vessel-name screening (unpaid probes). IMO/MMSI vessel matching and related-party ownership are unsupported, so this is not yet a sanctions desk.",
     nextStep:
-      "Pin sanctions, corporate-registry and vessel intents, then define match thresholds and how near matches are reported.",
-    boundaries: ["No sanctions list is queried by this deployment.", "A screen is not a legal determination."],
+      "Add an IMO/MMSI-based vessel screen and an ownership link before claiming exposure analysis; name screening alone is not enough.",
+    boundaries: [
+      "Vessel screening is name-based only; there is no IMO/MMSI match.",
+      "Related-party ownership exposure is unsupported; a screen is not a legal determination.",
+    ],
   },
   {
     slug: "caseledger",
@@ -277,11 +272,15 @@ export const MINDS: MindDefinition[] = [
       "Gaps: jurisdictions and registries that cannot be searched.",
     ],
     capabilities: ["Counterparty diligence", "Dispute monitoring", "Portfolio risk review"],
-    status: "planned",
-    statusNote: "Product definition only. No court-record provider is selected.",
+    status: "in_development",
+    statusNote:
+      "Schema and routing are verified for party identity, public filings, adverse coverage and claim checks (unpaid probes). Court dockets, judgments and multi-jurisdiction coverage are unsupported, so litigation history cannot be claimed.",
     nextStep:
-      "Identify court-record intents and priority jurisdictions, then define entity matching and how sealed or unavailable matters are reported.",
-    boundaries: ["No court-record provider is connected.", "Nothing here is legal advice."],
+      "Find a verifiable court-record source before calling this a case ledger; press coverage and filings are not a docket.",
+    boundaries: [
+      "Court dockets, judgments, settlements and sealed matters are unsupported.",
+      "Adverse coverage is not a court record; nothing here is legal advice.",
+    ],
   },
   {
     slug: "energywatch",
@@ -297,11 +296,15 @@ export const MINDS: MindDefinition[] = [
       "Counterparties: operators, offtakers and the entities exposed.",
     ],
     capabilities: ["Operational diligence", "Continuity planning", "Exposure monitoring"],
-    status: "planned",
-    statusNote: "Product definition only. No grid, outage or production source is connected.",
+    status: "in_development",
+    statusNote:
+      "Schema and routing are verified for ERCOT grid price, operator identity, storm risk, current temperature and historical weather (unpaid probes). Outages, production and facility telemetry are unsupported, and no executor is wired.",
     nextStep:
-      "Pin outage, production and infrastructure intents, then define the dependency model linking an asset to its grid and operators.",
-    boundaries: ["No grid, outage or production feed is connected.", "No live energy asset is monitored on this page."],
+      "Wire the verified dimensions into an energy-site dossier, then source outage/production data before claiming operational monitoring.",
+    boundaries: [
+      "Outage notices, production volumes and facility power/PUE are unsupported.",
+      "ERCOT price coverage is not a global energy market view.",
+    ],
   },
 ];
 
