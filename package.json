@@ -13,13 +13,14 @@
     "db:verify": "bun scripts/db-verify.ts"
   },
   "dependencies": {
+    "@animocabrands/minds-client-lib": "^0.1.7",
     "@neon/config": "^1.9.6",
     "@neon/env": "^1.6.6",
     "@privy-io/react-auth": "^3.51.4",
-    "@solana/kit": "^5.0.0",
     "@solana-program/memo": "^0.10.0",
     "@solana-program/system": "^0.10.0",
     "@solana-program/token": "^0.9.0",
+    "@solana/kit": "^5.0.0",
     "@stripe/stripe-js": "^5.0.0",
     "@x402/evm": "^2.28.0",
     "@x402/fetch": "^2.28.0",

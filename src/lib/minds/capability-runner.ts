@@ -30,7 +30,12 @@ import {
   DEFAULT_ASK_PRICE_USD_CENTS,
   type CapabilityDimension,
 } from "./capabilities";
-import { notifyMindReport } from "@/lib/mind/builder";
+import { notifyMindReport, reportMessage, mindsBuilderAlias, MINDS_BUILDER_ENDPOINT } from "@/lib/mind/builder";
+import {
+  awaitAndRecordMindReply,
+  captureSendFingerprint,
+  receiveMindReply,
+} from "@/lib/mind/builder-receive";
 
 export interface CapabilityRunnerDeps {
   probe: (spec: AskRequestSpec, opts?: { preferEscrow?: boolean }) => Promise<ProbeOutcome>;
@@ -38,6 +43,8 @@ export interface CapabilityRunnerDeps {
   verify: (signalHash: string) => Promise<VerifyOutcome>;
   /** Optional report delivery to a Minds account; config-gated and best-effort. */
   notify?: typeof notifyMindReport;
+  /** Optional two-way round trip: bounded reply wait on the bound conversation. */
+  receive?: typeof receiveMindReply;
   now: () => number;
 }
 
@@ -47,6 +54,7 @@ export function defaultCapabilityDeps(): CapabilityRunnerDeps {
     execute: executeAsk,
     verify: verifySignal,
     notify: (input, fetchImpl) => notifyMindReport(input, fetchImpl),
+    receive: (request) => receiveMindReply(request),
     now: () => Date.now(),
   };
 }

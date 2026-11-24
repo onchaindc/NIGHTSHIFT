@@ -31,6 +31,17 @@ import {
 import type { CapabilityRunConfig } from "@/lib/minds/capability-plan";
 import { BITCOIN_MINING_SLUG } from "@/lib/bitcoinmining/intel";
 import { buildBitcoinMiningReport } from "@/lib/bitcoinmining/report";
+import {
+  MINDS_BUILDER_ENDPOINT,
+  mindsBuilderAlias,
+  notifyMindReport,
+  reportMessage,
+} from "@/lib/mind/builder";
+import {
+  awaitAndRecordMindReply,
+  captureSendFingerprint,
+  receiveMindReply,
+} from "@/lib/mind/builder-receive";
 
 /* ------------------------------------------------------------------ */
 /* Injectable deps (tests override; production uses the real rails)    */
@@ -48,6 +59,7 @@ export function resetCapabilityDeps(): void {
   capabilityDeps.execute = real.execute;
   capabilityDeps.verify = real.verify;
   capabilityDeps.notify = real.notify;
+  capabilityDeps.receive = real.receive;
   capabilityDeps.now = real.now;
 }
 
@@ -319,14 +331,17 @@ export async function executeCapabilityReport(
   await event(task, "capability_report_ready", `Report recorded for ${config.slug}: ${verified} verified, ${report.counts.gap} unsupported.`);
 
   // Bitcoin Mining Intelligence is the first Mind wired for report delivery to
-  // Minds by Animoca Brands. Delivery is environment-gated, best-effort, and
-  // recorded as skipped when the key or a bound alias is absent. A failed
-  // delivery never changes the investigation result.
+  // Minds by Animoca Brands — and the first wired for the reply back. The
+  // correlation fingerprint is captured BEFORE the send (documented
+  // getLatestHistoryFingerprint → afterFingerprint); the reply wait is bounded
+  // and the whole round trip is persisted on the result. Delivery is
+  // environment-gated, best-effort, recorded as skipped when the key or a
+  // bound alias is absent, and never changes the investigation result.
   if (bitcoinReport && config.mode === "intel" && capabilityDeps.notify) {
     const objective = bitcoinReport.objective
       ? `Bitcoin mining economics · block ${bitcoinReport.objective.blockHeight} · ${bitcoinReport.objective.zone} · ${bitcoinReport.objective.intervalStart}`
       : `Bitcoin mining economics · ${config.slug}`;
-    const delivery = await capabilityDeps.notify({
+    const notifyInput = {
       task: {
         id: task.id,
         goal: task.goal,
@@ -339,7 +354,10 @@ export async function executeCapabilityReport(
         intelUsed: true,
         reasoning: parts,
       },
-    });
+    };
+    const alias = mindsBuilderAlias();
+    const fingerprintBefore = await captureSendFingerprint(alias ?? "");
+    const delivery = await capabilityDeps.notify(notifyInput);
     await event(
       task,
       delivery.ok ? "delivery_succeeded" : "delivery_skipped",
@@ -347,5 +365,15 @@ export async function executeCapabilityReport(
         ? `Bitcoin mining report delivered to the connected Mind (${delivery.detail}).`
         : `Minds delivery skipped: ${delivery.detail}`,
     );
+    await awaitAndRecordMindReply({
+      task,
+      notify: delivery,
+      alias,
+      fingerprintBefore,
+      sentMessageText: reportMessage(notifyInput),
+      receive: capabilityDeps.receive,
+      now: capabilityDeps.now,
+      event: (type, message, data) => event(task, type, message, data),
+    });
   }
 }
