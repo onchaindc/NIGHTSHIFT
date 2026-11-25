@@ -290,6 +290,28 @@ export default function FundsPage() {
   const [balances, setBalances] = useState<Record<string, Balances>>({});
   const [showDeposit, setShowDeposit] = useState<string | null>(null);
   const [showWithdraw, setShowWithdraw] = useState<string | null>(null);
+  const [payer, setPayer] = useState<{ address: string; rails: Array<{ chain: string; name: string; role: string; balance: { whole: string } | null }> } | null>(null);
+  const [payerError, setPayerError] = useState<string | null>(null);
+
+  const refreshPayer = async () => {
+    try {
+      const res = await fetch("/api/wallet/balance", { cache: "no-store" });
+      const data = (await res.json()) as { error?: string; payer?: string; rails?: Array<{ chain: string; name: string; role: string; balance: { whole: string } | null }> };
+      if (!res.ok) {
+        setPayer(null);
+        setPayerError(data.error ?? "The payer balance could not be read right now.");
+        return;
+      }
+      setPayerError(null);
+      if (data.payer && data.rails) setPayer({ address: data.payer, rails: data.rails });
+    } catch {
+      setPayerError("The payer balance could not be read right now.");
+    }
+  };
+
+  useEffect(() => {
+    void refreshPayer();
+  }, []);
 
   const embedded = wallets.find((w) => w.walletClientType === "privy");
   const external = wallets.find((w) => w.walletClientType !== "privy");
@@ -454,6 +476,55 @@ export default function FundsPage() {
           )}
         </div>
       )}
+
+      {/* What autonomous Minds spend from: the deployment payer wallet. These
+          spends debit THIS wallet, not yours — without this card they were
+          invisible, which made "I paid but my balance never changed" a bug
+          report about visibility, not about settlement. */}
+      <div className="mt-3 rounded-2xl border border-edge bg-panel p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-panel-2 text-ink-soft">
+              <Coins size={14} strokeWidth={1.8} />
+            </span>
+            <p className="text-[13.5px] font-medium text-ink">Paid-research wallet (Minds)</p>
+          </div>
+          <button
+            type="button"
+            onClick={refreshPayer}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-edge px-2.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-ink-faint hover:text-ink"
+          >
+            <RefreshCw size={12} strokeWidth={1.8} /> Refresh
+          </button>
+        </div>
+        {payerError ? (
+          <p className="mt-3 text-[12.5px] leading-relaxed text-amber">{payerError}</p>
+        ) : !payer ? (
+          <p className="mt-3 text-[12.5px] text-ink-soft">Reading the payer balances…</p>
+        ) : (
+          <div className="mt-3 space-y-2">
+            <p className="font-mono text-[11.5px] text-ink-soft">
+              payer {payer.address.slice(0, 10)}…{payer.address.slice(-8)}
+            </p>
+            {payer.rails.map((rail) => (
+              <div key={`${rail.chain}-${rail.name}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-xl border border-edge bg-panel-2 px-3.5 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-[12.5px] font-medium text-ink">
+                    {rail.name} <span className="text-ink-soft">· {rail.chain}</span>
+                  </p>
+                  <p className="mt-0.5 text-[11.5px] leading-snug text-ink-soft">{rail.role}</p>
+                </div>
+                <p className="tabular shrink-0 text-[13.5px] text-ink">
+                  {rail.balance ? `${rail.balance.whole} USDC` : "unavailable"}
+                </p>
+              </div>
+            ))}
+            <p className="text-[11.5px] leading-relaxed text-ink-soft">
+              Every Mind spend is also itemized per task on its own page (spend ledger, settlement hash).
+            </p>
+          </div>
+        )}
+      </div>
 
       <div className={`mt-8 grid gap-4 ${hasEmbedded ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
         <button

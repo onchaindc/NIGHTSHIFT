@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { hapticsEnabled, hapticsSupported, setHapticsEnabled, vibrate } from "@/lib/haptics";
 import { CheckCircle2, CircleAlert, Server, Wallet } from "lucide-react";
 import { money } from "@/components/taskParts";
 import type { StatusBody } from "@/components/shell-types";
@@ -18,6 +19,10 @@ export default function Settings() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [busySession, setBusySession] = useState(false);
+  const [hapticsOn, setHapticsOn] = useState(true);
+  useEffect(() => {
+    setHapticsOn(hapticsEnabled());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +93,36 @@ export default function Settings() {
           Could not read the runtime status. Check that the server is running.
         </p>
       )}
+
+      <section className="mt-8 overflow-hidden rounded-lg border border-edge bg-panel" aria-label="Feedback">
+        <div className="border-b border-edge px-4 py-3">
+          <h2 className="x-label">Feedback</h2>
+        </div>
+        <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+          <div className="min-w-0">
+            <p className="text-[13px] font-medium text-ink">Haptic feedback</p>
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-faint">
+              Vibration pulses when a result is ready, a run fails, a payment settles or your approval is needed.
+              Android browsers only — iOS Safari does not expose vibration to web apps, so there it stays silent.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={!hapticsSupported()}
+            onClick={() => {
+              const next = !hapticsOn;
+              setHapticsEnabled(next);
+              setHapticsOn(next);
+              if (next) vibrate("select");
+            }}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-[11px] font-medium transition-colors disabled:opacity-50 ${
+              hapticsOn ? "border-teal/40 bg-teal/10 text-teal" : "border-edge bg-panel-2 text-ink-soft"
+            }`}
+          >
+            {hapticsSupported() ? (hapticsOn ? "On" : "Off") : "Unsupported"}
+          </button>
+        </div>
+      </section>
 
       {status && (
         <div className="mt-8 space-y-5">

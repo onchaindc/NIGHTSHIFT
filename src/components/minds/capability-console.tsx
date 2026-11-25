@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import type { TaskRecord } from "@/lib/engine/types";
+import { vibrate } from "@/lib/haptics";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 
 /**
@@ -181,6 +182,8 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [redacted, setRedacted] = useState(false);
+  // Last state seen by the poller — haptics fire only on transitions.
+  const prevStateRef = useRef<TaskRecord["state"] | null>(null);
   const [session, setSession] = useState<Session>("loading");
   const [token, setToken] = useState("");
   const [signingIn, setSigningIn] = useState(false);
@@ -236,6 +239,15 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
         }
         setTask(body.task);
         setRedacted(!!body.redacted);
+        const prev = prevStateRef.current;
+        if (prev && prev !== body.task.state) {
+          // Haptic milestones on the run console: result ready, failure, and
+          // the approval gate needing the human. Transitions only.
+          if (body.task.state === "completed") vibrate("success");
+          else if (body.task.state === "failed" || body.task.state === "blocked") vibrate("error");
+          else if (body.task.state === "awaiting_approval") vibrate("notify");
+        }
+        prevStateRef.current = body.task.state;
         if (TERMINAL.has(body.task.state)) stopPolling();
       } catch {
         /* transient; next poll retries */

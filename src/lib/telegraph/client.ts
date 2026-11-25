@@ -39,6 +39,7 @@ import { x402Client, wrapFetchWithPayment } from "@x402/fetch";
 import { ExactEvmScheme } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
 import type { TelegraphAnswer, TelegraphReceipt } from "@/lib/engine/types";
+import { rpcForChainId } from "@/lib/chain/rpc";
 
 export const DEFAULT_NODE_URL = "https://devnode.telegraphprotocol.com";
 
@@ -436,13 +437,11 @@ export async function diagnosePaymentRejection(payer: string, challenge: Telegra
   }
 }
 
-async function tokenBalanceViaPublicRpc(payer: string, asset: string, network: string): Promise<string | null> {
-  if (network !== "eip155:11155111") {
-    return null; // public RPC snippet below is Sepolia-configured by the docs
-  }
+export async function tokenBalanceViaPublicRpc(payer: string, asset: string, network: string): Promise<string | null> {
   // balanceOf(address) — public reads only; no key material is read or logged.
   const data = `0x70a08231${payer.replace(/^0x/i, "").toLowerCase().padStart(64, "0")}`;
-  const rpcUrl = process.env.TELEGRAPH_PUBLIC_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
+  const rpcUrl = process.env.TELEGRAPH_PUBLIC_RPC_URL || rpcForChainId(network);
+  if (!rpcUrl) return null; // only chains Telegraph rails actually name are mapped
   const res = await fetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -454,6 +453,17 @@ async function tokenBalanceViaPublicRpc(payer: string, asset: string, network: s
   if (!body.result || body.result === "0x") { return null; }
   const raw = BigInt(body.result);
   return `${raw / 1000000n} whole units (6 decimals; ${raw} atomic)`;
+}
+
+/** The address whose funds every autonomous Minds payment actually spends (the deployment payer key). */
+export function telegraphPayerAddress(): string | null {
+  const key = process.env.TELEGRAPH_EVM_PRIVATE_KEY;
+  if (!key) return null;
+  try {
+    return privateKeyToAccount(key as `0x${string}`).address;
+  } catch {
+    return null;
+  }
 }
 
 /**

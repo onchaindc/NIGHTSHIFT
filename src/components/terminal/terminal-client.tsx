@@ -22,6 +22,7 @@ import { useWallets, useSignTypedData, useSignMessage, useSendTransaction } from
 import { encodeFunctionData } from "viem";
 
 import { ResultView } from "@/components/result-view";
+import { vibrate } from "@/lib/haptics";
 
 export interface TerminalIntentSummary {
   intent: string;
@@ -548,6 +549,7 @@ export default function TerminalClient({
 
   const runExecute = useCallback(async () => {
     if (!challenge || !approvedOffer) return;
+    vibrate("select");
     if (!signerWallet) {
       setApprovalBox(false);
       setFailure({
@@ -717,15 +719,18 @@ export default function TerminalClient({
             });
             setChallenge(null);
             setStage("result");
+            vibrate("payment");
             pushLog("Answer delivered from your wallet. Run verification before trusting it.", "good");
             return;
           }
           const failureDetail = result.error ?? JSON.stringify(result.body ?? result).slice(0, 300);
           if (typeof failureDetail === "string" && /insufficient escrow/i.test(failureDetail)) setEscrowCovered(false);
+          vibrate("error");
           setFailure({ heading: "Payment from your wallet failed", detail: failureDetail });
           return;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
+          vibrate("error");
           setFailure({ heading: "Payment from your wallet failed", detail: msg.slice(0, 300) });
           return;
         }
@@ -801,6 +806,7 @@ export default function TerminalClient({
       }
       setEscrowCovered(true);
       setEscrowNotice(`Added ${Number(after ?? depositAmount) / 1_000_000} test USDC. Paying this ask now…`);
+      vibrate("payment");
       pushLog("Balance topped up. Signing the payment for this ask…", "good");
       // Funding was the last consent step, and the offer being paid is the one
       // already approved — runExecute re-checks it for drift before signing.
@@ -808,6 +814,7 @@ export default function TerminalClient({
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setEscrowNotice(`Escrow funding failed: ${msg.slice(0, 240)}`);
+      vibrate("error");
       pushLog(`Escrow funding failed: ${msg}`, "bad");
     } finally {
       setFundingEscrow(false);

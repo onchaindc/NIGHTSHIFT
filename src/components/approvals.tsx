@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, ShieldCheck, Wallet } from "lucide-react";
 import type { TaskRecord } from "@/lib/engine/types";
 import { StatusChip, isTestRun, money } from "@/components/taskParts";
+import { vibrate } from "@/lib/haptics";
 
 /**
  * Approvals view. Lists only real awaiting-approval tasks (test records
@@ -48,6 +49,7 @@ export default function Approvals() {
   async function act(id: string, action: "approve" | "reject") {
     if (activating) return;
     setActivating(id);
+    vibrate("select");
     setActionError((prev) => {
       const next = { ...prev };
       delete next[id];
@@ -60,6 +62,7 @@ export default function Approvals() {
         body: JSON.stringify({ action }),
       });
       if (!res.ok) {
+        vibrate("error");
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         setActionError((prev) => ({
           ...prev,
@@ -72,6 +75,7 @@ export default function Approvals() {
         router.push(`/tasks/${id}`);
       }
     } catch (err) {
+      vibrate("error");
       setActionError((prev) => ({
         ...prev,
         [id]: `Could not ${action} the task: ${err instanceof Error ? err.message : String(err)}`,

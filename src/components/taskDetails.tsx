@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ClipboardList, Receipt } from "lucide-react";
 import type { TaskRecord } from "@/lib/engine/types";
 import { activityTitle } from "@/lib/terminal/activity";
+import { vibrate } from "@/lib/haptics";
 import {
   ActivityLog,
   Disclose,
@@ -98,6 +99,9 @@ export default function TaskDetails({ id }: { id: string }) {
   const [restricted, setRestricted] = useState(false);
   const [activating, setActivating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Last state seen by the poller — haptics fire only on transitions, never
+  // on the first render or on unchanged polls.
+  const prevStateRef = useRef<TaskRecord["state"] | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -110,6 +114,13 @@ export default function TaskDetails({ id }: { id: string }) {
         const body = (await res.json()) as { task: TaskRecord; redacted?: boolean };
         setTask(body.task);
         setRestricted(body.redacted === true);
+        const prev = prevStateRef.current;
+        if (prev && prev !== body.task.state) {
+          if (body.task.state === "completed") vibrate("success");
+          else if (body.task.state === "failed" || body.task.state === "blocked") vibrate("error");
+          else if (body.task.state === "awaiting_approval") vibrate("notify");
+        }
+        prevStateRef.current = body.task.state;
       }
     } catch {
       // retry on the next tick
@@ -133,13 +144,17 @@ export default function TaskDetails({ id }: { id: string }) {
         body: JSON.stringify({ action }),
       });
       if (!res.ok) {
+        vibrate("error");
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         setActionError(
           `Could not ${action} the task: ` + (body.error ?? `status ${res.status}`),
         );
+      } else {
+        vibrate("select");
       }
       await load();
     } catch (err) {
+      vibrate("error");
       setActionError(`Could not ${action} the task: ` + (err instanceof Error ? err.message : String(err)));
       await load();
     } finally {
