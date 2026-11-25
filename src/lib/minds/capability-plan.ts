@@ -133,8 +133,12 @@ export function planCapabilityRun(
   };
 }
 
-/** HTTP-facing description of the inputs a run needs. */
-export function capabilityRunInputs(slug: string): CapabilityRunPlan["requiredInputs"] {
+/** HTTP-facing description of the inputs a run needs, with safe samples. */
+export function capabilityRunInputs(slug: string): Array<{
+  dimension: string;
+  label: string;
+  params: Array<{ name: string; required: boolean; description: string; sample?: string | number }>;
+}> {
   const caps = CAPABILITIES[slug];
   if (!caps) return [];
   return caps.dimensions
@@ -142,6 +146,11 @@ export function capabilityRunInputs(slug: string): CapabilityRunPlan["requiredIn
     .map((d) => ({
       dimension: d.id,
       label: d.label,
-      params: Object.keys(d.params ?? {}),
+      params: Object.entries(d.params ?? {}).map(([name, spec]) => ({
+        name,
+        required: spec.required,
+        description: spec.description,
+        ...(spec.sample !== undefined ? { sample: spec.sample } : {}),
+      })),
     }));
 }

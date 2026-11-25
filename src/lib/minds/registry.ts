@@ -107,7 +107,7 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["KYC refresh", "Supplier onboarding", "Registry evidence"],
     status: "available",
     statusNote:
-      "Live. The price check is free; the exact offer is shown and approved before a single ask is signed.",
+      "Live. GLEIF's free registry resolves the legal identity before anything is paid, and the ask carries the LEI as the registry identifier (the pinned miner refuses name-only searches). On 2026-11-24 a $0.01 ask returned a signal-verified record for MARA HOLDINGS, INC.: 7 of 9 canonical fields, with legal form and register named as gaps and the US→US-NV jurisdiction refinement reported as a conflict.",
     nextStep: "Add group-structure traversal and scheduled re-checks; single-entity resolution is what runs today.",
     boundaries: [
       "One legal entity per investigation; group structures are OwnershipGraph's domain.",
