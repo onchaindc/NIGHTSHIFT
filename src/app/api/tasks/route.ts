@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Operations run to completion in the background (see after() below); on
 // Vercel the function keeps executing up to this duration limit.
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * GET /api/tasks - task records for the caller's clearance. The operator

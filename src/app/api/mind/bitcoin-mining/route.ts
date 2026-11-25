@@ -18,7 +18,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function objectiveOf(task: TaskRecord): BitcoinMiningObjective | null {
   const target = task.plan?.find((s) => s.kind === "capability_baseline")?.target;

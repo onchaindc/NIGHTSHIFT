@@ -359,11 +359,28 @@ export async function runTask(id: string, deps: EngineDeps = defaultDeps()): Pro
  * any task still created/planning/executing/verifying with no update for
  * TASK_STALL_MS is failed with an honest explanation. `awaiting_approval` is
  * deliberately NOT reaped — waiting for a human is legitimate and unbounded.
+ *
+ * 90s is provably dead: every in-run call is bounded (≤30s abort) and the run
+ * saves after every step event, so a healthy run never goes silent longer
+ * than ~35s. A 5-minute window was tried first and left users watching a
+ * spinner long after the run was already dead.
  */
-export const TASK_STALL_MS = 5 * 60_000;
+export const TASK_STALL_MS = 90_000;
 
 const STALL_MESSAGE =
   "The run stopped making progress (the execution window closed or the node stopped answering) and was interrupted. Nothing after the last recorded step was invented or guessed — re-run the investigation to continue.";
+
+/**
+ * Wall-clock budget for one runPlan invocation. The serverless window is
+ * maxDuration=300s; keep a margin so the honest failure path (event + save)
+ * always fits INSIDE the window instead of being killed mid-write — which is
+ * exactly the eternal-spinner failure mode stall recovery exists to prevent.
+ */
+export const RUN_BUDGET_MS = 240_000;
+
+export function runOverBudget(startedAt: number, now: number = Date.now()): boolean {
+  return now - startedAt > RUN_BUDGET_MS;
+}
 
 export async function reapStalledTasks(now: number): Promise<number> {
   let tasks: TaskRecord[];
@@ -395,7 +412,7 @@ export async function reapIfStalled(task: TaskRecord, now: number): Promise<Task
     ts: now,
     type: "step_failed",
     message:
-      "Run interrupted: no progress for over 5 minutes (execution window closed or the node stopped answering). Failed cleanly instead of hanging forever; re-run to continue.",
+      "Run interrupted: no progress for over 90 seconds (execution window closed or the node stopped answering). Failed cleanly instead of hanging forever; re-run to continue.",
   });
   task.updatedAt = now;
   await saveTask(task);
@@ -406,9 +423,24 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
   await saveTask(task);
   const plan = task.plan ?? [];
   const outputs: ExecutionOutputs = {};
+  // Wall-clock deadline for THIS invocation: rather than starting a step the
+  // window cannot fit (the kill would re-hang the task until stall recovery),
+  // end the run honestly while we can still write the failure down.
+  const startedAt = Date.now();
 
   for (const step of plan) {
     try {
+      if (runOverBudget(startedAt)) {
+        finishWithError(
+          task,
+          deps,
+          new Error(
+            "the run reached its execution budget before starting this step (the node is answering slowly) — everything completed so far is recorded above; re-run to continue",
+          ),
+        );
+        await saveTask(task);
+        return task;
+      }
       if (step.kind === "telegraph_ask") {
         outputs.primary = await executeTelegraphAsk(task, deps);
         if (task.state !== "executing") return task; // blocked during attempt

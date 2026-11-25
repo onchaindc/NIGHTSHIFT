@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // A check fetches up to 5 real sources; the run continues in the background
 // (after()) so the trigger response is never cut off mid-execution.
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * POST /api/watches/:id/check - run ONE real check now.

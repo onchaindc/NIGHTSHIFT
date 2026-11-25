@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Approving an execution plan may include paid steps and chain reads; run it
 // in the background like every execution path (see /api/tasks POST).
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * POST /api/tasks/:id/action - { action: "approve" | "reject" }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/engine/store", () => ({ saveTask: vi.fn(async () => undefined), getTask: vi.fn(), listTasks: vi.fn(async () => []) }));
 
-import { reapIfStalled, reapStalledTasks, TASK_STALL_MS } from "@/lib/engine/engine";
+import { reapIfStalled, reapStalledTasks, runOverBudget, RUN_BUDGET_MS, TASK_STALL_MS } from "@/lib/engine/engine";
 import { telegraphFetch } from "@/lib/telegraph/client";
 import { probeCapabilitySet, sampleParams, type CapabilityRunnerDeps } from "@/lib/minds/capability-runner";
 import { CAPABILITIES } from "@/lib/minds/capabilities";
@@ -39,6 +39,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.TELEGRAPH_CALL_TIMEOUT_MS;
   vi.clearAllMocks();
+});
+
+describe("run budget", () => {
+  it("ends the run honestly before the window can kill it", () => {
+    expect(runOverBudget(1_000_000, 1_000_000 + RUN_BUDGET_MS - 1)).toBe(false);
+    expect(runOverBudget(1_000_000, 1_000_000 + RUN_BUDGET_MS + 1)).toBe(true);
+    // The failure write must fit inside the serverless window: budget < window.
+    expect(RUN_BUDGET_MS).toBeLessThan(300_000);
+    // A dead run is reaped fast, while a healthy run (silence ≤ one bounded
+    // call ≈ 35s) is never falsely reaped.
+    expect(TASK_STALL_MS).toBe(90_000);
+    expect(TASK_STALL_MS).toBeGreaterThan(60_000);
+  });
 });
 
 describe("stall recovery", () => {

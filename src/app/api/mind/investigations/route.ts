@@ -8,7 +8,7 @@ import { planMindInvestigation } from "@/lib/mind/plan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * The Mind's investigation tool — the externally reachable HTTP capability a

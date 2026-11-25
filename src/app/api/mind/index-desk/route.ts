@@ -9,7 +9,7 @@ import { validateIndexDefinition } from "@/lib/indexdesk/intel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * The Index Reconstitution Desk — the first specialist Mind over the

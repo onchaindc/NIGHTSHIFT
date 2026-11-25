@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // A tick may run free source checks for every due watch; the scan continues
 // in the background after this response (after()).
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * GET/POST /api/watches/scheduler-tick - one scheduled Protocol Watch scan.
