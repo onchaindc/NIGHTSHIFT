@@ -3,6 +3,7 @@ import { createTask, reapIfStalled, runTask, EngineError } from "@/lib/engine/en
 import { listTasks } from "@/lib/engine/store";
 import { requestAuthorized } from "@/lib/api/auth";
 import { tasksForCaller } from "@/lib/api/public";
+import { BUILD_MARKER } from "@/lib/version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
     const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: "storage unavailable", detail: detail.slice(0, 200) }, { status: 503 });
   }
-  return NextResponse.json(tasksForCaller(req, tasks));
+  return NextResponse.json({ build: BUILD_MARKER, ...tasksForCaller(req, tasks) });
 }
 
 export async function POST(req: NextRequest) {
