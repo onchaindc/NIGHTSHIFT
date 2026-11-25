@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { createTask, reapIfStalled, runTask, EngineError } from "@/lib/engine/engine";
+import { createTask, reapIfStalled, runTask, EngineError, defaultSpendLimit } from "@/lib/engine/engine";
 import { listTasks } from "@/lib/engine/store";
-import { requestAuthorized } from "@/lib/api/auth";
+import { requestAuthorized, userAddressFromRequest } from "@/lib/api/auth";
 import { tasksForCaller } from "@/lib/api/public";
+import { requestedSpendCeilingCents, userPaidSpend24h } from "@/lib/api/userSpend";
 import { BUILD_MARKER } from "@/lib/version";
 
 export const runtime = "nodejs";
@@ -58,17 +59,33 @@ export async function POST(req: NextRequest) {
       : undefined;
 
   // A free goal can never become a purchase, so it stays open. "auto" and
-  // "paid" can plan paid steps and are operator-gated. Approval is never the
-  // caller's decision: anything that can spend waits for a human.
+  // "paid" can plan paid steps: the operator, or ANY signed-in wallet user —
+  // multi-user production runs on per-user identity, not a shared secret.
+  // User sessions carry a daily spend cap protecting the shared payer wallet;
+  // the operator (who funds it) is uncapped.
   const isFree = mode === "free";
-  if (!isFree && !requestAuthorized(req)) {
+  const isOperator = requestAuthorized(req);
+  const userAddress = userAddressFromRequest(req);
+  if (!isFree && !isOperator && !userAddress) {
     return NextResponse.json(
       {
         error:
-          'authorization required: goals that can spend are gated behind a bearer token (NIGHTSHIFT_API_TOKEN); mode "free" stays open',
+          'sign in with your wallet (Settings or the console sign-in) to run goals that can spend; mode "free" stays open to everyone',
       },
       { status: 401 },
     );
+  }
+  if (!isFree && userAddress && !isOperator) {
+    const standing = await userPaidSpend24h(userAddress);
+    const ceiling = requestedSpendCeilingCents(spendLimitUsdCents ?? defaultSpendLimit());
+    if (!standing.allowsAdditional(ceiling)) {
+      return NextResponse.json(
+        {
+          error: `daily spend cap reached: this wallet has already spent ${(standing.spentCents / 100).toFixed(2)} USD of the ${(standing.capCents / 100).toFixed(2)} USD per-day allowance for payer-funded runs (resets on a rolling 24h window). Free runs stay open.`,
+        },
+        { status: 403 },
+      );
+    }
   }
 
   try {
@@ -78,6 +95,7 @@ export async function POST(req: NextRequest) {
       requiresApproval: !isFree,
       origin: { source: "web" },
       mode,
+      ...(userAddress && !isOperator ? { owner: userAddress } : {}),
     });
     if (task.state === "executing") {
       // Execution (possibly paid steps with retries and chain reads) must not

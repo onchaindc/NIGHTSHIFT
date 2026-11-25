@@ -221,7 +221,7 @@ describe("POST /api/tasks/:id/action", () => {
     );
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("authorization required");
+    expect(body.error).toContain("sign in with your wallet");
   });
 
   it("accepts the operator session cookie as identity", async () => {

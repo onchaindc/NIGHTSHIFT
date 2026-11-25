@@ -8,7 +8,6 @@ import {
   CircleAlert,
   Cpu,
   Loader2,
-  LockKeyhole,
   Radio,
   RefreshCw,
   ShieldCheck,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react";
 
 import type { TaskRecord } from "@/lib/engine/types";
+import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 import type { BitcoinMiningReport } from "@/lib/bitcoinmining/report";
 
@@ -59,7 +59,7 @@ const MIND_HANDOFF_OBJECTIVE =
 function sessionMode(body: unknown): Session {
   if (!body || typeof body !== "object") return "unavailable";
   const mode = (body as { mode?: unknown }).mode;
-  return mode === "operator" ? "authenticated" : mode === "anonymous" ? "anonymous" : "unavailable";
+  return mode === "operator" || mode === "user" ? "authenticated" : mode === "anonymous" ? "anonymous" : "unavailable";
 }
 
 function previousHourUtc(): string {
@@ -109,7 +109,7 @@ function stateLabel(state: string | null): string {
 }
 
 function friendlyError(status: number, detail?: string): string {
-  if (status === 401) return "The operator session was not accepted. Sign in with the deployment token and retry.";
+  if (status === 401) return "The session was not accepted. Sign in with your wallet and retry.";
   if (status === 503) return detail || "The required live lookup is unavailable. Supply the value explicitly and retry.";
   return detail || `The request failed (HTTP ${status}).`;
 }
@@ -136,9 +136,6 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   const [intervalStart, setIntervalStart] = useState<string>(() => previousHourUtc());
   const [mode, setMode] = useState<"free" | "intel">("free");
   const [session, setSession] = useState<Session>("loading");
-  const [token, setToken] = useState("");
-  const [signingIn, setSigningIn] = useState(false);
-  const [signInError, setSignInError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -159,6 +156,12 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
     }
   }, [mode, session]);
 
+  // WalletSignIn reports the session it loads; both wallet users and the
+  // operator unlock the paid path, anonymous keeps the public view.
+  const handleSession = useCallback((next: SessionState) => {
+    setSession(next.mode === "operator" || next.mode === "user" ? "authenticated" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+  }, []);
+
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -167,21 +170,6 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   }, []);
 
   useEffect(() => stopPolling, [stopPolling]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/session", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (!cancelled) setSession(sessionMode(body));
-      })
-      .catch(() => {
-        if (!cancelled) setSession("unavailable");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const load = useCallback(
     async (id: string) => {
@@ -300,39 +288,6 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
     },
     [taskId, poll, load, stopPolling],
   );
-
-  const signIn = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token.trim()) {
-      setSignInError("Enter the operator token first.");
-      return;
-    }
-    setSigningIn(true);
-    setSignInError(null);
-    try {
-      const res = await fetch("/api/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: token.trim() }),
-      });
-      if (!res.ok) {
-        setSignInError(res.status === 401 ? "That token was not accepted." : friendlyError(res.status));
-        return;
-      }
-      const check = await fetch("/api/session", { cache: "no-store" });
-      if (sessionMode(await check.json().catch(() => null)) !== "authenticated") {
-        setSignInError("The session cookie did not stick. Allow cookies for this site and retry.");
-        return;
-      }
-      setToken("");
-      setSession("authenticated");
-      if (taskId) void load(taskId);
-    } catch {
-      setSignInError(friendlyError(0));
-    } finally {
-      setSigningIn(false);
-    }
-  }, [token, taskId, load]);
 
   const [handoffBusy, setHandoffBusy] = useState<"collect" | "create" | null>(null);
   const [handoffLog, setHandoffLog] = useState<string[]>([]);
@@ -513,7 +468,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
                   }}
                   className="text-[11.5px] font-medium text-teal hover:underline"
                 >
-                  Sign in below — paid runs need the operator token
+                  Sign in with your wallet — paid runs need a session
                 </button>
               ) : (
                 `Hard ceiling ${fmtUsd(guarantees.ceilingUsdCents / 100)} · one attempt per dimension.`
@@ -708,30 +663,11 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
           ) : (
             <>
               <p className="text-[12px] leading-relaxed text-ink-soft">
-                Free preflights are open. Approving a paid run and reading its full report need the operator token.
+                Free preflights are open. Sign in with your wallet to approve a paid run and read its full report.
               </p>
-              <form onSubmit={signIn} className="mt-2.5 flex flex-wrap items-end gap-2">
-                <label className="min-w-0 flex-1">
-                  <span className="x-label">Operator token</span>
-                  <input
-                    type="password"
-                    value={token}
-                    onChange={(e) => {
-                      setToken(e.target.value);
-                      setSignInError(null);
-                    }}
-                    placeholder="Paste the operator token"
-                    autoComplete="off"
-                    enterKeyHint="go"
-                    className="mt-1 h-9 w-full rounded-md border border-edge bg-panel-2 px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
-                  />
-                </label>
-                <button type="submit" disabled={signingIn} className="btn-secondary !min-h-9">
-                  {signingIn ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <LockKeyhole size={12} aria-hidden />}
-                  Sign in
-                </button>
-              </form>
-              {signInError && <p className="mt-1.5 text-[12px] text-risk">{signInError}</p>}
+              <div className="mt-2.5">
+                <WalletSignIn onSession={handleSession} />
+              </div>
             </>
           )}
         </div>

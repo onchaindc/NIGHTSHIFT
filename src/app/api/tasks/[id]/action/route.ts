@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { approveTask, rejectTask, defaultDeps } from "@/lib/engine/engine";
 import { getTask } from "@/lib/engine/store";
-import { requestAuthorized } from "@/lib/api/auth";
+import { callerIdentity } from "@/lib/api/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,15 +14,17 @@ export const maxDuration = 300;
  * Approve resumes execution (the engine enforces that only a task in
  * awaiting_approval can proceed); reject terminates without any spend.
  *
- * Operator-only: approval is what releases paid steps, so it must never be
- * reachable by an anonymous caller. Accepted identity: the bearer token, or
- * the operator session cookie established at /api/session (same privilege:
- * both require knowing NIGHTSHIFT_API_TOKEN).
+ * Identity: the deployment operator (bearer token or session cookie), or the
+ * task's OWNER — the signed-in wallet user who created the task. Ownership IS
+ * the human-in-the-loop here: a user approving their own task releases paid
+ * steps from THEIR allowance, which is exactly the multi-user production
+ * model. Anonymous callers and non-owners are refused.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  if (!requestAuthorized(req)) {
+  const identity = callerIdentity(req);
+  if (identity.kind === "anonymous") {
     return NextResponse.json(
-      { error: "authorization required: approving or rejecting a plan releases paid execution, so it is gated behind the operator token or session" },
+      { error: "sign in with your wallet to approve or reject runs; the task's owner or the operator can act" },
       { status: 401 },
     );
   }
@@ -37,6 +39,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const existing = await getTask(id);
   if (!existing) return NextResponse.json({ error: `task ${id} not found` }, { status: 404 });
+
+  // A signed-in user may only act on tasks they own.
+  if (identity.kind === "user" && (existing.owner ?? "").toLowerCase() !== identity.address) {
+    return NextResponse.json(
+      { error: "this task belongs to a different wallet — only its owner or the operator can act on it" },
+      { status: 403 },
+    );
+  }
 
   try {
     if (body.action === "approve") {

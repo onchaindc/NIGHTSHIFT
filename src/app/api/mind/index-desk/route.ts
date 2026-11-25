@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
+import { paidRunGate, requestedSpendCeilingCents } from "@/lib/api/userSpend";
 import { tasksForCaller } from "@/lib/api/public";
 import { listTasks } from "@/lib/engine/store";
 import { createTask, runTask, EngineError, defaultDeps } from "@/lib/engine/engine";
@@ -50,11 +50,13 @@ export async function POST(req: NextRequest) {
   }
   // Only the paid mode is privileged: free investigations never plan a
   // purchase, so they stay usable without the operator token.
-  if (mode !== "free" && !requestAuthorized(req)) {
-    return NextResponse.json(
-      { error: "authorization required: intel index desks can spend money, so they are gated behind a bearer token (NIGHTSHIFT_API_TOKEN); mode \"free\" stays open" },
-      { status: 401 },
-    );
+  if (mode !== "free") {
+  const gate = await paidRunGate(
+    req,
+    "intel index desks",
+    typeof body.spendLimitUsdCents === "number" && body.spendLimitUsdCents > 0 ? Math.round(body.spendLimitUsdCents) : undefined,
+  );
+  if (gate.kind === "deny") return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
 
   const spendLimitUsdCents =

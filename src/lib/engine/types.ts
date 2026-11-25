@@ -387,6 +387,14 @@ export interface TaskRecord {
   };
   /** Task variant: "goal" (default), "protocol_watch", or "terminal_request". */
   jobType?: JobType;
+  /**
+   * Owner of the task: the lowercase wallet address of the signed-in user who
+   * created it (wallet session), or undefined for server/operator-created
+   * runs. Owners see their own tasks in full; everyone else gets the public
+   * projection. Approval authority follows ownership: a task's own owner can
+   * approve its plan, since the owner IS the human in the loop for that task.
+   */
+  owner?: string;
   /** Set when jobType is protocol_watch; carries the watch run context. */
   watch?: WatchRef;
   /**

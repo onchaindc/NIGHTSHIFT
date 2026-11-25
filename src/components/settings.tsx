@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { hapticsEnabled, hapticsSupported, setHapticsEnabled, vibrate } from "@/lib/haptics";
+import { WalletSignIn } from "@/components/wallet-sign-in";
 import { CheckCircle2, CircleAlert, Server, Wallet } from "lucide-react";
 import { money } from "@/components/taskParts";
 import type { StatusBody } from "@/components/shell-types";
@@ -201,46 +202,49 @@ export default function Settings() {
             </ul>
           </section>
 
-          <section className="overflow-hidden rounded-lg border border-edge bg-panel" aria-label="Operator session">
-            <div className="flex items-center justify-between gap-3 border-b border-edge px-4 py-3">
-              <h2 className="x-label">Operator session</h2>
-              {signedIn === true && (
-                <span className="rounded-md border border-teal/40 bg-teal/10 px-2 py-0.5 text-[10.5px] font-medium text-teal">Signed in</span>
-              )}
+          <section className="overflow-hidden rounded-lg border border-edge bg-panel" aria-label="Session">
+            <div className="border-b border-edge px-4 py-3">
+              <h2 className="x-label">Session</h2>
             </div>
             <div className="px-4 py-3.5">
-              <p className="text-[12px] leading-relaxed text-ink-soft">
-                Full task records — objectives, plans, reports, evidence and settlement proofs — are operator-only.
-                Sign in once per browser: the token is verified server-side and kept as an HttpOnly session cookie
-                holding a derived verifier, never the token itself. The token is never embedded in page code.
-              </p>
-              {signedIn === false && (
-                <form onSubmit={signIn} className="mt-3 flex flex-wrap items-center gap-2">
-                  <input
-                    type="password"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    placeholder="operator token"
-                    autoComplete="off"
-                    className="min-h-9 min-w-[16rem] flex-1 rounded-md border border-edge bg-panel-2 px-3 text-[13px] text-ink outline-none focus:border-amber"
-                  />
-                  <button
-                    type="submit"
-                    disabled={busySession || !token}
-                    className="btn-quiet !min-h-9 disabled:opacity-50"
-                  >
-                    {busySession ? "Signing in…" : "Sign in"}
+              <WalletSignIn />
+              <details className="mt-3">
+                <summary className="cursor-pointer select-none text-[11.5px] text-ink-soft transition-colors hover:text-ink">
+                  Operator sign-in (token)
+                </summary>
+                <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">
+                  For the deployment owner only: the token is verified server-side and kept as an HttpOnly session
+                  cookie holding a derived verifier, never the token itself. Everyone else signs in with their wallet
+                  above — full task records are visible to their owner; everything else stays at the public view.
+                </p>
+                {signedIn === false && (
+                  <form onSubmit={signIn} className="mt-3 flex flex-wrap items-center gap-2">
+                    <input
+                      type="password"
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      placeholder="operator token"
+                      autoComplete="off"
+                      className="min-h-9 min-w-[16rem] flex-1 rounded-md border border-edge bg-panel-2 px-3 text-[13px] text-ink outline-none focus:border-amber"
+                    />
+                    <button
+                      type="submit"
+                      disabled={busySession || !token}
+                      className="btn-quiet !min-h-9 disabled:opacity-50"
+                    >
+                      {busySession ? "Signing in…" : "Sign in"}
+                    </button>
+                  </form>
+                )}
+                {sessionError && (
+                  <p role="alert" className="mt-2 text-[12px] text-risk">{sessionError}</p>
+                )}
+                {signedIn === true && (
+                  <button onClick={signOut} disabled={busySession} className="btn-quiet mt-3 !min-h-9 disabled:opacity-50">
+                    Sign out
                   </button>
-                </form>
-              )}
-              {sessionError && (
-                <p role="alert" className="mt-2 text-[12px] text-risk">{sessionError}</p>
-              )}
-              {signedIn === true && (
-                <button onClick={signOut} disabled={busySession} className="btn-quiet mt-3 !min-h-9 disabled:opacity-50">
-                  Sign out
-                </button>
-              )}
+                )}
+              </details>
             </div>
           </section>
 

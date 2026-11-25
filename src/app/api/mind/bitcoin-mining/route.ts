@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
+import { paidRunGate, requestedSpendCeilingCents } from "@/lib/api/userSpend";
 import { tasksForCaller } from "@/lib/api/public";
 import { listTasks } from "@/lib/engine/store";
 import { createTask, defaultDeps, runTask } from "@/lib/engine/engine";
@@ -65,14 +65,9 @@ export async function POST(req: NextRequest) {
 
   const mode = body.mode === "free" ? "free" : body.mode === "intel" || body.mode === undefined ? "intel" : null;
   if (!mode) return NextResponse.json({ error: 'mode must be "free" or "intel"' }, { status: 400 });
-  if (mode === "intel" && !requestAuthorized(req)) {
-    return NextResponse.json(
-      {
-        error:
-          'authorization required: a paid mining run can spend money, so it needs the operator session or bearer token; mode "free" stays open',
-      },
-      { status: 401 },
-    );
+  if (mode === "intel") {
+  const gate = await paidRunGate(req, "paid mining runs");
+  if (gate.kind === "deny") return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
 
   let blockHeight = body.blockHeight;

@@ -8,15 +8,14 @@ import {
   ChevronDown,
   CircleAlert,
   Loader2,
-  LockKeyhole,
   Radio,
-  RefreshCw,
   ShieldCheck,
   Wand2,
 } from "lucide-react";
 
 import type { TaskRecord } from "@/lib/engine/types";
 import { vibrate } from "@/lib/haptics";
+import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 
 /**
@@ -103,7 +102,8 @@ const STATUS_DOT: Record<string, string> = {
 function sessionMode(body: unknown): Session {
   if (!body || typeof body !== "object") return "unavailable";
   const mode = (body as { mode?: unknown }).mode;
-  return mode === "operator" ? "authenticated" : mode === "anonymous" ? "anonymous" : "unavailable";
+  // "user" (wallet session) and "operator" both unlock the paid path.
+  return mode === "operator" || mode === "user" ? "authenticated" : mode === "anonymous" ? "anonymous" : "unavailable";
 }
 
 function fmtUsd(value: number | null | undefined, digits = 2): string {
@@ -167,7 +167,7 @@ function stateLabel(state: string | null): string {
 }
 
 function friendlyError(status: number, detail?: string): string {
-  if (status === 401) return "The operator session was not accepted. Sign in with the deployment token and retry.";
+  if (status === 401) return "The session was not accepted. Sign in with your wallet and retry.";
   return detail || `The request failed (HTTP ${status}).`;
 }
 
@@ -185,15 +185,18 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   // Last state seen by the poller — haptics fire only on transitions.
   const prevStateRef = useRef<TaskRecord["state"] | null>(null);
   const [session, setSession] = useState<Session>("loading");
-  const [token, setToken] = useState("");
-  const [signingIn, setSigningIn] = useState(false);
-  const [signInError, setSignInError] = useState<string | null>(null);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const approveGraceUntil = useRef(0);
   const resultRef = useRef<HTMLDivElement>(null);
   const opsRef = useRef<HTMLDetailsElement>(null);
+
+  // WalletSignIn reports the session it loads (wallet user, operator, or
+  // anonymous); both unlock the paid path, anonymous keeps the public view.
+  const handleSession = useCallback((next: SessionState) => {
+    setSession(next.mode === "operator" || next.mode === "user" ? "authenticated" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+  }, []);
 
   useEffect(() => {
     if (mode === "intel" && session === "anonymous") {
@@ -209,21 +212,6 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   }, []);
 
   useEffect(() => stopPolling, [stopPolling]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/session", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (!cancelled) setSession(sessionMode(body));
-      })
-      .catch(() => {
-        if (!cancelled) setSession("unavailable");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const load = useCallback(
     async (id: string) => {
@@ -366,35 +354,6 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
     [taskId, poll, load, stopPolling],
   );
 
-  const signIn = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token.trim()) {
-      setSignInError("Enter the operator token first.");
-      return;
-    }
-    setSigningIn(true);
-    setSignInError(null);
-    try {
-      const res = await fetch("/api/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: token.trim() }),
-      });
-      if (!res.ok) {
-        setSignInError(res.status === 401 ? "That token was not accepted." : friendlyError(res.status));
-        return;
-      }
-      const check = await fetch("/api/session", { cache: "no-store" });
-      const body = await check.json().catch(() => null);
-      setSession(sessionMode(body));
-      setToken("");
-    } catch {
-      setSignInError(friendlyError(0));
-    } finally {
-      setSigningIn(false);
-    }
-  }, [token]);
-
   const state = task?.state ?? null;
   const awaiting = state === "awaiting_approval";
   const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
@@ -503,7 +462,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                 }}
                 className="text-[11.5px] font-medium text-teal hover:underline"
               >
-                Sign in below — paid runs need the operator token
+                Sign in with your wallet — paid runs need a session
               </button>
             )}
           </div>
@@ -692,46 +651,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
           )}
         </summary>
         <div className="border-t border-edge px-4 py-3 sm:px-5">
-          {session === "authenticated" ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[12px] leading-relaxed text-ink-soft">
-                This browser can approve the paid plan and read the full evidence trail.
-              </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
-                  setSession("anonymous");
-                }}
-                className="btn-secondary !min-h-8 !text-[11.5px]"
-              >
-                Sign out
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={signIn} className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[240px] flex-1">
-                <label htmlFor={`ops-token-${slug}`} className="x-label">Deployment token</label>
-                <div className="relative mt-1.5">
-                  <LockKeyhole size={13} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
-                  <input
-                    id={`ops-token-${slug}`}
-                    type="password"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    placeholder="NIGHTSHIFT_API_TOKEN"
-                    autoComplete="off"
-                    className="h-10 w-full rounded-lg border border-edge bg-panel-2 pl-8 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
-                  />
-                </div>
-              </div>
-              <button type="submit" disabled={signingIn} className="btn-primary !min-h-10">
-                {signingIn ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <RefreshCw size={13} aria-hidden />}
-                Sign in
-              </button>
-              {signInError && <p className="w-full text-[12px] text-risk">{signInError}</p>}
-            </form>
-          )}
+          <WalletSignIn onSession={handleSession} />
           <p className="mt-3 border-t border-edge pt-3 text-[11px] leading-relaxed text-ink-faint">
             Paid runs sign exact x402 offers after the approval gate; every committed answer is re-derived against its node
             signal before the report is written.{probedAt ? ` Capability matrix probed unpaid ${probedAt.slice(0, 10)}.` : ""}{" "}

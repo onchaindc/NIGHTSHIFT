@@ -1,5 +1,6 @@
 import type { TaskRecord } from "@/lib/engine/types";
 import {
+  callerIdentity,
   bearerTokenOf,
   operatorCookieFromHeader,
   requestAuthorizedFromParts,
@@ -72,14 +73,31 @@ export function readAuthorized(req: Request): boolean {
   return requestAuthorizedFromParts(bearerTokenOf(req), operatorCookieFromHeader(req.headers.get("cookie")));
 }
 
-/** Present tasks with the right fidelity for the caller's authorization. */
+/** Present tasks with the right fidelity for the caller's authorization.
+ *
+ * Identity-aware since multi-user: the operator sees everything; a signed-in
+ * wallet user sees their OWN tasks in full (owner matches their session
+ * address) and everyone else's tasks only as the public projection; an
+ * anonymous caller sees only public projections, as before. */
 export function tasksForCaller(req: Request, tasks: TaskRecord[]): { tasks: TaskRecord[]; redacted: boolean } {
-  if (readAuthorized(req)) return { tasks, redacted: false };
+  const identity = callerIdentity(req);
+  if (identity.kind === "operator") return { tasks, redacted: false };
+  if (identity.kind === "user") {
+    const address = identity.address;
+    return {
+      tasks: tasks.map((t) => (t.owner?.toLowerCase() === address ? t : publicTaskView(t))),
+      redacted: false,
+    };
+  }
   return { tasks: tasks.map(publicTaskView), redacted: true };
 }
 
 /** Single-task variant of tasksForCaller. */
 export function taskForCaller(req: Request, task: TaskRecord): { task: TaskRecord; redacted: boolean } {
-  if (readAuthorized(req)) return { task, redacted: false };
+  const identity = callerIdentity(req);
+  if (identity.kind === "operator") return { task, redacted: false };
+  if (identity.kind === "user" && task.owner?.toLowerCase() === identity.address) {
+    return { task, redacted: false };
+  }
   return { task: publicTaskView(task), redacted: true };
 }

@@ -166,6 +166,9 @@ export interface CreateTaskInput {
   plan?: PlanStep[];
   criteria?: VerificationCriteria;
   assumptions?: string[];
+  /** Wallet address of the signed-in user creating this task; omitted for
+   * server/operator runs. Drives ownership (see TaskRecord.owner). */
+  owner?: string;
 }
 
 export async function createTask(input: CreateTaskInput, deps: EngineDeps = defaultDeps()): Promise<TaskRecord> {
@@ -210,6 +213,7 @@ export async function createTask(input: CreateTaskInput, deps: EngineDeps = defa
     result: null,
     error: null,
     origin: input.origin,
+    ...(input.owner ? { owner: input.owner.toLowerCase() } : {}),
     ...(input.jobType ? { jobType: input.jobType } : {}),
     ...(input.watch ? { watch: input.watch } : {}),
   };

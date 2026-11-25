@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
+import { paidRunGate, requestedSpendCeilingCents } from "@/lib/api/userSpend";
 import { tasksForCaller } from "@/lib/api/public";
 import { listTasks } from "@/lib/engine/store";
 import { createTask, defaultDeps, reapIfStalled, runTask, EngineError } from "@/lib/engine/engine";
@@ -48,14 +48,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
   if (body.mode !== undefined && body.mode !== "free" && body.mode !== "intel") {
     return NextResponse.json({ error: 'mode must be "free" or "intel"' }, { status: 400 });
   }
-  if (mode === "intel" && !requestAuthorized(req)) {
-    return NextResponse.json(
-      {
-        error:
-          'authorization required: intel runs can spend money, so they need the operator bearer token (NIGHTSHIFT_API_TOKEN); mode "free" stays open',
-      },
-      { status: 401 },
-    );
+  if (mode === "intel") {
+  const gate = await paidRunGate(req, "intel runs on this Mind");
+  if (gate.kind === "deny") return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
 
   const inputs = (body.inputs ?? {}) as Record<string, Record<string, unknown>>;

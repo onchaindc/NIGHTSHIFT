@@ -108,3 +108,121 @@ export function cronAuthorized(req: Request): boolean {
   if (!presented) return false;
   return secretMatches(presented, expected);
 }
+
+// ---------------------------------------------------------------------------
+// Wallet-signed USER sessions (multi-user production).
+//
+// The operator token above stays what it was: ONE identity for the deployment
+// owner, and the signing secret for this cookie — but it is never again
+// something a regular user types. Users sign in with their OWN in-app wallet:
+// the browser asks the wallet to personal_sign a canonical, time-bound,
+// explicitly-not-a-transaction message; the server verifies the signature
+// recovers the claimed address (pure crypto, no secrets needed to verify) and
+// issues an HttpOnly cookie carrying a HMAC-signed {address, exp} payload.
+// The HMAC key derives from NIGHTSHIFT_API_TOKEN, which therefore remains an
+// internal server secret while losing its role as a user-facing credential.
+// Fails closed when the token is unset (no signing secret, no sessions).
+// ---------------------------------------------------------------------------
+
+import { createHmac, randomUUID } from "node:crypto";
+
+import { buildUserSignInMessage } from "@/lib/api/signInMessage";
+
+export { buildUserSignInMessage };
+
+export const USER_COOKIE = "ns_user";
+const USER_COOKIE_CONTEXT = "ns-user-session-v1";
+export const USER_SESSION_MAX_AGE_S = 30 * 24 * 60 * 60; // 30 days
+
+/** HMAC key for user session cookies; null when the deployment has no server secret. */
+function userSessionKey(): Buffer | null {
+  const token = (process.env.NIGHTSHIFT_API_TOKEN ?? "").trim();
+  if (!token) return null;
+  return createHmac("sha256", token).update(USER_COOKIE_CONTEXT).digest();
+}
+
+/** True when the deployment can issue user session cookies at all. */
+export function userSessionsAvailable(): boolean {
+  return userSessionKey() !== null;
+}
+
+/** Shape and freshness of a presented sign-in message (±10 minutes clock slack). */
+export function userSignInMessageValid(
+  message: string,
+): { ok: true; address: string } | { ok: false; reason: string } {
+  const m = /^NIGHTSHIFT sign-in\nAddress: (0x[0-9a-fA-F]{40})\nTime: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\nPurpose: prove wallet ownership/.exec(
+    message,
+  );
+  if (!m) return { ok: false, reason: "the signed message is not the NIGHTSHIFT sign-in template" };
+  const time = Date.parse(m[2]);
+  if (!Number.isFinite(time)) return { ok: false, reason: "the signed message carries an unreadable time" };
+  if (Math.abs(Date.now() - time) > 10 * 60 * 1000) {
+    return { ok: false, reason: "the signed message has expired — sign a fresh one and retry" };
+  }
+  return { ok: true, address: m[1] };
+}
+
+/** Cookie value for a fresh user session: payload.signature (HMAC-signed, HttpOnly). */
+export function userSessionCookieValue(address: string, nowMs: number = Date.now()): string {
+  const key = userSessionKey();
+  if (!key) return "";
+  const payload = Buffer.from(
+    JSON.stringify({ a: address.toLowerCase(), e: nowMs + USER_SESSION_MAX_AGE_S * 1000, n: randomUUID() }),
+  ).toString("base64url");
+  const sig = createHmac("sha256", key).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+/** Verify a presented user-session cookie; returns the lowercase address or null. */
+export function userAddressFromSessionCookie(value: string | undefined): string | null {
+  const key = userSessionKey();
+  if (!key || !value) return null;
+  const dot = value.indexOf(".");
+  if (dot <= 0) return null;
+  const payload = value.slice(0, dot);
+  const sig = value.slice(dot + 1);
+  const expectedSig = createHmac("sha256", key).update(payload).digest("base64url");
+  if (!secretMatches(sig, expectedSig)) return null;
+  let parsed: { a?: unknown; e?: unknown };
+  try {
+    parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { a?: unknown; e?: unknown };
+  } catch {
+    return null;
+  }
+  if (typeof parsed.a !== "string" || typeof parsed.e !== "number") return null;
+  if (parsed.e < Date.now()) return null;
+  return parsed.a;
+}
+
+/** The wallet address of the caller's user session, or null. */
+export function userAddressFromRequest(req: Request): string | null {
+  const header = req.headers.get("cookie");
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name === USER_COOKIE) return userAddressFromSessionCookie(rest.join("="));
+  }
+  return null;
+}
+
+/**
+ * Who is calling: the deployment operator (token or operator cookie), a
+ * signed-in wallet user, or an anonymous visitor. Checked in that order.
+ */
+export type CallerIdentity =
+  | { kind: "operator" }
+  | { kind: "user"; address: string }
+  | { kind: "anonymous" };
+
+export function callerIdentity(req: Request): CallerIdentity {
+  if (requestAuthorized(req)) return { kind: "operator" };
+  const address = userAddressFromRequest(req);
+  return address ? { kind: "user", address } : { kind: "anonymous" };
+}
+
+/** Write/spend authorization for multi-user routes: operator OR wallet session. */
+export function requestAuthorizedOrUser(req: Request): { authorized: boolean; userAddress: string | null } {
+  if (requestAuthorized(req)) return { authorized: true, userAddress: null };
+  const address = userAddressFromRequest(req);
+  return { authorized: !!address, userAddress: address };
+}

@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import type { IndexDeskReport } from "@/lib/indexdesk/report";
+import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import {
   DESK_STATE_META,
   deskHrefWithTask,
@@ -119,15 +120,18 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const [snap, setSnap] = useState<DeskTaskSnapshot | null>(null);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [signInError, setSignInError] = useState<string | null>(null);
-  const [token, setToken] = useState("");
-  const [signingIn, setSigningIn] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   // Approval resumes in the background (after()), so the first poll or two can
   // still show awaiting_approval. Without this grace the client would stop
   // polling and show the gate again immediately after the user approved it.
   const approveGraceUntil = useRef(0);
+
+  // WalletSignIn reports the session it loads; both wallet users and the
+  // operator unlock the paid path, anonymous keeps the public view.
+  const handleSession = useCallback((next: SessionState) => {
+    setSession(next.mode === "operator" || next.mode === "user" ? "authenticated" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+  }, []);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -139,21 +143,6 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   useEffect(() => stopPolling, [stopPolling]);
 
   // Operator session state drives the sign-in panel and approval wording.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/session", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (!cancelled) setSession(deskSessionMode(body));
-      })
-      .catch(() => {
-        if (!cancelled) setSession("unavailable");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const load = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store" });
@@ -341,61 +330,6 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
     [taskId, poll, load, stopPolling],
   );
 
-  const signIn = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const value = token.trim();
-      if (!value) {
-        setSignInError("Enter the operator token first.");
-        return;
-      }
-      setSigningIn(true);
-      setSignInError(null);
-      try {
-        const res = await fetch("/api/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: value }),
-        });
-        if (!res.ok) {
-          setSignInError(
-            res.status === 401
-              ? "That operator token was not accepted. Use the exact value configured for this deployment (a trailing space or newline is tolerated)."
-              : friendlyDeskError(res.status),
-          );
-          return;
-        }
-        // Do not claim success until the server confirms the HttpOnly cookie
-        // actually stuck: a blocked cookie would otherwise look like a dead
-        // button while every request stays anonymous.
-        const check = await fetch("/api/session", { cache: "no-store" });
-        const state = deskSessionMode(await check.json().catch(() => null));
-        if (state !== "authenticated") {
-          setSignInError(
-            "You were signed in, but this browser did not keep the session cookie. Allow cookies for this site and try again.",
-          );
-          return;
-        }
-        setToken("");
-        setSession("authenticated");
-        setActionError(null);
-        // Re-read the active investigation at full clearance immediately.
-        if (taskId) void load(taskId);
-      } catch {
-        setSignInError(friendlyDeskError(0));
-      } finally {
-        setSigningIn(false);
-      }
-    },
-    [token, taskId, load],
-  );
-
-  const signOut = useCallback(async () => {
-    await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
-    setSession("anonymous");
-    if (taskId) void load(taskId);
-  }, [taskId, load]);
-
   const reset = () => {
     stopPolling();
     setTaskId(null);
@@ -449,67 +383,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       <section id="operator-access" className="mt-6 scroll-mt-20 overflow-hidden rounded-xl border border-edge bg-panel">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
           <p className="x-label">Operator access</p>
-          {session === "authenticated" ? (
-            <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal">
-              <span aria-hidden className="size-1.5 rounded-full bg-teal" /> Signed in
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint">
-              <span aria-hidden className="size-1.5 rounded-full bg-ink-faint/60" /> Browsing anonymously
-            </span>
-          )}
-        </div>
-        <div className="px-4 py-3 sm:px-5">
-          {session === "authenticated" ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[12px] leading-relaxed text-ink-soft">
-                This browser holds an operator session: paid intel desks and plan approvals are available.
-              </p>
-              <button
-                type="button"
-                onClick={signOut}
-                className="text-[11.5px] font-medium text-ink-faint transition-colors hover:text-ink"
-              >
-                Sign out
-              </button>
-            </div>
-          ) : (
-            <>
-              <p className="text-[12px] leading-relaxed text-ink-soft">
-                Free desks are open to everyone. Running a paid intel desk or approving its asks needs the
-                operator token — sign in here once; the token is verified server-side and is not stored in this page.
-              </p>
-              <form onSubmit={signIn} className="mt-2.5 flex flex-wrap items-end gap-2">
-                <label className="min-w-0 flex-1">
-                  <span className="x-label">Operator token</span>
-                  <input
-                    type="password"
-                    value={token}
-                    onChange={(e) => {
-                      setToken(e.target.value);
-                      setSignInError(null);
-                    }}
-                    placeholder="Paste the operator token"
-                    autoComplete="off"
-                    enterKeyHint="go"
-                    className="mt-1 h-9 w-full rounded-md border border-edge bg-panel-2 px-2 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
-                  />
-                </label>
-                <button
-                  type="submit"
-                  disabled={signingIn}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink transition-colors hover:border-teal/50 hover:text-teal disabled:opacity-60"
-                >
-                  {signingIn ? <Loader2 size={12} className="animate-spin" aria-hidden /> : null}
-                  Sign in
-                </button>
-              </form>
-              {signInError && <p className="mt-1.5 text-[12px] text-risk">{signInError}</p>}
-              {session === "unavailable" && (
-                <p className="mt-1.5 text-[11.5px] text-ink-faint">Session status could not be read; signing in still works.</p>
-              )}
-            </>
-          )}
+          <WalletSignIn onSession={handleSession} />
         </div>
       </section>
 

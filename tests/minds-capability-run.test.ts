@@ -120,7 +120,7 @@ describe("capability run planner", () => {
     const res = await investigate(req, { params: Promise.resolve({ slug: "portsentinel" }) });
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("authorization required");
+    expect(body.error).toContain("sign in with your wallet");
 
     const missing = new NextRequest("http://localhost/api/minds/nope/investigate", {
       method: "POST",
