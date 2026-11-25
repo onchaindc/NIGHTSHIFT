@@ -521,7 +521,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
             </p>
           </div>
           {error && (
-            <p className="flex items-start gap-2 text-[12px] leading-relaxed text-risk">
+            <p className="flex items-start gap-2 text-[12px] leading-relaxed break-words [overflow-wrap:anywhere] text-risk">
               <CircleAlert size={13} className="mt-0.5 shrink-0" aria-hidden /> {error}
             </p>
           )}
@@ -589,14 +589,14 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
                   {eventTail.map((e) => (
                     <li key={e.id} className="grid grid-cols-[76px_1fr] gap-2 text-[11.5px] leading-relaxed">
                       <span className="tabular text-ink-faint">{new Date(e.ts).toLocaleTimeString("en-US", { hour12: false })}</span>
-                      <span className={e.type === "step_failed" ? "text-risk" : "text-ink-soft"}>{e.message}</span>
+                      <span className={`min-w-0 break-words [overflow-wrap:anywhere] ${e.type === "step_failed" ? "text-risk" : "text-ink-soft"}`}>{e.message}</span>
                     </li>
                   ))}
                 </ol>
               )}
 
               {state === "failed" && task?.error && (
-                <p className="rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12px] leading-relaxed text-risk">{task.error}</p>
+                <p className="rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12px] leading-relaxed break-words [overflow-wrap:anywhere] text-risk">{task.error}</p>
               )}
 
               {redacted && state === "completed" && (

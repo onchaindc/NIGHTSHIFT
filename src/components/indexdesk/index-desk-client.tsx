@@ -415,7 +415,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <Link href="/minds" className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
         ← All Minds
       </Link>
@@ -745,7 +745,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       </section>
 
       {error && (
-        <section className="mt-5 rounded-xl border border-risk/40 bg-risk/5 p-4 text-[13px] text-risk" role="alert">
+        <section className="mt-5 rounded-xl border border-risk/40 bg-risk/5 p-4 text-[13px] break-words [overflow-wrap:anywhere] text-risk" role="alert">
           <p className="flex items-center gap-1.5 font-medium"><XCircle size={14} aria-hidden /> {sanitizeDeskMessage(error)}</p>
         </section>
       )}

@@ -22,9 +22,11 @@ export const maxDuration = 60;
  *   mode "free"  — probes each dimension (canonical schema + live price),
  *                  records the gap ledger and returns a readiness report.
  *                  No payment path exists and nothing is signed.
- *   mode "intel" — the same baseline, then ONE paid attempt per routable
- *                  dimension after the human approval gate. Requires the
- *                  operator bearer token and waits for approval.
+ *   mode "intel" — the same baseline, then paid asks per routable dimension
+ *                  after the human approval gate: each ask runs its pinned
+ *                  route first and a failed route is re-routed once through
+ *                  the node's router, always inside the approved ceiling.
+ *                  Requires the operator bearer token and waits for approval.
  *
  * This is an API path, not a launch button: Minds without an executor remain
  * "in development" in the catalogue and no profile claims otherwise.
@@ -83,7 +85,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
         "the capability matrix is the plan: unsupported dimensions are excluded and reported as gaps, never asked through a loosely related intent",
         "a verified route means the canonical schema, pinned provider and price were accepted by the node; it is not a purchased answer",
         mode === "intel"
-          ? "no ask is signed before the operator approves this exact plan; each ask is one attempt with no retry after signing"
+          ? "no ask is signed before the operator approves this exact plan; each ask runs its pinned route first and a failed route is re-routed once through the node's router, always inside the approved ceiling"
           : "free mode plans no purchase and can spend nothing by construction",
       ],
     });

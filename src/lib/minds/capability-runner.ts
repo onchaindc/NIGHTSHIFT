@@ -79,6 +79,54 @@ export class CapabilityBudgetError extends CapabilityError {
 }
 
 /* ------------------------------------------------------------------ */
+/* Human failure text                                                  */
+/* ------------------------------------------------------------------ */
+
+const FAILURE_CODE_PHRASES: Array<[RegExp, string]> = [
+  [/SEARCH_TOO_BROAD/i, "the search was too broad — a more specific identifier (registry id, LEI, exact legal name) is needed"],
+  [/\bNOT_FOUND\b/i, "no record matched the input"],
+  [/UNSUPPORTED_INTENT/i, "this provider does not serve the intent"],
+  [/INVALID_PARAM/i, "a parameter was rejected by the provider"],
+  [/RATE_LIMIT/i, "the provider is rate-limiting right now"],
+  [/\bTIMEOUT\b/i, "the provider timed out"],
+];
+
+/**
+ * Turn a raw provider failure (often an HTTP body with embedded JSON) into
+ * one readable sentence. The raw text is never put in front of the reader;
+ * callers that need it for audit keep it in event data.
+ */
+export function describeAskFailure(
+  detail: string,
+  opts: { httpStatus?: number; paymentSettled?: boolean } = {},
+): string {
+  const raw = (detail ?? "").trim();
+  let human = "";
+  for (const [re, phrase] of FAILURE_CODE_PHRASES) {
+    if (re.test(raw)) {
+      human = phrase;
+      break;
+    }
+  }
+  if (!human) {
+    const msg = raw.match(/"message"\s*:\s*"([^"]{3,160})"/);
+    if (msg) human = msg[1];
+  }
+  const parts: string[] = [];
+  if (opts.httpStatus) parts.push(`the provider answered HTTP ${opts.httpStatus}`);
+  parts.push(human || "the ask could not be completed");
+  const notCredited = /not_credited/i.test(raw);
+  if (opts.paymentSettled || notCredited) {
+    parts.push(
+      notCredited
+        ? "the payment settled but was not credited, so no charge should appear — the receipt is the record"
+        : "the payment may have settled — the receipt records the settlement state and no answer was delivered",
+    );
+  }
+  return `${parts.join("; ")}.`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Spec construction                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -187,20 +235,35 @@ export async function probeCapabilitySet(
       continue;
     }
 
-    const outcome = await deps.probe(spec);
+    let outcome = await deps.probe(spec);
+    let routedVia = dim.provider ?? "router";
+    if (outcome.kind !== "challenge" && spec.minerId) {
+      // The pinned provider refused the ask — give the node's router one free
+      // shot before naming the route unavailable. A different provider may
+      // still serve the same intent.
+      outcome = await deps.probe({ ...spec, minerId: undefined });
+      if (outcome.kind === "challenge") routedVia = "router (fallback)";
+    }
     if (outcome.kind === "challenge") {
       const cents = Math.round(outcome.pricedOffer.amountCents);
       plannedCostUsdCents += cents;
-      offers.push({ dimension: dim, spec, approvedOffer: outcome.approvedOffer, priceUsdCents: cents });
+      offers.push({
+        dimension: dim,
+        // The offer must be executed against the exact spec it was probed
+        // with — a router-fallback offer is executed unpinned.
+        spec: routedVia.startsWith("router") ? { ...spec, minerId: undefined } : spec,
+        approvedOffer: outcome.approvedOffer,
+        priceUsdCents: cents,
+      });
       dimensions.push({
         dimension: dim.id,
         label: dim.label,
         status: "routable",
         intent: dim.intent as string,
-        provider: dim.provider ?? "router",
+        provider: routedVia,
         priceUsdCents: cents,
         network: outcome.approvedOffer.network,
-        detail: `routable at $${(cents / 100).toFixed(2)} on ${outcome.approvedOffer.network} (unpaid probe; nothing signed)`,
+        detail: `routable at $${(cents / 100).toFixed(2)} on ${outcome.approvedOffer.network} via ${routedVia} (unpaid probe; nothing signed)`,
       });
     } else if (outcome.kind === "rejected") {
       dimensions.push({
@@ -281,6 +344,12 @@ export interface ApprovedDimensionInput {
   params: Record<string, unknown>;
   approvedOffer: ApprovedOffer;
   remainingBudgetUsdCents: number;
+  /**
+   * Execute against this exact spec instead of rebuilding it from the
+   * dimension. Required when the approved offer came from a router-fallback
+   * probe: the drift check must see the same spec the offer was priced for.
+   */
+  spec?: AskRequestSpec;
   deps?: CapabilityRunnerDeps;
 }
 
@@ -298,7 +367,7 @@ export async function executeApprovedDimension(input: ApprovedDimensionInput): P
     throw new CapabilityBudgetError(priceUsdCents, remainingBudgetUsdCents);
   }
 
-  const spec = buildCapabilitySpec(dim, params);
+  const spec = input.spec ?? buildCapabilitySpec(dim, params);
   const outcome = await deps.execute({ spec, approved: true, approvedOffer });
   if (outcome.kind !== "answered") {
     const detail =
@@ -340,7 +409,13 @@ export async function executeApprovedDimension(input: ApprovedDimensionInput): P
     dimension: dim.id,
     label: dim.label,
     intent: dim.intent,
-    provider: dim.provider ?? "router",
+    // Attribution: a pinned ask keeps its registry provider; a router-fallback
+    // ask is attributed to whoever actually served it, when the node says so.
+    provider: spec.minerId
+      ? (dim.provider ?? spec.minerId)
+      : outcome.minerName
+        ? String(outcome.minerName)
+        : (outcome.minerId ? String(outcome.minerId) : "router"),
     signalHash: outcome.signalHash,
     receiptHash: outcome.receipt.receipt_hash,
     verifiedAt,

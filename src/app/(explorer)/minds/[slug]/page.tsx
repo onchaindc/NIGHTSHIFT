@@ -79,7 +79,7 @@ export default async function MindProfilePage({ params }: Params) {
   const ceiling = routable.reduce((sum, d) => sum + (d.priceUsdCents ?? 1), 0);
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <Link href="/minds" className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
         <ArrowLeft size={12} aria-hidden /> All Minds
       </Link>
@@ -137,7 +137,7 @@ export default async function MindProfilePage({ params }: Params) {
       )}
 
       {/* Scope & limits — compact, two columns */}
-      <section className="mt-10 grid gap-8 border-t border-edge pt-7 lg:grid-cols-2" aria-label="Scope and limits">
+      <section className="mt-8 grid gap-8 border-t border-edge pt-6 lg:grid-cols-2" aria-label="Scope and limits">
         <div>
           <h2 className="x-label !mt-0">What it investigates</h2>
           <ul className="mt-2.5 space-y-2">
@@ -161,7 +161,7 @@ export default async function MindProfilePage({ params }: Params) {
 
       {/* Coverage detail — collapsed until asked for */}
       {caps && (
-        <details className="group mt-8 rounded-xl border border-edge bg-panel">
+        <details className="group mt-6 rounded-xl border border-edge bg-panel">
           <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5">
             <span className="text-[13px] font-medium text-ink">
               Coverage detail — {routable.length} routes, {gapDims.length} unsupported

@@ -410,7 +410,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                     {d.label}
                     <span className="ml-2 normal-case tracking-normal text-ink-faint/80">{fmtUsd((d.priceUsdCents ?? 1) / 100)}</span>
                   </p>
-                  <div className="mt-1.5 grid gap-2.5 sm:grid-cols-2">
+                  <div className="mt-1.5 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
                     {d.params.map((p) => (
                       <input
                         key={p.name}
@@ -449,7 +449,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
               {
                 value: "intel" as const,
                 title: `Paid answers — up to ${fmtUsd(ceilingUsdCents / 100)}`,
-                body: "One paid attempt per route after your explicit approval.",
+                body: "Waits for your approval; a failed route is re-routed once automatically.",
               },
             ].map((opt) => (
               <button
@@ -524,7 +524,8 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                   </p>
                   <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">
                     {routable.length} route{routable.length === 1 ? "" : "s"} priced at {fmtUsd(ceilingUsdCents / 100)} total. Approving
-                    releases one paid attempt per route, re-checked against each live offer.
+                    releases each pinned route, re-checked against its live offer; a failed route is re-routed once through the
+                    node's router. Spend never exceeds this ceiling.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button type="button" onClick={() => void act("approve")} disabled={!!acting} className="btn-primary !min-h-9">
@@ -547,18 +548,18 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
               )}
 
               {eventTail.length > 0 && (
-                <ol className="space-y-1.5 border-t border-edge pt-3">
+                  <ol className="space-y-1.5 border-t border-edge pt-3">
                   {eventTail.map((e) => (
                     <li key={e.id} className="grid grid-cols-[64px_1fr] gap-2 text-[11.5px] leading-relaxed">
                       <span className="tabular text-ink-faint">{new Date(e.ts).toLocaleTimeString("en-US", { hour12: false })}</span>
-                      <span className={e.type === "step_failed" ? "text-risk" : "text-ink-soft"}>{e.message}</span>
+                      <span className={`min-w-0 break-words [overflow-wrap:anywhere] ${e.type === "step_failed" ? "text-risk" : "text-ink-soft"}`}>{e.message}</span>
                     </li>
                   ))}
                 </ol>
               )}
 
               {state === "failed" && task?.error && (
-                <p className="rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12px] leading-relaxed text-risk">{task.error}</p>
+                <p className="rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12px] leading-relaxed break-words [overflow-wrap:anywhere] text-risk">{task.error}</p>
               )}
 
               {redacted && state === "completed" && (
@@ -622,11 +623,11 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                       ) : null}
                     </div>
                     {values.length > 0 ? (
-                      <dl className="mt-2 grid gap-x-4 gap-y-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-2.5 text-[12px] sm:grid-cols-2">
+                      <dl className="mt-2 grid gap-x-4 gap-y-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-2.5 text-[12px] sm:grid-cols-2 lg:grid-cols-3">
                         {values.map(([k, v]) => (
                           <div key={k} className="flex flex-wrap items-baseline justify-between gap-x-3">
                             <dt className="text-ink-faint">{k}</dt>
-                            <dd className="tabular text-ink">{v}</dd>
+                            <dd className="tabular min-w-0 break-words text-ink">{v}</dd>
                           </div>
                         ))}
                       </dl>
@@ -634,7 +635,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                       <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">{plainDetail(d.status, d.detail)}</p>
                     )}
                     {d.missingFields && d.missingFields.length > 0 && (
-                      <p className="mt-1 text-[11px] text-amber-deep">
+                      <p className="mt-1 text-[11px] break-words text-amber-deep">
                         Not returned: {d.missingFields.map(humanizeKey).join(", ")}
                       </p>
                     )}
@@ -642,14 +643,6 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                 );
               })}
             </ul>
-            {report.missing.length > 0 && (
-              <div className="border-t border-edge px-4 py-3 sm:px-5">
-                <p className="text-[11.5px] leading-relaxed text-ink-faint">
-                  <span className="font-medium text-ink">Not covered on this run:</span>{" "}
-                  {report.missing.map((m) => m.reason).join(" · ")}
-                </p>
-              </div>
-            )}
             <details className="group border-t border-edge">
               <summary className="flex cursor-pointer items-center justify-between gap-2 px-4 py-2.5 text-[11.5px] text-ink-faint sm:px-5">
                 Evidence — intents, providers, signal hashes

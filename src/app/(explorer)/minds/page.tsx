@@ -24,7 +24,7 @@ export default function MindsPage() {
   const planned = mindsByStatus("planned");
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-11 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-9 sm:px-6">
       <header className="max-w-[64ch]">
         <p className="x-eyebrow">NIGHTSHIFT MINDS</p>
         <h1 className="x-display-1 mt-3 text-ink">Specialists for decisions that carry consequence.</h1>
@@ -84,7 +84,12 @@ export default function MindsPage() {
                     <ArrowRight size={12} aria-hidden />
                   </Link>
                 ) : (
-                  <span className="text-[11.5px] text-ink-faint">No launch path</span>
+                  <Link
+                    href={`/minds/${mind.slug}`}
+                    className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-teal transition-colors hover:text-ink"
+                  >
+                    Run it <ArrowRight size={12} aria-hidden />
+                  </Link>
                 )}
                 <Link
                   href={`/minds/${mind.slug}`}

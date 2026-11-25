@@ -21,6 +21,7 @@ import { CAPABILITIES } from "@/lib/minds/capabilities";
 import {
   buildCapabilityReport,
   defaultCapabilityDeps,
+  describeAskFailure,
   executeApprovedDimension,
   probeCapabilitySet,
   type CapabilityRunnerDeps,
@@ -141,7 +142,9 @@ export async function executeCapabilityBaseline(
     { routable: coverage.routable, gaps: coverage.gaps, plannedCostUsdCents: coverage.plannedCostUsdCents },
   );
   for (const failure of rejected) {
-    await event(task, "step_failed", `${failure.label}: ${failure.detail}`);
+    await event(task, "step_failed", `${failure.label}: ${describeAskFailure(failure.detail)}`, {
+      rawDetail: failure.detail.slice(0, 400),
+    });
   }
   if (config.mode === "free") {
     await event(task, "step_succeeded", "Free mode: only the pre-flight ran. No offer was signed and no answer is presented as data.");
@@ -172,7 +175,7 @@ export async function executeCapabilityAsk(
   await event(
     task,
     "step_started",
-    `Paying for ${baseline.offers.length} verified dimension(s) with a $${(task.spend.limitUsdCents / 100).toFixed(2)} ceiling — one attempt each, live offer must match the approved one, budget guarded per ask`,
+    `Paying for ${baseline.offers.length} verified dimension(s) with a $${(task.spend.limitUsdCents / 100).toFixed(2)} ceiling — each ask runs its pinned route first and a failed route is re-routed once through the node's router, always inside the approved ceiling`,
   );
 
   const committed: CommittedDimension[] = [];
@@ -180,7 +183,35 @@ export async function executeCapabilityAsk(
   let answered = 0;
   let spendUsdCents = 0;
 
+  const recordAnswer = async (result: CommittedDimension, via: string): Promise<void> => {
+    answered += 1;
+    spendUsdCents += result.costUsdCents;
+    task.spend.spentUsdCents += result.costUsdCents;
+    task.spend.entries.push({
+      ts: capabilityDeps.now(),
+      description: `${config.slug}: ${result.label} via Telegraph (${via})`,
+      amountUsdCents: result.costUsdCents,
+      source: "telegraph",
+      receiptHash: result.receiptHash,
+      signalHash: result.signalHash,
+    });
+    committed.push(result);
+    await event(
+      task,
+      "spend_recorded",
+      `Spent $${(result.costUsdCents / 100).toFixed(2)} on ${result.label} (task total $${(task.spend.spentUsdCents / 100).toFixed(2)} / $${(task.spend.limitUsdCents / 100).toFixed(2)})`,
+      { amountUsdCents: result.costUsdCents, receiptHash: result.receiptHash, signalHash: result.signalHash },
+    );
+    await event(
+      task,
+      "step_succeeded",
+      `${result.label}: ${result.verification === "verified" ? "verified against the node signal" : `recorded as ${result.verification}`} — served by ${result.provider} (signal ${result.signalHash})${result.missingFields.length ? `; the answer is missing ${result.missingFields.join(", ")}` : ""}`,
+      { signalHash: result.signalHash, verification: result.verification, provider: result.provider },
+    );
+  };
+
   for (const offer of baseline.offers) {
+    const label = offer.dimension.label;
     const remaining = task.spend.limitUsdCents - task.spend.spentUsdCents;
     attempted += 1;
 
@@ -191,36 +222,57 @@ export async function executeCapabilityAsk(
         params: config.inputs[offer.dimension.id] ?? {},
         approvedOffer: offer.approvedOffer,
         remainingBudgetUsdCents: remaining,
+        spec: offer.spec,
         deps: capabilityDeps,
       });
-      answered += 1;
-      spendUsdCents += result.costUsdCents;
-      task.spend.spentUsdCents += result.costUsdCents;
-      task.spend.entries.push({
-        ts: capabilityDeps.now(),
-        description: `${config.slug}: ${result.label} via Telegraph`,
-        amountUsdCents: result.costUsdCents,
-        source: "telegraph",
-        receiptHash: result.receiptHash,
-        signalHash: result.signalHash,
-      });
-      committed.push(result);
-      await event(
-        task,
-        "spend_recorded",
-        `Spent $${(result.costUsdCents / 100).toFixed(2)} on ${result.label} (task total $${(task.spend.spentUsdCents / 100).toFixed(2)} / $${(task.spend.limitUsdCents / 100).toFixed(2)})`,
-        { amountUsdCents: result.costUsdCents, receiptHash: result.receiptHash, signalHash: result.signalHash },
-      );
-      await event(
-        task,
-        "step_succeeded",
-        `${result.label}: ${result.verification === "verified" ? "verified against the node signal" : `recorded as ${result.verification}`} (signal ${result.signalHash})${result.missingFields.length ? `; committed answer is missing ${result.missingFields.join(", ")}` : ""}`,
-        { signalHash: result.signalHash, verification: result.verification },
-      );
+      await recordAnswer(result, result.provider);
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      const label = offer.dimension.label;
-      await event(task, "step_failed", `${label}: ${detail}`);
+      const rawDetail = err instanceof Error ? err.message : String(err);
+      await event(task, "step_failed", `${label} — the first route failed: ${describeAskFailure(rawDetail)}`, {
+        rawDetail: rawDetail.slice(0, 400),
+      });
+
+      // Autonomous failover: re-route the same intent through the node's
+      // router once, inside the approved ceiling. No answer means no further
+      // attempts — the dimension stays missing, never filled with a guess.
+      const fallbackRemaining = task.spend.limitUsdCents - task.spend.spentUsdCents;
+      try {
+        const fallbackSpec = { ...offer.spec, minerId: undefined };
+        const reoffer = await capabilityDeps.probe(fallbackSpec);
+        if (reoffer.kind !== "challenge") {
+          await event(task, "step_failed", `${label} — the router found no alternate route either; the dimension stays missing.`);
+          continue;
+        }
+        const cents = Math.round(reoffer.pricedOffer.amountCents);
+        if (cents > fallbackRemaining) {
+          await event(
+            task,
+            "step_failed",
+            `${label} — an alternate route exists at $${(cents / 100).toFixed(2)} but only $${(fallbackRemaining / 100).toFixed(2)} of the approved ceiling remains, so it was not spent.`,
+          );
+          continue;
+        }
+        await event(
+          task,
+          "step_started",
+          `${label} — re-routing through the router: an alternate provider at $${(cents / 100).toFixed(2)} (one attempt, inside the approved ceiling)`,
+        );
+        const result = await executeApprovedDimension({
+          slug: config.slug,
+          dimension: offer.dimension,
+          params: config.inputs[offer.dimension.id] ?? {},
+          approvedOffer: reoffer.approvedOffer,
+          remainingBudgetUsdCents: fallbackRemaining,
+          spec: fallbackSpec,
+          deps: capabilityDeps,
+        });
+        await recordAnswer(result, "router fallback");
+      } catch (err2) {
+        const raw2 = err2 instanceof Error ? err2.message : String(err2);
+        await event(task, "step_failed", `${label} — the alternate route failed too: ${describeAskFailure(raw2)}`, {
+          rawDetail: raw2.slice(0, 400),
+        });
+      }
     }
   }
 

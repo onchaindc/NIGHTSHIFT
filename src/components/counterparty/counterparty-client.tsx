@@ -454,7 +454,7 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
   const classification = analysis?.kind === "analyzed" ? analysis.classification : null;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <Link href="/minds" className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
         ← All Minds
       </Link>
@@ -587,7 +587,7 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
         )}
 
         {failure && (
-          <section className="mt-5 rounded-xl border border-risk/40 bg-risk/5 p-4 text-[13px] text-risk">
+          <section className="mt-5 rounded-xl border border-risk/40 bg-risk/5 p-4 text-[13px] break-words [overflow-wrap:anywhere] text-risk">
             <p className="flex items-center gap-1.5 font-medium"><XCircle size={13} aria-hidden /> {failure.heading}</p>
             <p className="mt-1.5 break-words">{failure.detail}</p>
           </section>
