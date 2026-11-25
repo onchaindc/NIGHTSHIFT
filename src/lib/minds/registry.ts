@@ -179,7 +179,7 @@ export const MINDS: MindDefinition[] = [
     capabilities: ["Incident response", "Counterparty due diligence", "Treasury tracing"],
     status: "in_development",
     statusNote:
-      "Schema and routing are verified for transaction lookup, balances, transaction risk, account metrics, holder counts and wash-trading signals (unpaid probes). The shared capability API can execute them, but clustering, attribution and multi-hop tracing are unsupported and no paid answer has been verified, so there is no product launch.",
+      "First paid verification landed 2026-11-25: transaction lookup, wallet balance, transaction risk, holder concentration and wash trading each returned a paid, hash-committed answer that re-derived against its node signal ($0.05, one attempt each, no retry). The shared capability console runs these dimensions free (prices) or paid (operator approval gate). Clustering, attribution and multi-hop tracing remain unsupported, so it is not yet a forensic tracing product.",
     nextStep:
       "Run a paid pilot over the six verified dimensions, then add a labelling/tracing source before claiming wallet attribution.",
     boundaries: [
