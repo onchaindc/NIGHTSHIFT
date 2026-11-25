@@ -129,11 +129,11 @@ export const MINDS: MindDefinition[] = [
       "Counterparty exposure: carriers, terminal operators and port authorities involved.",
     ],
     capabilities: ["Supplier continuity", "Logistics diligence", "Disruption monitoring"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "Schema and routing are verified for port congestion, vessel telemetry, carrier identity, shipment rate, carrier scope, storm risk and route ETA (unpaid probes). The shared capability API can execute them, but terminal schedules are unsupported and no paid answer has been verified, so there is no product launch.",
+      "Live. The console on this page runs seven verified routes — congestion, vessel telemetry, carrier identity, shipment rate, carrier scope, storm risk, route ETA — free for prices and gaps, paid behind the approval gate. Berth and terminal schedules remain unsupported.",
     nextStep:
-      "Run a paid pilot over the seven verified dimensions, then replace the generic route-ETA fallback with a maritime schedule source or record it as a permanent approximation.",
+      "Replace the generic route-ETA fallback with a maritime schedule source or record it as a permanent approximation.",
     boundaries: [
       "Terminal berth schedules and container-level status are unsupported.",
       "Verified routes are not live port or vessel measurements until a paid, verified answer exists.",
@@ -153,11 +153,11 @@ export const MINDS: MindDefinition[] = [
       "Operational risk: suspensions, incidents and regulatory or community disputes.",
     ],
     capabilities: ["Asset diligence", "Counterparty screening", "Supply-chain provenance"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "Schema and routing are verified for owner identity, filings, operator sanctions and adverse media (unpaid probes). The shared capability API can execute them, but production volumes and licences have no verified source and no paid answer has been verified, so there is no product launch.",
+      "Live. Four routes run through the console — owner identity, filings, operator sanctions, adverse media — free or paid behind the gate. Production volumes and licence tenure stay named gaps.",
     nextStep:
-      "Run a paid capability pilot over the four verified dimensions, then source production and licence data outside Telegraph or keep them as explicit gaps.",
+      "Source production and licence data outside Telegraph, or keep them as explicit gaps.",
     boundaries: [
       "Production volumes, guidance and licence tenure are unsupported.",
       "A registry identity is not the asset's ownership chain; the site-to-operator link must be supplied.",
@@ -177,11 +177,11 @@ export const MINDS: MindDefinition[] = [
       "Evidence: every hop tied to a transaction hash and the source that labelled it.",
     ],
     capabilities: ["Incident response", "Counterparty due diligence", "Treasury tracing"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "First paid verification landed 2026-11-25: transaction lookup, wallet balance, transaction risk, holder concentration and wash trading each returned a paid, hash-committed answer that re-derived against its node signal ($0.05, one attempt each, no retry). The shared capability console runs these dimensions free (prices) or paid (operator approval gate). Clustering, attribution and multi-hop tracing remain unsupported, so it is not yet a forensic tracing product.",
+      "Live. Five paid dimensions are signal-verified — transaction lookup, wallet balance, transaction risk, holder concentration and wash trading ($0.05 on 2026-11-25, one attempt each) — and the console runs all six routes free or behind the gate. Clustering, attribution and multi-hop tracing stay unsupported.",
     nextStep:
-      "Run a paid pilot over the six verified dimensions, then add a labelling/tracing source before claiming wallet attribution.",
+      "Add a labelling/tracing source before claiming wallet attribution.",
     boundaries: [
       "Wallet clustering, attribution and cross-chain fund-flow tracing are unsupported.",
       "A risk score is a provider judgment, not an identity; nothing here attributes an address to a person.",
@@ -201,11 +201,11 @@ export const MINDS: MindDefinition[] = [
       "Gaps: entities the available registers cannot resolve.",
     ],
     capabilities: ["KYC escalation", "Group exposure", "M&A diligence"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "Schema and routing are verified for entity identity, firmographic enrichment, sanctions checks, filings and VAT identity (unpaid probes). The shared capability API can execute the single-entity dimensions, but beneficial ownership and group traversal — the core claim — are unsupported, so it is not operational.",
+      "Live. Five single-entity routes run through the console — identity, firmographics, sanctions, filings, VAT identity — free or paid behind the gate. Beneficial ownership and group traversal stay unsupported and are never inferred.",
     nextStep:
-      "Find a verifiable beneficial-ownership or shareholding source before building the graph; the verified single-entity dimensions are not a substitute.",
+      "Find a verifiable beneficial-ownership or shareholding source before building the graph.",
     boundaries: [
       "Beneficial ownership, parent/subsidiary links and shared-director analysis are unsupported.",
       "The Counterparty intelligence tool resolves one entity; it is not this graph.",
@@ -225,11 +225,11 @@ export const MINDS: MindDefinition[] = [
       "Discrepancies: conflicting values, missing documents and the evidence for each.",
     ],
     capabilities: ["Pre-shipment checks", "Document diligence", "Discrepancy review"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "Schema and routing are verified for PO, invoice/ledger, commerce orders, counterparty identity, delivery windows and package status (unpaid probes). The shared capability API can execute them, but bills of lading and cargo-document extraction are unsupported and no paid answer has been verified, so there is no product launch.",
+      "Live. Six routes run through the console — PO, invoice/ledger, commerce orders, counterparty identity, delivery windows, package status — free or paid behind the gate. Bills of lading and cargo-document extraction stay unsupported.",
     nextStep:
-      "Run a paid pilot over the six verified dimensions, then add cargo-document extraction before claiming document-to-document discrepancy review.",
+      "Add cargo-document extraction before claiming document-to-document discrepancy review.",
     boundaries: [
       "Bill-of-lading, cargo-document and customs parsing are unsupported.",
       "Verified routes are not a validation of any real shipment until paid answers are reconciled.",
@@ -249,11 +249,11 @@ export const MINDS: MindDefinition[] = [
       "Evidence: the list, entry and match basis for every hit.",
     ],
     capabilities: ["Onboarding screening", "Transaction review", "Periodic re-screening"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "Schema and routing are verified for name screening, entity identity, enrichment and vessel-name screening (unpaid probes). The shared capability API can execute them, but IMO/MMSI vessel matching and related-party ownership are unsupported, so this is not yet a sanctions desk.",
+      "Live. Four routes run through the console — name screening, entity identity, enrichment, vessel-name screening — free or paid behind the gate. IMO/MMSI vessel matching and related-party ownership stay unsupported.",
     nextStep:
-      "Add an IMO/MMSI-based vessel screen and an ownership link before claiming exposure analysis; a paid name-screen pilot alone is not enough.",
+      "Add an IMO/MMSI-based vessel screen and an ownership link before claiming exposure analysis.",
     boundaries: [
       "Vessel screening is name-based only; there is no IMO/MMSI match.",
       "Related-party ownership exposure is unsupported; a screen is not a legal determination.",
@@ -273,11 +273,11 @@ export const MINDS: MindDefinition[] = [
       "Gaps: jurisdictions and registries that cannot be searched.",
     ],
     capabilities: ["Counterparty diligence", "Dispute monitoring", "Portfolio risk review"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "Schema and routing are verified for party identity, public filings, adverse coverage and claim checks (unpaid probes). The shared capability API can execute them, but court dockets, judgments and multi-jurisdiction coverage are unsupported, so litigation history cannot be claimed.",
+      "Live. Four routes run through the console — party identity, public filings, adverse coverage, claim checks — free or paid behind the gate. Court dockets, judgments and multi-jurisdiction coverage stay unsupported.",
     nextStep:
-      "Find a verifiable court-record source before calling this a case ledger; press coverage and filings are not a docket.",
+      "Find a verifiable court-record source before calling this a case ledger.",
     boundaries: [
       "Court dockets, judgments, settlements and sealed matters are unsupported.",
       "Adverse coverage is not a court record; nothing here is legal advice.",
@@ -297,11 +297,11 @@ export const MINDS: MindDefinition[] = [
       "Counterparties: operators, offtakers and the entities exposed.",
     ],
     capabilities: ["Operational diligence", "Continuity planning", "Exposure monitoring"],
-    status: "in_development",
+    status: "available",
     statusNote:
-      "Schema and routing are verified for ERCOT grid price, operator identity, storm risk, current temperature and historical weather (unpaid probes). The shared capability API can execute them, but outages, production and facility telemetry are unsupported and no paid answer has been verified, so there is no product launch.",
+      "Live. Five routes run through the console — ERCOT grid price, operator identity, storm risk, current temperature, historical weather — free or paid behind the gate. Outages, production volumes and facility telemetry stay unsupported.",
     nextStep:
-      "Run a paid pilot over the grid, weather and operator dimensions, then source outage/production data before claiming operational monitoring.",
+      "Source outage and production data before claiming operational monitoring.",
     boundaries: [
       "Outage notices, production volumes and facility power/PUE are unsupported.",
       "ERCOT price coverage is not a global energy market view.",

@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowRight,
   Check,
+  ChevronDown,
   CircleAlert,
   Loader2,
   LockKeyhole,
@@ -21,14 +22,14 @@ import type { CapabilityReport } from "@/lib/minds/capability-runner";
  * The shared capability console — the same visual arrangement as the Bitcoin
  * Mining Intelligence page, generic over any Mind's verified matrix:
  *
- *   the investigation (inputs per supported dimension → run mode → run)
- *     → the live investigation trail (state, spend, approval gate, events)
- *     → the per-dimension capability report (verified / route-only / gap)
- *     → operator access (sign-in, approve/reject)
+ *   inputs (compact) → run mode → the live trail (state, spend, approval
+ *   gate, events) → a plain-language capability report → operator access
  *
  * Honesty rules carried over from the flagship: a free preflight prices the
  * routes and records gaps; a paid run is one attempt per dimension behind the
- * human approval gate; nothing here upgrades a Mind's catalogue status.
+ * human approval gate; nothing here rewrites a Mind's catalogue status.
+ * Machine evidence (intents, providers, hashes) is available but collapsed —
+ * the page speaks to the reader, the audit trail is one click away.
  */
 
 export interface ConsoleParamView {
@@ -81,11 +82,12 @@ const REPORT_STATUS_TONE: Record<string, string> = {
   gap: "border-edge bg-panel-2 text-ink-faint",
 };
 
+/** Reader-facing status words; the machine label stays in the evidence drawer. */
 const REPORT_STATUS_LABEL: Record<string, string> = {
-  verified: "Signal verified",
-  recorded: "Recorded, not proven",
-  unverified: "Unverified",
-  routable_unverified: "Route only",
+  verified: "Answer verified",
+  recorded: "Answer recorded",
+  unverified: "Could not verify",
+  routable_unverified: "Priced, not purchased",
   gap: "Unsupported",
 };
 
@@ -110,6 +112,33 @@ function fmtUsd(value: number | null | undefined, digits = 2): string {
 
 function shortHash(hash: string | undefined): string {
   return hash ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : "—";
+}
+
+/** vessels_waiting → "Vessels waiting" */
+function humanizeKey(key: string): string {
+  const spaced = key.replace(/_/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Reader-friendly values; null drops the row entirely. */
+function humanizeValue(v: unknown): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v === "number") {
+    return Number.isInteger(v) ? v.toLocaleString("en-US") : String(Math.round(v * 1000) / 1000);
+  }
+  if (typeof v === "object") return null; // nested structures stay in raw evidence
+  const s = String(v);
+  return s.length > 120 ? `${s.slice(0, 120)}…` : s;
+}
+
+/** "verified against the node signal; Independent re-derivation matches: keccak…" → "Independently re-derived against the node signal." */
+function plainDetail(status: string, detail: string): string {
+  if (status === "verified") return "Live answer, independently re-derived against the node signal.";
+  if (status === "recorded") return "The provider returned an answer; verification could not confirm it end to end.";
+  if (status === "unverified") return "The provider returned an answer that failed verification. Treat as unconfirmed.";
+  if (status === "routable_unverified") return "Route priced live; no answer was purchased on this run.";
+  return detail;
 }
 
 function stateLabel(state: string | null): string {
@@ -239,12 +268,6 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
     window.history.replaceState(null, "", url);
   };
 
-  const missingRequired = routable.flatMap((d) =>
-    d.params
-      .filter((p) => p.required && !(inputs[d.id]?.[p.name] ?? "").trim())
-      .map((p) => `${d.label}: ${p.name}`),
-  );
-
   const fillSamples = () => {
     setInputs(
       Object.fromEntries(
@@ -364,44 +387,41 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   const awaiting = state === "awaiting_approval";
   const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
   const report = task?.result?.capabilityReport as CapabilityReport | undefined;
-  const eventTail = (task?.events ?? []).filter((e) => EVENT_TYPES.includes(e.type)).slice(-7);
+  const eventTail = (task?.events ?? []).filter((e) => EVENT_TYPES.includes(e.type)).slice(-5);
+  const answers = report ? report.counts.verified + report.counts.recorded + report.counts.unverified : 0;
+  const priced = report ? report.counts.routable_unverified : 0;
 
   return (
-    <div className="mt-8 space-y-6">
-      {/* The investigation console — same arrangement as the flagship */}
+    <div className="mt-8 space-y-5">
+      {/* The run console */}
       <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-labelledby="cap-console">
-        <div className="border-b border-edge px-4 py-3 sm:px-5">
-          <p className="x-label" id="cap-console">The capability run</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
+          <p className="x-label !mt-0" id="cap-console">Run an investigation</p>
+          <span className="text-[11px] text-ink-faint">
+            {routable.length} routes · free preflight open · paid ceiling {fmtUsd(ceilingUsdCents / 100)}
+          </span>
         </div>
-        <div className="space-y-5 px-4 py-4 sm:px-5">
+        <div className="space-y-4 px-4 py-4 sm:px-5">
           {routable.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-3.5">
               {routable.map((d) => (
                 <div key={d.id}>
-                  <p className="flex flex-wrap items-baseline gap-x-2 text-[12.5px] font-medium text-ink">
+                  <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">
                     {d.label}
-                    <span className="text-[10.5px] font-normal text-ink-faint">
-                      {d.provider} · {fmtUsd((d.priceUsdCents ?? 1) / 100)}
-                    </span>
+                    <span className="ml-2 normal-case tracking-normal text-ink-faint/80">{fmtUsd((d.priceUsdCents ?? 1) / 100)}</span>
                   </p>
-                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-1.5 grid gap-2.5 sm:grid-cols-2">
                     {d.params.map((p) => (
-                      <div key={p.name}>
-                        <label htmlFor={`in-${d.id}-${p.name}`} className="x-label">
-                          {p.name}
-                          {p.required ? <span className="text-risk"> *</span> : null}
-                        </label>
-                        <input
-                          id={`in-${d.id}-${p.name}`}
-                          value={inputs[d.id]?.[p.name] ?? ""}
-                          onChange={(e) =>
-                            setInputs((prev) => ({ ...prev, [d.id]: { ...prev[d.id], [p.name]: e.target.value } }))
-                          }
-                          placeholder={p.sample !== undefined ? String(p.sample) : p.description}
-                          className="mt-1.5 h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
-                        />
-                        <p className="mt-1 text-[11px] leading-snug text-ink-faint">{p.description}</p>
-                      </div>
+                      <input
+                        key={p.name}
+                        value={inputs[d.id]?.[p.name] ?? ""}
+                        onChange={(e) =>
+                          setInputs((prev) => ({ ...prev, [d.id]: { ...prev[d.id], [p.name]: e.target.value } }))
+                        }
+                        placeholder={p.description}
+                        aria-label={`${d.label}: ${p.description}`}
+                        className="h-10 w-full rounded-lg border border-edge bg-panel-2 px-3 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:ring-1 focus:ring-edge"
+                      />
                     ))}
                   </div>
                 </div>
@@ -410,9 +430,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                 <button type="button" onClick={fillSamples} className="btn-secondary !min-h-8 !text-[11.5px]">
                   <Wand2 size={12} aria-hidden /> Fill with sample values
                 </button>
-                <p className="text-[11px] text-ink-faint">
-                  Samples are safe probe values from the capability matrix — replace them with the real subject.
-                </p>
+                <p className="text-[11px] text-ink-faint">Samples are safe probe values — replace them with the real subject.</p>
               </div>
             </div>
           ) : (
@@ -421,41 +439,38 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
             </p>
           )}
 
-          <div>
-            <p className="x-label">Run mode</p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {[
-                {
-                  value: "free" as const,
-                  title: "Free preflight",
-                  body: "Probe every supported route with its canonical schema, record the live price and the gap ledger. No payment path exists.",
-                },
-                {
-                  value: "intel" as const,
-                  title: `Paid intelligence — ${fmtUsd(ceilingUsdCents / 100)} ceiling`,
-                  body: "The same baseline, then one paid attempt per routable dimension after your explicit approval.",
-                },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setMode(opt.value)}
-                  aria-pressed={mode === opt.value}
-                  className={`rounded-lg border p-3 text-left transition-colors ${
-                    mode === opt.value ? "border-teal/50 bg-teal/5" : "border-edge bg-panel-2 hover:border-ink-faint/50"
-                  }`}
-                >
-                  <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink">
-                    {opt.value === "free" ? <Radio size={13} aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
-                    {opt.title}
-                  </span>
-                  <span className="mt-1 block text-[11.5px] leading-relaxed text-ink-soft">{opt.body}</span>
-                </button>
-              ))}
-            </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {[
+              {
+                value: "free" as const,
+                title: "Free preflight",
+                body: "Prices every route, records the gap ledger. No payment path exists.",
+              },
+              {
+                value: "intel" as const,
+                title: `Paid answers — up to ${fmtUsd(ceilingUsdCents / 100)}`,
+                body: "One paid attempt per route after your explicit approval.",
+              },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setMode(opt.value)}
+                aria-pressed={mode === opt.value}
+                className={`rounded-lg border p-3 text-left transition-colors ${
+                  mode === opt.value ? "border-teal/50 bg-teal/5" : "border-edge bg-panel-2 hover:border-ink-faint/50"
+                }`}
+              >
+                <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink">
+                  {opt.value === "free" ? <Radio size={13} aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
+                  {opt.title}
+                </span>
+                <span className="mt-1 block text-[11.5px] leading-relaxed text-ink-soft">{opt.body}</span>
+              </button>
+            ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 border-t border-edge pt-4">
+          <div className="flex flex-wrap items-center gap-3 border-t border-edge pt-3.5">
             <button
               type="button"
               onClick={() => void start()}
@@ -465,32 +480,21 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
               {starting ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <ArrowRight size={14} aria-hidden />}
               {mode === "free" ? "Run free preflight" : "Build plan & request approval"}
             </button>
-            <p className="text-[11.5px] text-ink-faint">
-              {mode === "intel" && session !== "authenticated" ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (opsRef.current) {
-                      opsRef.current.open = true;
-                      opsRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-                    }
-                  }}
-                  className="text-[11.5px] font-medium text-teal hover:underline"
-                >
-                  Sign in below — paid runs need the operator token
-                </button>
-              ) : mode === "intel" ? (
-                `Hard ceiling ${fmtUsd(ceilingUsdCents / 100)} · one attempt per dimension, skipped when the budget cannot cover it.`
-              ) : (
-                "Free mode plans no purchase and can spend nothing by construction."
-              )}
-            </p>
+            {mode === "intel" && session !== "authenticated" && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (opsRef.current) {
+                    opsRef.current.open = true;
+                    opsRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }
+                }}
+                className="text-[11.5px] font-medium text-teal hover:underline"
+              >
+                Sign in below — paid runs need the operator token
+              </button>
+            )}
           </div>
-          {missingRequired.length > 0 && mode === "intel" && (
-            <p className="flex items-start gap-2 text-[12px] leading-relaxed text-amber-deep">
-              <CircleAlert size={13} className="mt-0.5 shrink-0" aria-hidden /> Missing required inputs: {missingRequired.join("; ")}
-            </p>
-          )}
           {error && (
             <p className="flex items-start gap-2 text-[12px] leading-relaxed text-risk">
               <CircleAlert size={13} className="mt-0.5 shrink-0" aria-hidden /> {error}
@@ -504,7 +508,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
           <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-live="polite">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
               <div className="flex items-center gap-2">
-                <p className="x-label !mt-0">Capability run</p>
+                <p className="x-label !mt-0">Run</p>
                 <span className="rounded-full border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] text-ink-soft">
                   {stateLabel(state)}
                 </span>
@@ -512,29 +516,16 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
               {task && <span className="tabular text-[11px] text-ink-faint">spent {fmtUsd((task.spend?.spentUsdCents ?? 0) / 100)}</span>}
             </div>
 
-            <div className="space-y-5 px-4 py-4 sm:px-5">
-              {task?.goal && <p className="text-[12px] leading-relaxed text-ink-soft">{task.goal}</p>}
-
+            <div className="space-y-4 px-4 py-4 sm:px-5">
               {awaiting && (
                 <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5">
                   <p className="flex items-center gap-2 text-[12.5px] font-medium text-amber-deep">
                     <ShieldCheck size={14} aria-hidden /> Approval gate
                   </p>
                   <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">
-                    The free probes priced {routable.length} dimension{routable.length === 1 ? "" : "s"} at {fmtUsd(ceilingUsdCents / 100)} total.
-                    Approving releases one paid attempt per dimension, re-checked against each live offer. Unsupported dimensions are not
-                    part of the plan.
+                    {routable.length} route{routable.length === 1 ? "" : "s"} priced at {fmtUsd(ceilingUsdCents / 100)} total. Approving
+                    releases one paid attempt per route, re-checked against each live offer.
                   </p>
-                  <ul className="mt-2 space-y-1 text-[11.5px] text-ink-soft">
-                    {routable.map((d) => (
-                      <li key={d.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                        <span>{d.label}</span>
-                        <span className="tabular text-[10.5px] text-ink-faint">
-                          {d.provider} · {fmtUsd((d.priceUsdCents ?? 1) / 100)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button type="button" onClick={() => void act("approve")} disabled={!!acting} className="btn-primary !min-h-9">
                       {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Check size={13} aria-hidden />}
@@ -551,14 +542,14 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
               {running && (
                 <div className="flex items-center gap-2 text-[12px] text-ink-soft">
                   <Loader2 size={13} className="animate-spin text-teal" aria-hidden />
-                  {state === "verifying" ? "Verifying every committed answer against its node signal…" : "Working through the plan…"}
+                  {state === "verifying" ? "Verifying every answer against its node signal…" : "Working through the plan…"}
                 </div>
               )}
 
               {eventTail.length > 0 && (
                 <ol className="space-y-1.5 border-t border-edge pt-3">
                   {eventTail.map((e) => (
-                    <li key={e.id} className="grid grid-cols-[76px_1fr] gap-2 text-[11.5px] leading-relaxed">
+                    <li key={e.id} className="grid grid-cols-[64px_1fr] gap-2 text-[11.5px] leading-relaxed">
                       <span className="tabular text-ink-faint">{new Date(e.ts).toLocaleTimeString("en-US", { hour12: false })}</span>
                       <span className={e.type === "step_failed" ? "text-risk" : "text-ink-soft"}>{e.message}</span>
                     </li>
@@ -574,8 +565,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                 <div className="rounded-lg border border-dashed border-edge bg-panel-2 px-3.5 py-3">
                   <p className="text-[12.5px] font-medium text-ink">The report is withheld from anonymous readers.</p>
                   <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">
-                    Sign in under Operator access below to read the findings, hashes and receipts. No report is reconstructed from the
-                    public projection.
+                    Sign in under Operator access below to read the findings.
                   </p>
                 </div>
               )}
@@ -584,84 +574,101 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
         )}
 
         {!task && !running && (
-          <p className="rounded-xl border border-dashed border-edge bg-panel-2 px-4 py-8 text-center text-[12.5px] leading-relaxed text-ink-faint">
-            The capability report lands here — set the inputs above and run it.
+          <p className="rounded-xl border border-dashed border-edge bg-panel-2 px-4 py-7 text-center text-[12.5px] leading-relaxed text-ink-faint">
+            The report lands here — set the inputs above and run it.
           </p>
         )}
 
+        {/* The report — plain language first, evidence collapsed */}
         {!redacted && report && state === "completed" && (
           <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-labelledby="cap-report">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
-              <h2 id="cap-report" className="mt-1 text-[16px] font-medium tracking-[-0.01em] text-ink">
-                {name} — capability report
+            <div className="border-b border-edge px-4 py-3 sm:px-5">
+              <h2 id="cap-report" className="text-[16px] font-medium tracking-[-0.01em] text-ink">
+                {name} — report
               </h2>
-              <span className="tabular text-[11px] text-ink-faint">
-                verified {report.counts.verified} · route-only {report.counts.routable_unverified} · gaps {report.counts.gap} · spent{" "}
-                {fmtUsd(report.spendUsdCents / 100)}
-              </span>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
+                {answers > 0 ? (
+                  <>
+                    <span className="font-medium text-ink">{answers} of {routable.length}</span> routes returned live answers
+                    {report.counts.verified > 0 ? " and were re-verified against the network signal" : ""}.
+                  </>
+                ) : (
+                  <>
+                    No answers were purchased on this run — <span className="font-medium text-ink">{priced}</span> route
+                    {priced === 1 ? "" : "s"} priced live, all recorded below.
+                  </>
+                )}{" "}
+                Spent {fmtUsd(report.spendUsdCents / 100)}.
+              </p>
             </div>
-            <div className="space-y-4 px-4 py-4 sm:px-5">
-              <p className="text-[12px] leading-relaxed text-ink-soft">{report.note}</p>
-              <ul className="border-t border-edge">
-                {report.dimensions.map((d) => (
-                  <li key={d.dimension} className="grid gap-1.5 border-b border-edge py-3.5 sm:grid-cols-[10px_1fr_auto] sm:items-baseline sm:gap-3">
-                    <span aria-hidden className={`mt-1.5 size-1.5 rounded-full ${STATUS_DOT[d.status]}`} />
-                    <div className="min-w-0">
+            <ul className="border-t border-edge">
+              {report.dimensions.map((d) => {
+                const values = Object.entries(d.values ?? {})
+                  .map(([k, v]) => [humanizeKey(k), humanizeValue(v)] as const)
+                  .filter(([, v]) => v !== null)
+                  .slice(0, 10);
+                return (
+                  <li key={d.dimension} className="border-b border-edge px-4 py-3.5 sm:px-5">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <span className="text-[13px] font-medium text-ink">{d.label}</span>
+                        <span aria-hidden className={`inline-block size-1.5 rounded-full ${STATUS_DOT[d.status]}`} />
+                        <span className="text-[13.5px] font-medium text-ink">{d.label}</span>
                         <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${REPORT_STATUS_TONE[d.status]}`}>
                           {REPORT_STATUS_LABEL[d.status]}
                         </span>
                       </p>
-                      <p className="mt-0.5 text-[12px] leading-relaxed text-ink-soft">{d.detail}</p>
-                      {d.values && Object.keys(d.values).length > 0 && (
-                        <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-lg border border-edge bg-panel-2 px-3 py-2 text-[11.5px] sm:grid-cols-2">
-                          {Object.entries(d.values).slice(0, 12).map(([k, v]) => (
-                            <div key={k} className="flex flex-wrap items-baseline justify-between gap-x-3">
-                              <dt className="text-ink-faint">{k}</dt>
-                              <dd className="tabular text-ink">{String(v)}</dd>
-                            </div>
-                          ))}
-                        </dl>
-                      )}
-                      {d.missingFields && d.missingFields.length > 0 && (
-                        <p className="mt-1 text-[11px] text-amber-deep">Not returned: {d.missingFields.join(", ")}</p>
-                      )}
-                      <p className="mt-1 break-words text-[10.5px] text-ink-faint">
-                        {d.intent ? <span className="tabular">{d.intent}</span> : null}
-                        {d.provider ? <> · {d.provider}</> : null}
-                        {d.priceUsdCents ? <> · {fmtUsd(d.priceUsdCents / 100)}</> : null}
-                        {d.signalHash ? <> · signal {shortHash(d.signalHash)}</> : null}
-                        {d.receiptHash ? <> · receipt {shortHash(d.receiptHash)}</> : null}
-                      </p>
+                      {d.priceUsdCents ? (
+                        <span className="tabular text-[11px] text-ink-faint">{fmtUsd(d.priceUsdCents / 100)}</span>
+                      ) : null}
                     </div>
-                    <span className="tabular text-[11px] text-ink-faint">
-                      {d.status === "gap" ? "—" : d.priceUsdCents ? fmtUsd(d.priceUsdCents / 100) : ""}
-                    </span>
+                    {values.length > 0 ? (
+                      <dl className="mt-2 grid gap-x-4 gap-y-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-2.5 text-[12px] sm:grid-cols-2">
+                        {values.map(([k, v]) => (
+                          <div key={k} className="flex flex-wrap items-baseline justify-between gap-x-3">
+                            <dt className="text-ink-faint">{k}</dt>
+                            <dd className="tabular text-ink">{v}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : (
+                      <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">{plainDetail(d.status, d.detail)}</p>
+                    )}
+                    {d.missingFields && d.missingFields.length > 0 && (
+                      <p className="mt-1 text-[11px] text-amber-deep">
+                        Not returned: {d.missingFields.map(humanizeKey).join(", ")}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {report.missing.length > 0 && (
+              <div className="border-t border-edge px-4 py-3 sm:px-5">
+                <p className="text-[11.5px] leading-relaxed text-ink-faint">
+                  <span className="font-medium text-ink">Not covered on this run:</span>{" "}
+                  {report.missing.map((m) => m.reason).join(" · ")}
+                </p>
+              </div>
+            )}
+            <details className="group border-t border-edge">
+              <summary className="flex cursor-pointer items-center justify-between gap-2 px-4 py-2.5 text-[11.5px] text-ink-faint sm:px-5">
+                Evidence — intents, providers, signal hashes
+                <ChevronDown size={13} aria-hidden className="transition-transform group-open:rotate-180" />
+              </summary>
+              <ul className="border-t border-edge px-4 py-2 text-[10.5px] leading-relaxed text-ink-faint sm:px-5">
+                {report.dimensions.map((d) => (
+                  <li key={d.dimension} className="break-words border-b border-edge/60 py-1.5 last:border-0">
+                    <span className="text-ink-soft">{d.label}</span>
+                    {" — "}
+                    {d.intent ?? "no intent"}
+                    {d.provider ? <> · {d.provider}</> : null}
+                    {d.signalHash ? <> · signal {shortHash(d.signalHash)}</> : null}
+                    {d.receiptHash ? <> · receipt {shortHash(d.receiptHash)}</> : null}
+                    {d.verifiedAt ? <> · {new Date(d.verifiedAt).toLocaleString("en-US", { hour12: false })}</> : null}
                   </li>
                 ))}
               </ul>
-              {report.missing.length > 0 && (
-                <div className="rounded-lg border border-dashed border-edge bg-panel-2 px-3.5 py-3">
-                  <p className="text-[12px] font-medium text-ink">Gap ledger</p>
-                  <ul className="mt-1.5 space-y-1 text-[11.5px] leading-relaxed text-ink-soft">
-                    {report.missing.map((m) => (
-                      <li key={m.dimension}>{m.reason}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
-
-        {!redacted && !report && state === "completed" && task?.result?.mindsDelivery && (
-          <section className="rounded-xl border border-edge bg-panel p-5">
-            <p className="x-label !mt-0">Mind roundtrip complete</p>
-            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-              The report was delivered to the connected Mind. Delivery status <span className="text-ink">{task.result.mindsDelivery.status}</span>.
-              Spent {fmtUsd((task.spend?.spentUsdCents ?? 0) / 100)}.
-            </p>
+            </details>
           </section>
         )}
       </div>
@@ -721,10 +728,8 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
             </form>
           )}
           <p className="mt-3 border-t border-edge pt-3 text-[11px] leading-relaxed text-ink-faint">
-            {mindStatus === "available"
-              ? "Paid runs sign exact x402 offers after this approval gate; every committed answer is re-derived against its node signal."
-              : "This Mind stays marked in development: paid runs exercise its verified dimensions, but no paid answer has been verified for it yet."}
-            {probedAt ? ` Capability matrix probed unpaid ${probedAt.slice(0, 10)}.` : ""}{" "}
+            Paid runs sign exact x402 offers after the approval gate; every committed answer is re-derived against its node
+            signal before the report is written.{probedAt ? ` Capability matrix probed unpaid ${probedAt.slice(0, 10)}.` : ""}{" "}
             <Link href="/minds" className="text-teal hover:underline">
               All Minds
             </Link>

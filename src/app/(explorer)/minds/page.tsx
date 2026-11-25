@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-import { MINDS, MIND_STATUS_LABEL, mindIndex, mindsByStatus } from "@/lib/minds/registry";
+import { MINDS, mindIndex, mindsByStatus } from "@/lib/minds/registry";
 import { CAPABILITIES } from "@/lib/minds/capabilities";
 import { MIND_FOUNDATION } from "@/lib/minds/foundation";
 import { MindStatusChip } from "@/components/minds/status-chip";
@@ -39,10 +39,12 @@ export default function MindsPage() {
           <span aria-hidden className="size-1.5 rounded-full bg-teal" />
           {available.length} available
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="size-1.5 rounded-full bg-amber" />
-          {inDevelopment.length} in development
-        </span>
+        {inDevelopment.length > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="size-1.5 rounded-full bg-amber" />
+            {inDevelopment.length} in development
+          </span>
+        )}
         {planned.length > 0 && (
           <span className="inline-flex items-center gap-1.5">
             <span aria-hidden className="size-1.5 rounded-full bg-ink-faint/50" />
@@ -191,9 +193,8 @@ export default function MindsPage() {
       </section>
 
       <p className="mt-8 text-[11px] leading-relaxed text-ink-faint">
-        {MINDS.length} specialists defined. Statuses reflect what has a product launch path in this deployment — a
-        Mind marked {MIND_STATUS_LABEL.in_development.toLowerCase()} or {MIND_STATUS_LABEL.planned.toLowerCase()} has
-        no launch action, though its verified dimensions can be exercised through the capability API.
+        {MINDS.length} specialists defined. Every Mind here runs on the same shared engine: free preflights are open,
+        paid answers wait at the operator approval gate, and each profile names what it will not claim.
       </p>
     </div>
   );

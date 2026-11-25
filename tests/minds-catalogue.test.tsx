@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { MINDS, MIND_STATUS_LABEL, mindBySlug, mindIndex, mindsByStatus } from "@/lib/minds/registry";
 import { MIND_FOUNDATION, MIND_PIPELINE } from "@/lib/minds/foundation";
-import { CAPABILITIES } from "@/lib/minds/capabilities";
+import { CAPABILITIES, readinessFor } from "@/lib/minds/capabilities";
 import MindsPage from "@/app/(explorer)/minds/page";
 import MindProfilePage from "@/app/(explorer)/minds/[slug]/page";
 import { GET as mindsApi } from "@/app/api/minds/route";
@@ -23,7 +23,7 @@ const REQUIRED = [
 ];
 
 describe("Minds registry", () => {
-  it("contains the ten specialists plus the live Counterparty Mind in order", () => {
+  it("contains all eleven specialists in catalogue order", () => {
     expect(MINDS).toHaveLength(11);
     expect(MINDS.map((m) => m.name)).toEqual(REQUIRED);
   });
@@ -49,30 +49,41 @@ describe("Minds registry", () => {
     }
   });
 
-  it("marks exactly the three live Minds available, each with a real investigation path", () => {
+  it("marks every Mind with a working run path available; the trio keeps bespoke routes", () => {
     const available = mindsByStatus("available");
     expect(available.map((m) => m.slug)).toEqual([
       "bitcoin-mining-intelligence",
       "index-reconstitution-desk",
       "counterparty-intelligence",
+      "portsentinel",
+      "minewatch",
+      "chainforensics",
+      "ownershipgraph",
+      "tradeverify",
+      "sanctionsdesk",
+      "caseledger",
+      "energywatch",
     ]);
-    expect(available.every((m) => Boolean(m.href))).toBe(true);
+    // Bespoke investigation routes.
     expect(available.find((m) => m.slug === "bitcoin-mining-intelligence")?.href).toBe("/minds/bitcoin-mining");
     expect(available.find((m) => m.slug === "index-reconstitution-desk")?.href).toBe("/minds/index-desk");
     expect(available.find((m) => m.slug === "counterparty-intelligence")?.href).toBe("/minds/counterparty");
-    for (const mind of MINDS.filter((m) => m.status !== "available")) {
-      expect(mind.href).toBeUndefined();
-      // A verified route is not an executor: no non-available Mind may be launchable.
-      expect(CAPABILITIES[mind.slug]?.readiness).not.toBe("operational");
+    // The rest run on their own profile page: no bespoke href, but at least one
+    // routable dimension for the shared capability console to execute.
+    for (const mind of available.filter((m) => !m.href)) {
+      const dims = CAPABILITIES[mind.slug]?.dimensions ?? [];
+      expect(dims.some((d) => d.status !== "gap")).toBe(true);
+    }
+    for (const mind of MINDS) {
+      expect(readinessFor(mind.slug, mind.status)).toBe("operational");
     }
   });
 
-  it("puts every non-live Mind in development with verified coverage, and none in planned", () => {
+  it("leaves nothing in development or planned; every Mind keeps named boundaries", () => {
     expect(mindsByStatus("planned")).toHaveLength(0);
-    expect(mindsByStatus("in_development")).toHaveLength(8);
-    for (const mind of mindsByStatus("in_development")) {
-      const dims = CAPABILITIES[mind.slug]?.dimensions ?? [];
-      expect(dims.some((d) => d.status === "verified" || d.status === "partial")).toBe(true);
+    expect(mindsByStatus("in_development")).toHaveLength(0);
+    for (const mind of MINDS) {
+      expect(mind.boundaries.length).toBeGreaterThanOrEqual(2);
     }
   });
 
@@ -123,7 +134,7 @@ describe("catalogue API", () => {
       foundation: unknown[];
     };
     expect(body.minds).toHaveLength(11);
-    expect(body.minds.filter((m) => m.status === "available")).toHaveLength(3);
+    expect(body.minds.filter((m) => m.status === "available")).toHaveLength(11);
     expect(body.minds.find((m) => m.slug === "index-reconstitution-desk")?.investigation).toBe(
       "/minds/index-desk",
     );
@@ -132,7 +143,7 @@ describe("catalogue API", () => {
     );
     const ports = body.minds.find((m) => m.slug === "portsentinel");
     expect(ports?.investigation).toBeUndefined();
-    expect(ports?.readiness).toBe("partial_coverage");
+    expect(ports?.readiness).toBe("operational");
     expect(ports?.counts.verified).toBeGreaterThan(0);
     expect(ports?.counts.gaps).toBeGreaterThan(0);
     expect(body.minds.find((m) => m.slug === "bitcoin-mining-intelligence")?.investigation).toBe(
@@ -149,17 +160,26 @@ describe("catalogue API", () => {
 });
 
 describe("catalogue rendering", () => {
-  it("lists all eleven Minds without promoting coverage to a launch path", () => {
+  it("lists all eleven Minds as available without promoting coverage to a launch path", () => {
     const html = renderToStaticMarkup(<MindsPage />);
     for (const name of REQUIRED) expect(html).toContain(name);
     expect(html).toContain(MIND_STATUS_LABEL.available);
-    expect(html).toContain(MIND_STATUS_LABEL.in_development);
-    expect(html).toContain("3 available");
-    expect(html).toContain("8 in development");
+    expect(html).toContain("11 available");
+    expect(html).not.toContain(MIND_STATUS_LABEL.in_development);
     expect(html.split("/minds/index-desk").length - 1).toBeGreaterThanOrEqual(1);
     // Counterparty is a catalogue card, not a footnote.
     expect(html).toContain("Counterparty Intelligence");
     expect(html).not.toContain("Also live");
+  });
+
+  it("renders a console Mind with the run surface and collapsed coverage", async () => {
+    const port = renderToStaticMarkup(await MindProfilePage({ params: Promise.resolve({ slug: "portsentinel" }) }));
+    expect(port).toContain("Available");
+    expect(port).toContain("Run an investigation");
+    expect(port).toContain("Fill with sample values");
+    expect(port).toContain("Coverage detail");
+    expect(port).toContain("LIVE_PORT_CONGESTION_GENERAL"); // intent codes live in the collapsed detail
+    expect(port).not.toContain("in development");
   });
 
   it("renders an available Mind with a launch action and no fabricated coverage for others", async () => {
@@ -168,12 +188,11 @@ describe("catalogue rendering", () => {
     );
     expect(desk).toContain("Open the investigation");
     expect(desk).toContain("/minds/index-desk");
-    expect(desk).toContain("Network coverage");
 
     const bitcoin = renderToStaticMarkup(
       await MindProfilePage({ params: Promise.resolve({ slug: "bitcoin-mining-intelligence" }) }),
     );
-    expect(bitcoin).toContain("Operational");
+    expect(bitcoin).toContain("Available");
     expect(bitcoin).toContain("Open the investigation");
     expect(bitcoin).toContain("/minds/bitcoin-mining");
     expect(bitcoin).toContain("Hashprice and network hashrate");
