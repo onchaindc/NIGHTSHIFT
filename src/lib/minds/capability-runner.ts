@@ -207,76 +207,88 @@ export async function probeCapabilitySet(
   const profile = CAPABILITIES[slug];
   if (!profile) throw new CapabilityError(`unknown Mind: ${slug}`);
   const deps = opts.deps ?? defaultCapabilityDeps();
-  const dimensions: DimensionProbe[] = [];
-  const offers: CapabilityOffer[] = [];
-  let plannedCostUsdCents = 0;
 
-  for (const dim of profile.dimensions) {
-    if (dim.status === "gap") {
-      dimensions.push({
-        dimension: dim.id,
-        label: dim.label,
-        status: "gap",
-        detail: dim.missingReason ?? "unsupported dimension",
-      });
-      continue;
-    }
-    let spec: AskRequestSpec;
-    try {
-      spec = buildCapabilitySpec(dim, paramsById[dim.id] ?? {});
-    } catch (err) {
-      dimensions.push({
-        dimension: dim.id,
-        label: dim.label,
-        status: "rejected",
-        httpStatus: 0,
-        detail: err instanceof Error ? err.message : String(err),
-      });
-      continue;
-    }
+  // Probes are independent HTTP calls — run them concurrently. A sequential
+  // loop over many dimensions multiplied the node latency until the whole
+  // baseline outgrew the serverless execution window and the run died
+  // mid-flight. map keeps the dimension order in the results.
+  const probed = await Promise.all(
+    profile.dimensions.map(async (dim): Promise<{ entry: DimensionProbe; offer?: CapabilityOffer }> => {
+      if (dim.status === "gap") {
+        return {
+          entry: {
+            dimension: dim.id,
+            label: dim.label,
+            status: "gap",
+            detail: dim.missingReason ?? "unsupported dimension",
+          },
+        };
+      }
+      let spec: AskRequestSpec;
+      try {
+        spec = buildCapabilitySpec(dim, paramsById[dim.id] ?? {});
+      } catch (err) {
+        return {
+          entry: {
+            dimension: dim.id,
+            label: dim.label,
+            status: "rejected",
+            httpStatus: 0,
+            detail: err instanceof Error ? err.message : String(err),
+          },
+        };
+      }
 
-    let outcome = await deps.probe(spec);
-    let routedVia = dim.provider ?? "router";
-    if (outcome.kind !== "challenge" && spec.minerId) {
-      // The pinned provider refused the ask — give the node's router one free
-      // shot before naming the route unavailable. A different provider may
-      // still serve the same intent.
-      outcome = await deps.probe({ ...spec, minerId: undefined });
-      if (outcome.kind === "challenge") routedVia = "router (fallback)";
-    }
-    if (outcome.kind === "challenge") {
-      const cents = Math.round(outcome.pricedOffer.amountCents);
-      plannedCostUsdCents += cents;
-      offers.push({
-        dimension: dim,
-        // The offer must be executed against the exact spec it was probed
-        // with — a router-fallback offer is executed unpinned.
-        spec: routedVia.startsWith("router") ? { ...spec, minerId: undefined } : spec,
-        approvedOffer: outcome.approvedOffer,
-        priceUsdCents: cents,
-      });
-      dimensions.push({
-        dimension: dim.id,
-        label: dim.label,
-        status: "routable",
-        intent: dim.intent as string,
-        provider: routedVia,
-        priceUsdCents: cents,
-        network: outcome.approvedOffer.network,
-        detail: `routable at $${(cents / 100).toFixed(2)} on ${outcome.approvedOffer.network} via ${routedVia} (unpaid probe; nothing signed)`,
-      });
-    } else if (outcome.kind === "rejected") {
-      dimensions.push({
-        dimension: dim.id,
-        label: dim.label,
-        status: "rejected",
-        httpStatus: outcome.status,
-        detail: outcome.text || `the node refused the ask (HTTP ${outcome.status})`,
-      });
-    } else {
-      dimensions.push({ dimension: dim.id, label: dim.label, status: "unavailable", detail: outcome.detail });
-    }
-  }
+      let outcome = await deps.probe(spec);
+      let routedVia = dim.provider ?? "router";
+      if (outcome.kind !== "challenge" && spec.minerId) {
+        // The pinned provider refused the ask — give the node's router one free
+        // shot before naming the route unavailable. A different provider may
+        // still serve the same intent.
+        outcome = await deps.probe({ ...spec, minerId: undefined });
+        if (outcome.kind === "challenge") routedVia = "router (fallback)";
+      }
+      if (outcome.kind === "challenge") {
+        const cents = Math.round(outcome.pricedOffer.amountCents);
+        return {
+          entry: {
+            dimension: dim.id,
+            label: dim.label,
+            status: "routable",
+            intent: dim.intent as string,
+            provider: routedVia,
+            priceUsdCents: cents,
+            network: outcome.approvedOffer.network,
+            detail: `routable at $${(cents / 100).toFixed(2)} on ${outcome.approvedOffer.network} via ${routedVia} (unpaid probe; nothing signed)`,
+          },
+          offer: {
+            dimension: dim,
+            // The offer must be executed against the exact spec it was probed
+            // with — a router-fallback offer is executed unpinned.
+            spec: routedVia.startsWith("router") ? { ...spec, minerId: undefined } : spec,
+            approvedOffer: outcome.approvedOffer,
+            priceUsdCents: cents,
+          },
+        };
+      }
+      if (outcome.kind === "rejected") {
+        return {
+          entry: {
+            dimension: dim.id,
+            label: dim.label,
+            status: "rejected",
+            httpStatus: outcome.status,
+            detail: outcome.text || `the node refused the ask (HTTP ${outcome.status})`,
+          },
+        };
+      }
+      return { entry: { dimension: dim.id, label: dim.label, status: "unavailable", detail: outcome.detail } };
+    }),
+  );
+
+  const dimensions = probed.map((p) => p.entry);
+  const offers = probed.flatMap((p) => (p.offer ? [p.offer] : []));
+  const plannedCostUsdCents = offers.reduce((sum, o) => sum + o.priceUsdCents, 0);
 
   return {
     coverage: {

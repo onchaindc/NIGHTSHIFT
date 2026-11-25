@@ -3,7 +3,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { requestAuthorized } from "@/lib/api/auth";
 import { tasksForCaller } from "@/lib/api/public";
 import { listTasks } from "@/lib/engine/store";
-import { createTask, defaultDeps, runTask, EngineError } from "@/lib/engine/engine";
+import { createTask, defaultDeps, reapIfStalled, runTask, EngineError } from "@/lib/engine/engine";
 import type { TaskRecord } from "@/lib/engine/types";
 import { mindBySlug } from "@/lib/minds/registry";
 import { CAPABILITIES, READINESS_LABEL, readinessFor } from "@/lib/minds/capabilities";
@@ -134,6 +134,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string }>
   let tasks;
   try {
     tasks = await listTasks();
+    // Interrupted runs are failed on read instead of showing "executing" forever.
+    tasks = await Promise.all(tasks.map((t) => reapIfStalled(t, Date.now())));
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: "storage unavailable", detail: detail.slice(0, 200) }, { status: 503 });

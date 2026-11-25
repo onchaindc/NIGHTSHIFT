@@ -93,17 +93,27 @@ export function telegraphNodeUrl(): string {
  */
 const TELEGRAPH_UA = "NIGHTSHIFT/1.0 (Telegraph x402 client)";
 
+/**
+ * Every server→node call is time-bounded. A node that silently stops
+ * answering must fail the step with a clean error — an unbounded fetch would
+ * hang until the function's execution window kills it, leaving the task stuck
+ * in "executing" forever with no event and no error.
+ */
+const NODE_CALL_TIMEOUT_MS_DEFAULT = 30_000;
+
 export function telegraphFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  // Read per call so the window stays configurable at runtime (tests, ops).
+  const signal = init?.signal ?? AbortSignal.timeout(Number(process.env.TELEGRAPH_CALL_TIMEOUT_MS ?? 30_000));
   if (input instanceof Request) {
     // wrapFetchWithPayment always hands over a Request with the payment header
     // already set on its headers: add ours there (passing init.headers would
     // REPLACE the Request's headers per fetch spec and strip the payment).
     input.headers.set("User-Agent", TELEGRAPH_UA);
-    return fetch(input, init);
+    return fetch(input, { ...init, signal });
   }
   const headers = new Headers(init?.headers);
   headers.set("User-Agent", TELEGRAPH_UA);
-  return fetch(input, { ...init, headers });
+  return fetch(input, { ...init, headers, signal });
 }
 
 /** Returns the env keys missing for PAID inference. Discovery needs none. */

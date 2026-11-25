@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { createTask, runTask, EngineError } from "@/lib/engine/engine";
+import { createTask, reapIfStalled, runTask, EngineError } from "@/lib/engine/engine";
 import { listTasks } from "@/lib/engine/store";
 import { requestAuthorized } from "@/lib/api/auth";
 import { tasksForCaller } from "@/lib/api/public";
@@ -23,6 +23,8 @@ export async function GET(req: Request) {
   let tasks;
   try {
     tasks = await listTasks();
+    // Interrupted runs are failed on read instead of showing "executing" forever.
+    tasks = await Promise.all(tasks.map((t) => reapIfStalled(t, Date.now())));
   } catch (err) {
     // Storage unreachable (e.g. the configured database is down): report the
     // unavailable state explicitly instead of an opaque server error, so the

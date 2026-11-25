@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getTask, saveTask } from "./store";
+import { getTask, listTasks, saveTask } from "./store";
 import { planForGoal, describeCriteria } from "./planner";
 import { verifyTask, VerificationFailure } from "./verify";
 import { extractGasGwei, extractUsdCost } from "./planner";
@@ -346,6 +346,60 @@ export async function runTask(id: string, deps: EngineDeps = defaultDeps()): Pro
     throw new EngineError(`task ${id} is ${task.state}; runTask requires the executing state`);
   }
   return runPlan(task, deps);
+}
+
+/* ------------------------------------------------------------------ */
+/* Stall recovery                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A run whose progress stopped (the function's execution window closed while
+ * its background continuation was mid-step, or the node stopped answering)
+ * must not stay "executing" forever. Read paths call this before answering:
+ * any task still created/planning/executing/verifying with no update for
+ * TASK_STALL_MS is failed with an honest explanation. `awaiting_approval` is
+ * deliberately NOT reaped — waiting for a human is legitimate and unbounded.
+ */
+export const TASK_STALL_MS = 5 * 60_000;
+
+const STALL_MESSAGE =
+  "The run stopped making progress (the execution window closed or the node stopped answering) and was interrupted. Nothing after the last recorded step was invented or guessed — re-run the investigation to continue.";
+
+export async function reapStalledTasks(now: number): Promise<number> {
+  let tasks: TaskRecord[];
+  try {
+    tasks = await listTasks();
+  } catch {
+    return 0; // storage unavailable — reads must not turn into crashes
+  }
+  let reaped = 0;
+  for (const task of tasks) {
+    const before = task.state;
+    await reapIfStalled(task, now);
+    if (task.state !== before) reaped += 1;
+  }
+  return reaped;
+}
+
+/** Fail one task in place if it is stuck mid-run; returns the possibly updated record. */
+export async function reapIfStalled(task: TaskRecord, now: number): Promise<TaskRecord> {
+  if (task.state !== "created" && task.state !== "planning" && task.state !== "executing" && task.state !== "verifying") {
+    return task;
+  }
+  if (now - task.updatedAt < TASK_STALL_MS) return task;
+  if (!canTransition(task.state, "failed")) return task;
+  task.state = "failed";
+  task.error = STALL_MESSAGE;
+  task.events.push({
+    id: randomUUID(),
+    ts: now,
+    type: "step_failed",
+    message:
+      "Run interrupted: no progress for over 5 minutes (execution window closed or the node stopped answering). Failed cleanly instead of hanging forever; re-run to continue.",
+  });
+  task.updatedAt = now;
+  await saveTask(task);
+  return task;
 }
 
 async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> {
