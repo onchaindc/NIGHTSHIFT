@@ -12,6 +12,7 @@ import {
 } from "@/lib/minds/capabilities";
 import { MIND_FOUNDATION, MIND_PIPELINE } from "@/lib/minds/foundation";
 import { MindStatusChip } from "@/components/minds/status-chip";
+import CapabilityConsole, { type ConsoleDimensionView } from "@/components/minds/capability-console";
 
 interface Params {
   params: Promise<{ slug: string }>;
@@ -59,6 +60,29 @@ export default async function MindProfilePage({ params }: Params) {
   const verified = caps?.dimensions.filter((d) => d.status === "verified").length ?? 0;
   const partial = caps?.dimensions.filter((d) => d.status === "partial").length ?? 0;
   const gaps = caps?.dimensions.filter((d) => d.status === "gap").length ?? 0;
+
+  // Minds without a bespoke investigation route get the shared capability
+  // console: the flagship's arrangement, driven by this Mind's matrix.
+  const consoleDimensions: ConsoleDimensionView[] = (caps?.dimensions ?? [])
+    .filter((d) => d.status !== "gap")
+    .map((d) => ({
+      id: d.id,
+      label: d.label,
+      requirement: d.requirement,
+      status: d.status,
+      intent: d.intent,
+      provider: d.provider,
+      priceUsdCents: d.priceUsdCents,
+      params: Object.entries(d.params ?? {}).map(([name, spec]) => ({
+        name,
+        required: spec.required,
+        description: spec.description,
+        ...(spec.sample !== undefined ? { sample: spec.sample } : {}),
+      })),
+    }));
+  const ceiling = (caps?.dimensions ?? [])
+    .filter((d) => d.status !== "gap")
+    .reduce((sum, d) => sum + (d.priceUsdCents ?? 1), 0);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12">
@@ -149,9 +173,9 @@ export default async function MindProfilePage({ params }: Params) {
             ) : (
               <div className="mt-4 rounded-lg border border-dashed border-edge bg-panel-2 px-3 py-2.5">
                 <p className="text-[11.5px] leading-relaxed text-ink-faint">
-                  This Mind is not operational. There is no launch action because coverage is incomplete and no paid
-                  answer has been verified for it; the shared capability API can still execute its verified
-                  dimensions.
+                  This Mind is not operational. Coverage is incomplete and no paid answer has been verified for it, so there is no
+                  launch button — but the capability console below runs its verified dimensions: free preflight is open, paid runs
+                  wait at the operator approval gate.
                 </p>
               </div>
             )}
@@ -186,6 +210,30 @@ export default async function MindProfilePage({ params }: Params) {
           </section>
         </aside>
       </div>
+
+      {/* Capability console — the flagship arrangement, for Minds without a bespoke route */}
+      {!mind.href && consoleDimensions.length > 0 && (
+        <section className="mt-10 border-t border-edge pt-8" aria-labelledby="console-section">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 id="console-section" className="x-label !mt-0">Run it now</h2>
+            <span className="text-[11px] text-ink-faint">
+              Free preflight open · paid runs behind the operator approval gate
+            </span>
+          </div>
+          <p className="mt-2 max-w-[82ch] text-[12px] leading-relaxed text-ink-soft">
+            The same run surface the available Minds use, driven by this Mind&apos;s verified matrix. A run prices every routable
+            dimension and records the gap ledger; it does not upgrade the Mind&apos;s catalogue status.
+          </p>
+          <CapabilityConsole
+            slug={mind.slug}
+            name={mind.name}
+            mindStatus={mind.status}
+            ceilingUsdCents={ceiling}
+            dimensions={consoleDimensions}
+            probedAt={CAPABILITY_PROBED_AT}
+          />
+        </section>
+      )}
 
       {/* Capability matrix */}
       <section className="mt-12 border-t border-edge pt-8" aria-labelledby="coverage">
