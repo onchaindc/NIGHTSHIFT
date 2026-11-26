@@ -6,7 +6,7 @@ import { ArrowLeft, CircleAlert, LoaderCircle } from "lucide-react";
 
 import type { TaskRecord } from "@/lib/engine/types";
 import type { DeskEvidence, DeskInvestigation } from "@/lib/desk/types";
-import { DESK_TYPE_LABEL } from "@/lib/desk/types";
+import { DESK_TYPE_LABEL, DESK_VERDICT_LABEL } from "@/lib/desk/types";
 import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { vibrate } from "@/lib/haptics";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
@@ -30,6 +30,13 @@ const SEVERITY_CHIP: Record<string, string> = {
   material: "border-amber/40 bg-amber/10 text-amber",
   minor: "border-edge bg-panel-2 text-ink-soft",
   info: "border-edge bg-panel-2 text-ink-faint",
+};
+
+const VERDICT_CHIP: Record<string, string> = {
+  hold_pending_review: "border-risk/40 bg-risk/10 text-risk",
+  proceed_with_conditions: "border-amber/40 bg-amber/10 text-amber",
+  proceed_on_record: "border-teal/40 bg-teal/10 text-teal",
+  insufficient_verified_evidence: "border-edge bg-panel-3 text-ink-faint",
 };
 
 const CONFIDENCE_WORD: Record<string, string> = {
@@ -481,6 +488,50 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
                   {inv.report.counts.analysis} analysis
                 </span>
               </p>
+
+              {/* Executive assessment — the desk's labelled analysis verdict:
+                  what was established, what is adverse, what the file cannot
+                  speak to, and the concrete next steps, each traced. */}
+              <div className="mt-4 rounded-xl border border-edge bg-panel-2/60 p-3.5 sm:p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full border px-2.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide ${
+                      VERDICT_CHIP[inv.report.assessment.verdict] ?? VERDICT_CHIP.insufficient_verified_evidence
+                    }`}
+                  >
+                    {DESK_VERDICT_LABEL[inv.report.assessment.verdict] ?? inv.report.assessment.verdict}
+                  </span>
+                  <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint">Executive assessment · labelled desk analysis</span>
+                </div>
+                <p className="mt-2 text-[13px] leading-relaxed text-ink">{inv.report.assessment.summary}</p>
+                {inv.report.assessment.basis.length > 0 && (
+                  <ul className="mt-2.5 space-y-1">
+                    {inv.report.assessment.basis.map((b, i) => (
+                      <li key={i} className="flex gap-1.5 text-[12px] leading-relaxed text-ink-soft">
+                        <span aria-hidden className="mt-[1px] shrink-0 text-ink-faint">—</span>
+                        <span className="min-w-0">{b}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {inv.report.assessment.nextActions.length > 0 && (
+                  <div className="mt-3 border-t border-edge pt-3">
+                    <p className="text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink-faint">Recommended next steps</p>
+                    <ol className="mt-2 space-y-2">
+                      {inv.report.assessment.nextActions.map((a, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span aria-hidden className="mt-[1px] shrink-0 font-semibold text-ink-faint tabular">{i + 1}.</span>
+                          <div className="min-w-0">
+                            <p className="text-[12.5px] font-medium leading-snug text-ink">{a.title}</p>
+                            <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-soft">{a.detail}</p>
+                            {a.basis.length > 0 && <p className="mt-0.5 text-[10.5px] text-ink-faint">Basis: {a.basis.join(", ")}</p>}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </div>
 
               {inv.report.findings.length === 0 ? (
                 <p className="mt-3 text-[12.5px] leading-relaxed text-ink-soft">

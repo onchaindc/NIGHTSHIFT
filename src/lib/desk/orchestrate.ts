@@ -28,15 +28,18 @@ import { auditDesk, saveDeskInvestigation } from "./store";
 import { declaredInputEvidence, deskSubjectLine } from "./create";
 import type { DeskRunConfig } from "./execute";
 import type {
+  DeskAssessment,
   DeskConfidence,
   DeskDiscrepancy,
   DeskEvidence,
   DeskFinding,
   DeskInvestigation,
+  DeskNextAction,
   DeskReport,
   DeskReportSection,
   DeskSeverity,
   DeskUnsupportedRequirement,
+  DeskVerdict,
   ProvenanceClass,
 } from "./types";
 import { DESK_TYPE_LABEL } from "./types";
@@ -423,14 +426,17 @@ const NOTABLE: Array<{
 }> = [
   {
     match: (capability, facts) =>
-      /name_screening|sanctions/.test(capability) && facts.matched === true ? "critical" : null,
-    title: (facts) => `Sanctions name match${typeof facts.list_name === "string" ? ` (${facts.list_name})` : ""}`,
-    significance: "A sanctions list matched this name at the provider. Treat the file as blocked pending human review; a name screen is probabilistic and is not a legal determination.",
+      /name_screening|sanctions|vessel_screening/.test(capability) && facts.matched === true ? "critical" : null,
+    title: (facts) =>
+      `Sanctions name match${typeof facts.lists === "string" && facts.lists ? ` (${facts.lists})` : typeof facts.list_name === "string" ? ` (${facts.list_name})` : ""}`,
+    significance:
+      "A sanctions list matched a name in this file at the provider. Treat the file as blocked pending human review; a name screen is probabilistic and is not a legal determination, and for a controller or vessel the match is name-based only.",
   },
   {
     match: (capability, facts) => (/registry/.test(capability) && facts.active === false ? "material" : null),
     title: () => "Registry record is not active",
-    significance: "The official register does not show the entity as active. Resolve the status before any payment or contract relies on this identity.",
+    significance:
+      "The official register does not show the entity as active. Resolve the status before any payment or contract relies on this identity.",
   },
   {
     match: (capability, facts) => (/tx_risk/.test(capability) && typeof facts.risk_level === "string"
@@ -441,27 +447,223 @@ const NOTABLE: Array<{
           : null
       : null),
     title: (facts) => `Transaction risk flagged (${String(facts.risk_level)})`,
-    significance: "The risk provider flagged the transaction. A provider risk score is a judgment, not an attribution; review the signals with the cited evidence.",
+    significance:
+      "The risk provider flagged the transaction. A provider risk score is a judgment, not an attribution; review the signals with the cited evidence.",
   },
   {
     match: (capability, facts) => (/invoice_reconcile/.test(capability) && facts.reconciled === false ? "material" : null),
     title: () => "Invoice does not reconcile with the ledger",
-    significance: "The provider reports a reconciliation discrepancy. The recorded explanation and evidence sit with the finding.",
+    significance:
+      "The provider reports a reconciliation discrepancy. Do not release payment against it; the recorded explanation and evidence sit with the finding.",
   },
   {
     match: (capability, facts) => (/po_verify/.test(capability) && facts.verified === false ? "material" : null),
     title: () => "Purchase order could not be verified",
-    significance: "The source system did not confirm the purchase order as asked. Confirm the reference and vendor before relying on it.",
+    significance:
+      "The source system did not confirm the purchase order as asked. Confirm the reference and vendor with the source system before relying on it.",
+  },
+  {
+    match: (capability, facts) => (/vendor_identity/.test(capability) && facts.valid === false ? "material" : null),
+    title: (facts) => `VAT identity does not validate${typeof facts.vat_number === "string" ? ` (${facts.vat_number})` : ""}`,
+    significance:
+      "The tax registration could not be validated for this entity. Until the supplier supplies a correct registration, the chain between the invoice you hold and the entity you screened is broken — hold payment-relevant decisions on it.",
   },
   {
     match: (capability, facts) => (/wash_trading/.test(capability) && typeof facts.verdict === "string" && /wash/i.test(facts.verdict) ? "material" : null),
     title: (facts) => `Wash-trading signals reported (${String(facts.verdict)})`,
-    significance: "The provider's heuristic reports wash-trading patterns. It is not proof of intent; read the signals with the evidence.",
+    significance:
+      "The provider's heuristic reports wash-trading patterns. It is not proof of intent; read the signals with the evidence.",
+  },
+  {
+    match: (capability, facts) => (/adverse_media/.test(capability) && typeof facts.result_count === "number" && facts.result_count > 0 ? "minor" : null),
+    title: (facts) => `Adverse-coverage search returned ${facts.result_count} item(s)`,
+    significance:
+      "The search returned press coverage for this subject. Coverage is not adjudication and a news item is not a court record — review the cited sources for matters material to the relationship.",
+  },
+  {
+    match: (capability, facts) => (/fact_check/.test(capability) && typeof facts.verdict === "string" && facts.verdict.length > 0 ? "minor" : null),
+    title: (facts) => `Claim check verdict: ${String(facts.verdict)}`,
+    significance:
+      "The provider's verdict on public support for the declared claim, reported verbatim. It checks public sources; it is not a legal determination.",
   },
 ];
 
+/**
+ * Why this record matters for the decision the workflow serves. Per
+ * capability family, not generic — the significance names the decision the
+ * record feeds (onboarding, payment release, investment screening).
+ */
 function significanceFor(capability: string): string {
+  if (/counterparty-intelligence:registry|entity_registry|party_registry|owner_registry|operator_registry|counterparty_registry|index-reconstitution-desk:registry/.test(capability)) {
+    return "The registry record anchors the entity's legal identity — contracts, payments and screening should name the entity exactly as registered. Read it with the cited signal.";
+  }
+  if (/vendor_identity/.test(capability)) {
+    return "A validated VAT registration ties the trading name to a tax identity; it is the cheapest independent check that the entity you screened is the entity that invoices you. It is not beneficial ownership.";
+  }
+  if (/b2b_enrichment/.test(capability)) {
+    return "Firmographics disambiguate same-name entities and give scale context. The pinned provider is an aggregator, so treat the fields as leads, not confirmed facts, until reconciled.";
+  }
+  if (/name_screening|sanctions|vessel_screening/.test(capability)) {
+    return "A sanctions screen is a hard gate in onboarding and payment flows: a match blocks, a clean screen narrows but never closes the question, because name screens miss aliases and transliterations.";
+  }
+  if (/filings|regulatory_filings/.test(capability)) {
+    return "Filings show what the entity publicly disclosed in the period. They are source-linked, not adjudicated — read them against the claims the counterparty makes.";
+  }
+  if (/adverse_media/.test(capability)) {
+    return "Adverse coverage flags relationship risk that registries cannot: disputes, investigations, incidents. Press coverage is not adjudication — the sources decide, not the count.";
+  }
+  if (/fact_check/.test(capability)) {
+    return "The claim check tests public support for one declared claim; it bounds how far the counterparty's own statement can be relied on, nothing more.";
+  }
+  if (/wallet_balance|onchain_metric/.test(capability)) {
+    return "The on-chain read is the network's own record of holdings at the stated chain and block — the baseline every custody or treasury claim in the file is checked against.";
+  }
+  if (/tx_lookup/.test(capability)) {
+    return "The transaction record ties the hash to its on-chain facts — parties, value and status — so the rest of the file reasons about a real movement of funds, not a described one.";
+  }
+  if (/tx_risk/.test(capability)) {
+    return "Risk signals on the transaction bear directly on whether to accept the funds or the counterparty behind them. The score is a provider judgment, not an attribution.";
+  }
+  if (/holder_concentration|holders/.test(capability)) {
+    return "Holder supply context is first-order for token investment screening: distribution and holder base size bound how the asset can trade. The canonical answer is a count, not a top-holder table.";
+  }
+  if (/supply/.test(capability)) {
+    return "Total supply grounds every per-token valuation and the stated-vs-verified comparison. It is not circulating float, which the network cannot ask.";
+  }
+  if (/index-reconstitution-desk:price|btc_price/.test(capability)) {
+    return "The verified USD price fixes the market value used in this file at an observed moment — declared or stale prices never substitute for it.";
+  }
+  if (/liquidity/.test(capability)) {
+    return "Pool depth bounds exit size for the position; thin liquidity is a material investment constraint even when the token's price looks stable.";
+  }
+  if (/wash_trading/.test(capability)) {
+    return "Wash-trading signals bear on whether recorded volume reflects real demand. A heuristic verdict is not proof of intent.";
+  }
+  if (/po_verify/.test(capability)) {
+    return "A verified purchase order is the contractual baseline payment release is checked against; an unverifiable PO stops the payment chain here.";
+  }
+  if (/invoice_reconcile/.test(capability)) {
+    return "Invoice-to-ledger reconciliation is the last automated check before money leaves; a failed reconcile is a payment stopper, not a footnote.";
+  }
+  if (/commerce_verify/.test(capability)) {
+    return "The commerce order record confirms the order and its amount at the merchant — the counterpart of the invoice in consumer-style flows.";
+  }
+  if (/delivery_window|package_status|vessel_telemetry/.test(capability)) {
+    return "Shipment evidence tests the delivery story against the carrier's own records — the difference between a promised and an actual fulfilment.";
+  }
+  if (/port_congestion|storm_risk|route_eta|ship_rate|carrier_scope/.test(capability)) {
+    return "Route conditions and pricing bound whether the quoted delivery and cost terms are realistic for the contract window.";
+  }
+  if (/hashprice_network|energy_price|grid_price|current_temperature|weather_history/.test(capability)) {
+    return "Power and market economics are the input costs the asset's margin is computed from; each is pinned to its node and interval.";
+  }
   return "A verified fact for this investigation, re-derived against the node signal; read it with the cited source.";
+}
+
+/**
+ * A specific, fact-carrying title for a verified record — what the answer
+ * actually said, not the capability label. Deterministic from the facts, and
+ * gated on the discriminant field actually being present: a branch whose
+ * facts never arrived falls back to the plain label rather than implying a
+ * verdict the answer did not carry.
+ */
+function factTitle(e: DeskEvidence): string {
+  const f = e.facts;
+  const has = (...keys: string[]): boolean => keys.some((k) => f[k] !== undefined && f[k] !== null && f[k] !== "");
+  const v = (k: string): string => (f[k] === null || f[k] === undefined ? "" : String(f[k]));
+  if (/registry|entity_registry|party_registry/.test(e.capability) && typeof f.legal_name === "string") {
+    const status = f.active === true ? "active" : f.active === false ? "not active" : "status unreported";
+    const lei = v("lei") ? `, LEI ${v("lei")}` : "";
+    return `Registry record: ${v("legal_name")} (${v("jurisdiction") || "jurisdiction unreported"}) — ${status}${lei}`;
+  }
+  if (/vendor_identity/.test(e.capability) && has("valid", "vendor", "registered_name")) {
+    return `VAT ${f.valid === true ? "valid" : f.valid === false ? "not valid" : "check returned"} for ${v("vendor") || "vendor"} (${v("vat_number")}) — registered as "${v("registered_name") || "name unreported"}"`;
+  }
+  if (/name_screening|sanctions_check|operator_sanctions|vessel_screening/.test(e.capability) && typeof f.matched === "boolean") {
+    return `Sanctions screen: ${f.matched ? "match reported" : "no match"} for ${v("name") || v("subject") || "the screened name"}${v("match_score") ? ` (score ${v("match_score")})` : ""}`;
+  }
+  if (/filings|regulatory_filings/.test(e.capability) && has("filing_count")) {
+    return `${v("filing_count")} filing(s) disclosed by the named entity in the period`;
+  }
+  if (/adverse_media/.test(e.capability) && has("result_count")) {
+    return `Adverse-coverage search: ${v("result_count")} item(s) for the subject`;
+  }
+  if (/fact_check/.test(e.capability) && has("verdict")) {
+    return `Claim check on the declared claim: verdict "${v("verdict")}"`;
+  }
+  if (/wallet_balance/.test(e.capability) && has("balance", "address")) {
+    return `Wallet ${v("address") || ""} on ${v("chain") || "chain"}: balance ${v("balance") || "?"}${v("token_symbol") ? ` ${v("token_symbol")}` : ""}`;
+  }
+  if (/onchain_metric/.test(e.capability) && has("block", "tx_count", "balance_gwei")) {
+    return `Account at block ${v("block") || "?"} on ${v("chain") || "chain"}: ${v("tx_count") || "?"} transaction(s), ${v("balance_gwei") || "?"} gwei`;
+  }
+  if (/tx_lookup/.test(e.capability) && has("tx_hash", "status", "block_number")) {
+    return `Transaction ${(v("tx_hash") || "").slice(0, 14) || "0x"}…: ${v("status") || "status unreported"}, value ${v("value_eth") || "?"} ETH, block ${v("block_number") || "?"}`;
+  }
+  if (/tx_risk/.test(e.capability) && has("risk_level", "risk_score")) {
+    return `Transaction risk: ${v("risk_level") || "unreported"} (score ${v("risk_score") || "?"})`;
+  }
+  if (/holder_concentration|holders/.test(e.capability) && has("holders_count")) {
+    return `Holder base: ${v("holders_count")} holder(s)${v("token_symbol") ? ` of ${v("token_symbol")}` : ""}${v("chain") ? ` on ${v("chain")}` : ""}`;
+  }
+  if (/:supply|total_supply/.test(e.capability) && has("total_supply")) {
+    return `Verified total supply: ${v("total_supply")}`;
+  }
+  if (/price/.test(e.capability) && has("price_usd")) {
+    return `Verified USD price: $${v("price_usd")}`;
+  }
+  if (/liquidity/.test(e.capability) && has("liquidity_usd")) {
+    return `Pool depth: $${v("liquidity_usd")}`;
+  }
+  if (/wash_trading/.test(e.capability) && has("verdict", "subject")) {
+    return `Wash-trading check on ${v("subject") || "the market"}: verdict "${v("verdict") || "?"}"${v("wash_volume_pct") ? `, ${v("wash_volume_pct")}% flagged volume` : ""}`;
+  }
+  if (/po_verify/.test(e.capability) && has("verified", "po_number", "amount")) {
+    return `Purchase order ${v("po_number") || ""}: ${f.verified === true ? "verified" : f.verified === false ? "not verified" : "verdict unreported"}${v("amount") ? `, amount ${v("amount")}` : ""}${v("status") ? `, status ${v("status")}` : ""}`;
+  }
+  if (/invoice_reconcile/.test(e.capability) && typeof f.reconciled === "boolean") {
+    return `Invoice reconciliation: ${f.reconciled ? "reconciled" : "does not reconcile"}${v("discrepancy") ? ` (${v("discrepancy")})` : ""}`;
+  }
+  if (/commerce_verify/.test(e.capability) && has("verified", "order_id", "amount")) {
+    return `Commerce order ${v("order_id") || ""}: ${f.verified === true ? "verified" : f.verified === false ? "not verified" : "verdict unreported"}${v("amount") ? `, ${v("amount")} ${v("currency") ?? ""}` : ""}`;
+  }
+  if (/delivery_window/.test(e.capability) && has("transit_days_min", "transit_days_max")) {
+    return `Delivery window ${v("carrier") || ""} on ${v("route") || "route"}: ${v("transit_days_min") || "?"}–${v("transit_days_max") || "?"} day(s)${f.is_estimate === true ? " (estimate)" : ""}`;
+  }
+  if (/package_status/.test(e.capability) && has("status", "delivered", "tracking_number")) {
+    return `Package ${v("tracking_number") || ""}: ${v("status") || "status unreported"}${f.delivered === true ? " — delivered" : f.delivered === false ? " — not delivered" : ""}${v("last_location") ? `, last at ${v("last_location")}` : ""}`;
+  }
+  if (/vessel_telemetry/.test(e.capability) && has("vessel", "latitude")) {
+    return `Vessel ${v("vessel") || ""}: ${v("speed_knots") || "?"} kn at ${v("latitude") || "?"}, ${v("longitude") || "?"} (observed ${v("observed_at") || "?"})`;
+  }
+  if (/port_congestion/.test(e.capability) && has("port", "congestion_level", "vessels_waiting")) {
+    return `Port ${v("port") || ""}: ${v("congestion_level") || "level unreported"}, ${v("vessels_waiting") || "?"} vessel(s) waiting ~${v("wait_hours") || "?"} h`;
+  }
+  if (/ship_rate/.test(e.capability) && has("rate")) {
+    return `Shipment ${v("origin") ? `${v("origin")}→${v("destination")}` : ""}: ${v("rate")} ${v("currency") || ""}, transit ${v("transit_days") || "?"} d, ETA ${v("eta") || "?"}`;
+  }
+  if (/carrier_scope/.test(e.capability) && has("carrier", "serviceable")) {
+    return `Carrier ${v("carrier") || ""} in ${v("area") || ""}: ${f.serviceable === true ? "serviceable" : f.serviceable === false ? "not serviceable" : "coverage unreported"}`;
+  }
+  if (/route_eta/.test(e.capability) && has("duration")) {
+    return `Route ETA ${v("origin") ? `${v("origin")}→${v("destination")}` : ""}: ${v("duration")}`;
+  }
+  if (/storm_risk/.test(e.capability) && has("risk_level", "risk_score")) {
+    return `Storm risk at ${v("location") || ""}: ${v("risk_level") || "unreported"} (score ${v("risk_score") || "?"}), gusts ${v("peak_gust_kmh") || "?"} km/h`;
+  }
+  if (/hashprice_network/.test(e.capability) && has("hashprice_usd_per_ph_day", "block_height")) {
+    return `Hashprice $${v("hashprice_usd_per_ph_day") || "?"}/PH/day at block ${v("block_height") || "?"}; network ${v("hashrate_eh_s") || "?"} EH/s`;
+  }
+  if (/energy_price|grid_price/.test(e.capability) && has("lmp_usd_per_mwh")) {
+    return `Grid price at ${v("node_or_zone") || ""}: $${v("lmp_usd_per_mwh")}/MWh for ${v("interval_start") || "the interval"}`;
+  }
+  if (/current_temperature/.test(e.capability) && has("temperature_c")) {
+    return `Temperature at the site: ${v("temperature_c")} °C`;
+  }
+  if (/weather_history/.test(e.capability) && has("date", "temp_max_c")) {
+    return `Weather on ${v("date") || "the date"} at ${v("location") || ""}: ${v("temp_max_c") || "?"}/${v("temp_min_c") || "?"} °C, ${v("precipitation_mm") || "?"} mm, ${v("condition") || "?"}`;
+  }
+  return `Verified: ${e.label}`;
 }
 
 function buildFindings(inv: DeskInvestigation): DeskFinding[] {
@@ -486,7 +688,7 @@ function buildFindings(inv: DeskInvestigation): DeskFinding[] {
       findings.push({
         id: `finding:${i++}`,
         severity: "info",
-        title: `Verified: ${e.label}`,
+        title: factTitle(e),
         detail: e.detail,
         significance: significanceFor(e.capability),
         evidenceIds: [e.id],
@@ -496,6 +698,24 @@ function buildFindings(inv: DeskInvestigation): DeskFinding[] {
   }
   const order: Record<DeskSeverity, number> = { critical: 0, material: 1, minor: 2, info: 3 };
   return findings.sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
+/** First number in a free-text amount like "INV-2026-1042 12,000.00 USD". */
+function parseAmount(text: unknown): number | null {
+  const m = String(text ?? "").replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  const n = m ? Number(m[0]) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Trailing standalone country code in an address string ("Austin, TX, US"). */
+function trailingCountryCode(text: unknown): string | null {
+  const m = String(text ?? "").trim().match(/(?:^|[\s,;])([A-Za-z]{2})$/);
+  return m ? m[1].toUpperCase() : null;
+}
+
+function relDiff(a: number, b: number): number {
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1e-9);
+  return Math.abs(a - b) / scale;
 }
 
 function buildDiscrepancies(inv: DeskInvestigation): DeskDiscrepancy[] {
@@ -525,6 +745,32 @@ function buildDiscrepancies(inv: DeskInvestigation): DeskDiscrepancy[] {
         detail: `Requested "${inv.subject.legalName ?? inv.subject.supplierName ?? ""}"; the registry answers with "${String(e.facts.legal_name)}". Verify you asked about the intended entity.`,
         evidenceIds: [e.id],
       });
+    }
+    // VAT identity: the registered tax name must match the entity on the file.
+    if (/vendor_identity/.test(e.capability) && typeof e.facts.registered_name === "string") {
+      const vatName = normalizeName(e.facts.registered_name);
+      if (subjectName && vatName && vatName !== subjectName) {
+        out.push({
+          id: `disc:${i++}`,
+          kind: "field_conflict",
+          title: "VAT registration names a different entity",
+          detail: `The file is about "${inv.subject.legalName ?? inv.subject.supplierName ?? ""}"; the VAT check returns registered name "${String(e.facts.registered_name)}". The invoice chain must name the registered entity — resolve before releasing payment.`,
+          evidenceIds: [e.id],
+        });
+      }
+    }
+    // Firmographics: the enrichment's trailing country code against the file's.
+    if (/b2b_enrichment/.test(e.capability) && subjectJurisdiction.length === 2) {
+      const hq = trailingCountryCode(e.facts.headquarters);
+      if (hq && hq !== subjectJurisdiction) {
+        out.push({
+          id: `disc:${i++}`,
+          kind: "field_conflict",
+          title: "Enrichment headquarters sits outside the file's jurisdiction",
+          detail: `The file asks about jurisdiction ${subjectJurisdiction}; the enrichment record ends in "${String(e.facts.headquarters)}" (country code ${hq}). Same-name entities across borders are the classic screening miss — confirm which entity you are dealing with.`,
+          evidenceIds: [e.id],
+        });
+      }
     }
     if (e.missingFields?.length) {
       out.push({
@@ -559,6 +805,55 @@ function buildDiscrepancies(inv: DeskInvestigation): DeskDiscrepancy[] {
       detail: `Registry: "${String(registry.facts.legal_name)}". Enrichment: "${String(enrichment.facts.company)}". Both are verified against their own signals; the conflict is unresolved and named.`,
       evidenceIds: [registry.id, enrichment.id],
     });
+  }
+
+  // Stated supply vs the network-verified total supply (asset workflow).
+  if (inv.type === "asset_intelligence") {
+    const declaredSupply = inv.evidence.find((e) => e.id === "declared:declaredSupply");
+    const verifiedSupply = inv.evidence.find((e) => e.provenance === "verified" && /:supply/.test(e.capability) && e.facts.total_supply !== undefined);
+    if (declaredSupply && verifiedSupply) {
+      const stated = parseAmount(declaredSupply.facts.value);
+      const verified = Number(verifiedSupply.facts.total_supply);
+      if (stated !== null && Number.isFinite(verified) && relDiff(stated, verified) > 0.005) {
+        out.push({
+          id: `disc:${i++}`,
+          kind: "field_conflict",
+          title: "Stated supply differs from the verified total supply",
+          detail: `The issuer's materials state ${stated.toLocaleString("en-US")}; the network-verified answer carries ${verified.toLocaleString("en-US")}. The gap is unresolved — treat the token's stated economics with suspicion until it is explained.`,
+          evidenceIds: [declaredSupply.id, verifiedSupply.id],
+        });
+      }
+    }
+  }
+
+  // Trade: the purchase order's amount against the declared ledger line, and
+  // a failed reconciliation recorded as the conflict it is.
+  if (inv.type === "trade_supplier_intelligence") {
+    const po = inv.evidence.find((e) => e.provenance === "verified" && /po_verify/.test(e.capability) && e.facts.amount !== undefined);
+    const declaredLedger = inv.evidence.find((e) => e.id === "declared:ledgerRef");
+    if (po && declaredLedger) {
+      const poAmount = parseAmount(po.facts.amount);
+      const ledgerAmount = parseAmount(declaredLedger.facts.value);
+      if (poAmount !== null && ledgerAmount !== null && relDiff(poAmount, ledgerAmount) > 0.005) {
+        out.push({
+          id: `disc:${i++}`,
+          kind: "field_conflict",
+          title: "Purchase-order amount differs from the declared ledger amount",
+          detail: `The verified purchase order carries ${String(po.facts.amount)}; the ledger line you supplied reads "${inv.subject.ledgerRef}". Amount drift between PO and ledger is the classic over-billing pattern — reconcile before any payment release.`,
+          evidenceIds: [po.id, declaredLedger.id],
+        });
+      }
+    }
+    const failedReconcile = inv.evidence.find((e) => e.provenance === "verified" && /invoice_reconcile/.test(e.capability) && e.facts.reconciled === false);
+    if (failedReconcile) {
+      out.push({
+        id: `disc:${i++}`,
+        kind: "field_conflict",
+        title: "Invoice does not reconcile with the declared ledger record",
+        detail: `The reconciliation provider reports a discrepancy${typeof failedReconcile.facts.discrepancy === "string" ? `: "${failedReconcile.facts.discrepancy}"` : ""}${typeof failedReconcile.facts.explanation === "string" ? ` — ${failedReconcile.facts.explanation}` : ""}. The declared ledger line: "${inv.subject.ledgerRef ?? ""}".`,
+        evidenceIds: [failedReconcile.id, ...(inv.evidence.some((e) => e.id === "declared:ledgerRef") ? ["declared:ledgerRef"] : [])],
+      });
+    }
   }
 
   return out;
@@ -600,6 +895,209 @@ function confidenceOf(inv: DeskInvestigation, verified: number, askedVerifiedOrU
   const routable = inv.evidence.filter((e) => e.provenance === "unverified" && e.class === "probe_verified").length;
   if (routable > 0) return "route_verified_only";
   return "unverified";
+}
+
+/* ------------------------------------------------------------------ */
+/* Executive assessment                                                */
+/* ------------------------------------------------------------------ */
+
+const VERDICT_SENTENCE: Record<DeskVerdict, string> = {
+  hold_pending_review:
+    "Verdict: hold. At least one verified signal is a hard stop in ordinary onboarding and payment flows — route it to a human reviewer before money moves or commitments are made.",
+  proceed_with_conditions:
+    "Verdict: proceed with conditions. Nothing verified here is a hard stop, but the material findings and unresolved conflicts below must be resolved before the relationship or payment proceeds.",
+  proceed_on_record:
+    "Verdict: no adverse signal in the recorded checks. This is the absence of red flags in what the file asked — not a clean bill of health beyond those questions.",
+  insufficient_verified_evidence:
+    "Verdict: insufficient verified evidence. Nothing in this file is established as fact yet, so no assessment of the subject is possible — buy the routable answers or supply the missing inputs first.",
+};
+
+/** Titles of the negative checks that actually ran and came back clean. */
+function cleanCheckLines(inv: DeskInvestigation): string[] {
+  const lines: string[] = [];
+  const screens = inv.evidence.filter((e) => e.provenance === "verified" && /name_screening|sanctions|vessel_screening/.test(e.capability) && e.facts.matched === false);
+  if (screens.length > 0) {
+    lines.push(`Sanctions screens returned no match (${screens.length} screen(s) verified${screens.length > 1 ? ", including the named controller" : ""}).`);
+  }
+  const registries = inv.evidence.filter((e) => e.provenance === "verified" && /registry/.test(e.capability) && e.facts.active === true);
+  if (registries.length > 0) {
+    lines.push(`The registry record(s) show the entity active (${registries.length} record(s) verified).`);
+  }
+  const reconciles = inv.evidence.filter((e) => e.provenance === "verified" && /invoice_reconcile/.test(e.capability) && e.facts.reconciled === true);
+  if (reconciles.length > 0) lines.push("The invoice reconciled against the declared ledger line.");
+  const pos = inv.evidence.filter((e) => e.provenance === "verified" && /po_verify/.test(e.capability) && e.facts.verified === true);
+  if (pos.length > 0) lines.push("The purchase order verified against its source system.");
+  return lines;
+}
+
+function buildAssessment(
+  inv: DeskInvestigation,
+  parts: {
+    findings: DeskFinding[];
+    discrepancies: DeskDiscrepancy[];
+    counts: DeskReport["counts"];
+    mode: "free" | "intel";
+    routableOffers?: number;
+  },
+): DeskAssessment {
+  const criticals = parts.findings.filter((f) => f.severity === "critical");
+  const materials = parts.findings.filter((f) => f.severity === "material");
+  const conflicts = parts.discrepancies.filter((d) => d.kind === "field_conflict");
+  const verified = inv.evidence.filter((e) => e.provenance === "verified");
+  const verifiedCapabilities = new Set(verified.map((e) => e.capability)).size;
+  const inputGapCount = inv.evidence.filter((e) => e.id.startsWith("input-gap:")).length;
+  const declaredCount = inv.evidence.filter((e) => e.class === "declared").length;
+  const paid = parts.mode === "intel";
+
+  const verdict: DeskVerdict =
+    criticals.length > 0
+      ? "hold_pending_review"
+      : materials.length > 0 || conflicts.length > 0
+        ? "proceed_with_conditions"
+        : verified.length === 0
+          ? "insufficient_verified_evidence"
+          : "proceed_on_record";
+
+  // Summary: what was established → what is adverse → what the file cannot
+  // speak to → the verdict. Every sentence derives from the ledger, and the
+  // established-evidence sentence keys off the ledger, not the requesting
+  // mode: a free rebuild of a file that already holds paid verified records
+  // must never claim nothing is established.
+  const summaryParts: string[] = [];
+  if (verified.length > 0) {
+    summaryParts.push(
+      `${verified.length} verified record(s) across ${verifiedCapabilities} checked capabilit${verifiedCapabilities === 1 ? "y" : "ies"} rest on paid, hash-committed answers.`,
+    );
+  } else if (paid) {
+    summaryParts.push("The paid run returned nothing that could be verified, so this file establishes no facts.");
+  } else {
+    summaryParts.push(`This is a route-only pre-flight: ${parts.counts.unverified} route(s) were priced and schema-checked, no answer was purchased, and nothing here is established fact.`);
+  }
+  if (criticals.length > 0) {
+    summaryParts.push(`Decisive adverse signal(s): ${criticals.map((f) => f.title.toLowerCase()).join("; ")}.`);
+  } else if (materials.length > 0) {
+    summaryParts.push(`Material findings needing resolution: ${materials.map((f) => f.title.toLowerCase()).join("; ")}.`);
+  } else if (paid && verified.length > 0) {
+    const clean = cleanCheckLines(inv);
+    summaryParts.push(clean.length > 0 ? clean.join(" ") : "No adverse signal appeared in the checks this file ran.");
+  }
+  const cannotSpeakTo: string[] = [];
+  if (inv.unsupported.length > 0) cannotSpeakTo.push(`${inv.unsupported.length} requirement(s) unsupported on the network (${inv.unsupported.map((g) => g.label).join(", ")})`);
+  if (inputGapCount > 0) cannotSpeakTo.push(`${inputGapCount} capability(ies) not asked for lack of inputs`);
+  if (declaredCount > 0) cannotSpeakTo.push(`${declaredCount} declared input(s) never verified`);
+  if (parts.counts.unverified > 0) cannotSpeakTo.push(`${parts.counts.unverified} unverified record(s)`);
+  if (cannotSpeakTo.length > 0) {
+    summaryParts.push(`The file cannot speak to: ${cannotSpeakTo.join("; ")}.`);
+  }
+  summaryParts.push(VERDICT_SENTENCE[verdict]);
+
+  // Basis: the decisive inputs, one line each, traced. Clean checks stay
+  // visible even next to adverse ones — they bound what the adverse finding
+  // means (e.g. the company screened clean while its controller did not).
+  const basis: string[] = [];
+  for (const f of [...criticals, ...materials].slice(0, 5)) {
+    basis.push(`${f.title} — evidence ${f.evidenceIds.join(", ")}`);
+  }
+  basis.push(...cleanCheckLines(inv));
+  if (conflicts.length > 0) basis.push(`${conflicts.length} unresolved conflict(s) between sources — each names the evidence on both sides.`);
+  if (inv.unsupported.length > 0) basis.push(`Unsupported on the network, named not approximated: ${inv.unsupported.map((g) => g.label).join(", ")}.`);
+  if (inputGapCount > 0) basis.push(`${inputGapCount} capability(ies) were never asked — their required inputs were not supplied.`);
+  if (declaredCount > 0) basis.push(`${declaredCount} declared input(s) come from the guided form and are never verified by this workflow.`);
+
+  // Next actions: most decisive first, each traced to its evidence or gap.
+  const nextActions: DeskNextAction[] = [];
+  for (const f of criticals.slice(0, 3)) {
+    if (/sanctions|vessel_screening/i.test(f.title)) {
+      nextActions.push({
+        title: "Route the sanctions match to human compliance review before any payment or commitment",
+        detail: "The screen matched a name in this file at the provider. The match is probabilistic and name-based — the reviewer must confirm or clear it against the underlying list entry; the desk cannot do that for you.",
+        basis: f.evidenceIds,
+      });
+    } else if (/risk/i.test(f.title)) {
+      nextActions.push({
+        title: "Review the flagged transaction's risk signals before accepting funds from this counterparty",
+        detail: "The provider flagged the transaction at a severity that blocks ordinary acceptance. Read the recorded signals with the cited evidence; a score is a judgment, not an attribution.",
+        basis: f.evidenceIds,
+      });
+    } else {
+      nextActions.push({
+        title: `Resolve before proceeding: ${f.title}`,
+        detail: f.significance,
+        basis: f.evidenceIds,
+      });
+    }
+  }
+  for (const f of materials.slice(0, 3)) {
+    if (/not active/i.test(f.title)) {
+      nextActions.push({
+        title: "Confirm the registry status with the register or the counterparty directly before contracting",
+        detail: "A registry record that is not active may be a data lag, a deregistration or a wrong entity match. The desk cannot distinguish these; ask the counterparty for evidence of good standing.",
+        basis: f.evidenceIds,
+      });
+    } else if (/VAT/i.test(f.title)) {
+      nextActions.push({
+        title: "Ask the counterparty for the correct VAT registration and re-check it",
+        detail: "Until a valid registration ties the trading name to a tax identity, the invoice chain is unanchored — hold payment-relevant decisions on this file.",
+        basis: f.evidenceIds,
+      });
+    } else if (/reconcile/i.test(f.title)) {
+      nextActions.push({
+        title: "Stop payment release; obtain a corrected invoice or ledger entry and re-run the reconciliation",
+        detail: "The recorded reconciliation failure is a payment stopper, not a footnote. The recorded explanation sits with the evidence.",
+        basis: f.evidenceIds,
+      });
+    } else if (/Purchase order/i.test(f.title)) {
+      nextActions.push({
+        title: "Confirm the purchase-order reference and vendor with the source system, then re-ask",
+        detail: "The source system did not confirm the PO as asked — the payment chain has no contractual baseline until it verifies.",
+        basis: f.evidenceIds,
+      });
+    } else {
+      nextActions.push({
+        title: `Resolve before proceeding: ${f.title}`,
+        detail: f.significance,
+        basis: f.evidenceIds,
+      });
+    }
+  }
+  if (conflicts.length > 0) {
+    nextActions.push({
+      title: `Resolve the ${conflicts.length} recorded conflict(s) between sources`,
+      detail: "Each conflict names the evidence on both sides; none is resolved by assumption. Pick the authoritative source per field or obtain the missing document.",
+      basis: conflicts.flatMap((d) => d.evidenceIds).slice(0, 8),
+    });
+  }
+  const inputGaps = planDeskCapabilities(inv).inputGaps;
+  for (const gap of inputGaps.slice(0, 6)) {
+    nextActions.push({
+      title: `Supply the missing inputs to ask "${gap.label}"`,
+      detail: `This capability was planned but not asked — it needs ${gap.required.join("; ")}. Add them to the file and re-run.`,
+      basis: [gap.key],
+    });
+  }
+  for (const g of inv.unsupported.slice(0, 2)) {
+    nextActions.push({
+      title: `Cover "${g.label}" outside the network`,
+      detail: g.resolution,
+      basis: [g.capabilityKey],
+    });
+  }
+  if (!paid && (parts.routableOffers ?? 0) > 0) {
+    nextActions.push({
+      title: `Approve a paid run to purchase the ${parts.routableOffers} routable answer(s) at the probed prices`,
+      detail: "The free pre-flight verified routes and prices only; the answers themselves are what turn this file into evidence.",
+      basis: ["free pre-flight"],
+    });
+  }
+  if (inv.runs.length === 0) {
+    nextActions.push({
+      title: "Run the free pre-flight",
+      detail: "No run has been executed yet — the free pre-flight plans the capabilities, checks every route and records the live prices without spending.",
+      basis: ["no runs recorded"],
+    });
+  }
+
+  return { verdict, summary: summaryParts.join(" "), basis: basis.slice(0, 10), nextActions: nextActions.slice(0, 15) };
 }
 
 /**
@@ -672,11 +1170,14 @@ export function buildDeskReport(inv: DeskInvestigation, opts: { mode: "free" | "
         ? `No verified answer in this run. ${counts.unverified} unverified, ${counts.missing} missing — nothing is presented as data.`
         : `Route-verified only: ${counts.unverified} route(s) priced and schema-checked; no answer purchased and none presented as data.`;
 
+  const assessment = buildAssessment(inv, { findings, discrepancies, counts, mode: opts.mode, routableOffers: opts.routableOffers });
+
   const report: DeskReport = {
     preparedAt: new Date().toISOString(),
     type: inv.type,
     mode: opts.mode,
     headline,
+    assessment,
     findings,
     discrepancies,
     sections,
@@ -713,8 +1214,9 @@ export async function reportDeskInvestigation(inv: DeskInvestigation, mode: "fre
     capability: "desk_synthesis",
     label: "Desk synthesis",
     title: `Deal Desk synthesis · ${inv.reference}`,
-    detail: report.headline,
+    detail: `${report.headline} ${report.assessment.summary}`,
     facts: {
+      verdict: report.assessment.verdict,
       findings: report.findings.length,
       discrepancies: report.discrepancies.length,
       verified: report.counts.verified,

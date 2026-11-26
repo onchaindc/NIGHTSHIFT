@@ -114,11 +114,43 @@ export interface DeskReportSection {
 
 export type DeskConfidence = "signal_verified" | "partially_verified" | "route_verified_only" | "unverified";
 
+/**
+ * The desk's overall verdict. Derived from recorded evidence only, always
+ * labelled analysis, and phrased as a next step — never a legal, sanctions,
+ * credit or investment determination.
+ */
+export type DeskVerdict =
+  | "hold_pending_review"
+  | "proceed_with_conditions"
+  | "proceed_on_record"
+  | "insufficient_verified_evidence";
+
+export interface DeskNextAction {
+  /** The action, imperative and specific. */
+  title: string;
+  /** Why, and what settling it would mean for this file. */
+  detail: string;
+  /** What the action traces to: evidence ids, capability keys or named gaps. */
+  basis: string[];
+}
+
+export interface DeskAssessment {
+  verdict: DeskVerdict;
+  /** 2–4 sentences: what was established, what is adverse, what the file cannot speak to. */
+  summary: string;
+  /** The decisive inputs, one line each, traced to their evidence. */
+  basis: string[];
+  /** Concrete outstanding checks and recommended next actions, most decisive first. */
+  nextActions: DeskNextAction[];
+}
+
 export interface DeskReport {
   preparedAt: string;
   type: DeskInvestigationType;
   mode: "free" | "intel";
   headline: string;
+  /** The desk's executive assessment — the labelled analysis verdict. */
+  assessment: DeskAssessment;
   findings: DeskFinding[];
   discrepancies: DeskDiscrepancy[];
   sections: DeskReportSection[];
@@ -193,6 +225,13 @@ export const DESK_TYPE_LABEL: Record<DeskInvestigationType, string> = {
   counterparty_due_diligence: "Counterparty Due Diligence",
   asset_intelligence: "Asset Intelligence",
   trade_supplier_intelligence: "Trade & Supplier Intelligence",
+};
+
+export const DESK_VERDICT_LABEL: Record<DeskVerdict, string> = {
+  hold_pending_review: "Hold — resolve before money moves",
+  proceed_with_conditions: "Proceed with conditions",
+  proceed_on_record: "No adverse signal in the recorded checks",
+  insufficient_verified_evidence: "Insufficient verified evidence to assess",
 };
 
 export function deskEvidenceCounts(inv: Pick<DeskInvestigation, "evidence">): DeskReport["counts"] {

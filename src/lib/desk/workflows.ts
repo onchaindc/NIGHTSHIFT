@@ -120,6 +120,24 @@ const COUNTERPARTY_WORKFLOW: DeskWorkflowDef = {
       help: "Recorded with the file as a declared identifier. The pinned registry route resolves the entity you name.",
     },
     {
+      name: "vatNumber",
+      label: "VAT number (optional)",
+      kind: "text",
+      required: false,
+      placeholder: "e.g. DE129273398",
+      unlocks: ["VAT / vendor identity"],
+      help: "Unlocks the VAT identity check: does the tax registration name and validate the entity you are investigating?",
+    },
+    {
+      name: "controllerName",
+      label: "Director, owner or controller to screen (optional)",
+      kind: "text",
+      required: false,
+      placeholder: "One person or entity you know to own, direct or control the company",
+      unlocks: ["Related-party sanctions check"],
+      help: "The network screens the name you supply against sanctions lists. It cannot verify that the control relationship exists — that stays your declared input.",
+    },
+    {
       name: "role",
       label: "Your relationship (optional)",
       kind: "select",
@@ -178,6 +196,26 @@ const COUNTERPARTY_WORKFLOW: DeskWorkflowDef = {
       },
     },
     {
+      mind: "ownershipgraph",
+      dimension: "vendor_identity",
+      params: (s) => {
+        const vendor = req(s.legalName);
+        const vat = req(s.vatNumber);
+        return vendor && vat ? { vendor, vat_number: vat } : null;
+      },
+    },
+    {
+      // A named controller can be screened against sanctions lists. The
+      // control relationship itself is declared, never verified — the matrix
+      // has no ownership-graph intent (beneficial_ownership is a gap).
+      mind: "ownershipgraph",
+      dimension: "sanctions_check",
+      params: (s) => {
+        const name = req(s.controllerName);
+        return name ? { name } : null;
+      },
+    },
+    {
       mind: "sanctionsdesk",
       dimension: "name_screening",
       params: (s) => {
@@ -213,6 +251,7 @@ const COUNTERPARTY_WORKFLOW: DeskWorkflowDef = {
   gapRefs: [
     { mind: "counterparty-intelligence", dimension: "group_structure" },
     { mind: "ownershipgraph", dimension: "beneficial_ownership" },
+    { mind: "sanctionsdesk", dimension: "related_parties" },
     { mind: "caseledger", dimension: "docket_retrieval" },
     { mind: "caseledger", dimension: "jurisdiction_coverage" },
   ],
@@ -228,6 +267,13 @@ const COUNTERPARTY_WORKFLOW: DeskWorkflowDef = {
       title: "Commercial identity",
       description: "Firmographic fields — domain, industry, headcount, headquarters — from the enrichment provider.",
       capabilities: ["ownershipgraph:b2b_enrichment"],
+    },
+    {
+      id: "related_party_tax_identity",
+      title: "Related parties and tax identity",
+      description:
+        "The ownership-adjacent checks the network supports: sanctions screening of a named controller and VAT identity validation. Control and ownership graphs stay named gaps.",
+      capabilities: ["ownershipgraph:sanctions_check", "ownershipgraph:vendor_identity"],
     },
     {
       id: "sanctions",
@@ -255,9 +301,9 @@ const COUNTERPARTY_WORKFLOW: DeskWorkflowDef = {
     },
   ],
   honestyNotes: [
-    "Beneficial ownership and group structure have no verified route on the network and are never inferred.",
+    "Beneficial ownership, directors and group structure have no verified route on the network and are never inferred; a controller you name can be screened, but the control relationship itself stays a declared input.",
     "Court dockets and judgments are unsupported; adverse coverage is news search, not a case ledger.",
-    "The name screen is probabilistic and is not a legal determination.",
+    "The name screen is probabilistic and is not a legal determination. A VAT check validates a tax identity, not beneficial ownership.",
   ],
   samples: {
     legalName: "Maersk A/S",
@@ -278,8 +324,8 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
   name: "Asset Intelligence",
   kicker: "Deal Desk · Asset",
   summary:
-    "What the network's own records say about an asset — on-chain transactions and balances, market context, the operating company behind a mine or grid node, and the environment around it.",
-  scope: "Digital-asset addresses and transactions, mining operations, or energy sites.",
+    "What the network's own records say about an asset — on-chain transactions and balances, the issuer and token record, market context, the operating company behind a mine or grid node, and the environment around it.",
+  scope: "Digital-asset addresses and tokens, mining operations, or energy sites.",
   subjectNoun: "asset",
   fields: [
     {
@@ -341,8 +387,32 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
       label: "Token symbol (optional)",
       kind: "text",
       required: false,
-      unlocks: ["Holder concentration"],
-      help: "Holder count for the token on the stated chain.",
+      unlocks: ["Holder concentration", "USD price", "Total supply", "Holder count"],
+      help: "Unlocks holder concentration, the network-verified USD price, total supply and holder count for the token on the stated chain.",
+    },
+    {
+      name: "issuerEntity",
+      label: "Issuer legal name (token, optional)",
+      kind: "text",
+      required: false,
+      unlocks: ["Issuer registry record", "Issuer regulatory filings"],
+      help: "The legal entity that issued or promotes the token. Unlocks the issuer's registry record and filings.",
+    },
+    {
+      name: "issuerJurisdiction",
+      label: "Issuer jurisdiction (token, optional)",
+      kind: "text",
+      required: false,
+      placeholder: "e.g. US, SG",
+      help: "ISO 3166 alpha-2; the issuer registry schema requires it.",
+    },
+    {
+      name: "declaredSupply",
+      label: "Stated total supply (optional)",
+      kind: "text",
+      required: false,
+      placeholder: "As the issuer's materials state it, e.g. 1000000000",
+      help: "What the issuer's own materials claim, recorded as a declared input and cross-checked against the network-verified total supply when that is askable.",
     },
     {
       name: "marketSubject",
@@ -464,6 +534,63 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
       params: (s) => {
         const subject = req(s.marketSubject);
         return subject ? { subject } : null;
+      },
+    },
+    // Issuer and token record: the verified index-desk dimensions, planned
+    // only when the class is digital and the token inputs were supplied.
+    {
+      mind: "index-reconstitution-desk",
+      dimension: "registry",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const issuer = req(s.issuerEntity);
+        const jurisdiction = req(s.issuerJurisdiction);
+        return issuer && jurisdiction ? { company: issuer, jurisdiction } : null;
+      },
+    },
+    {
+      mind: "index-reconstitution-desk",
+      dimension: "price",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const symbol = req(s.tokenSymbol);
+        return symbol ? { symbol } : null;
+      },
+    },
+    {
+      mind: "index-reconstitution-desk",
+      dimension: "supply",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const token = req(s.tokenSymbol);
+        return token ? { token } : null;
+      },
+    },
+    {
+      mind: "index-reconstitution-desk",
+      dimension: "holders",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const token = req(s.tokenSymbol);
+        return token ? { token, chain: req(s.chain) ?? "ethereum" } : null;
+      },
+    },
+    {
+      mind: "index-reconstitution-desk",
+      dimension: "liquidity",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const pool = req(s.marketSubject);
+        return pool ? { pool, chain: req(s.chain) ?? "ethereum" } : null;
+      },
+    },
+    {
+      mind: "index-reconstitution-desk",
+      dimension: "filings",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const issuer = req(s.issuerEntity);
+        return issuer ? { entity: issuer, period: PERIOD } : null;
       },
     },
     // Mining
@@ -592,6 +719,20 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
       ],
     },
     {
+      id: "issuer_and_token",
+      title: "Issuer and token record",
+      description:
+        "The issuer's registry record and filings, the verified total supply, USD price, holder count and pool depth — the evidence the network holds about the token and who stands behind it.",
+      capabilities: [
+        "index-reconstitution-desk:registry",
+        "index-reconstitution-desk:filings",
+        "index-reconstitution-desk:supply",
+        "index-reconstitution-desk:price",
+        "index-reconstitution-desk:holders",
+        "index-reconstitution-desk:liquidity",
+      ],
+    },
+    {
       id: "market_context",
       title: "Market and network context",
       description: "Holder concentration, wash-trading signals, mining economics and asset price.",
@@ -630,6 +771,7 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
     "Wallet clustering, attribution and multi-hop fund-flow tracing are unsupported; a risk score is a provider judgment, not an identity.",
     "Production volumes, licence tenure, outages and facility telemetry have no verified route and stay named gaps.",
     "Pool concentration and fleet uptime are not inferred from network hashrate.",
+    "Circulating float, redemption terms and token sale documents are not askable on the network; circulating float stays a declared input, and issuer disclosures are covered only by the registry record and filings of the legal entity you name.",
   ],
   samples: {
     assetClass: "digital_asset",
@@ -679,6 +821,15 @@ const TRADE_WORKFLOW: DeskWorkflowDef = {
       kind: "text",
       required: false,
       unlocks: ["Firmographic enrichment"],
+    },
+    {
+      name: "vatNumber",
+      label: "Supplier VAT number (optional)",
+      kind: "text",
+      required: false,
+      placeholder: "e.g. DE129273398",
+      unlocks: ["VAT / vendor identity"],
+      help: "Unlocks the VAT identity check before payment release: does the tax registration validate and name this supplier?",
     },
     {
       name: "poNumber",
@@ -801,6 +952,15 @@ const TRADE_WORKFLOW: DeskWorkflowDef = {
       },
     },
     {
+      mind: "ownershipgraph",
+      dimension: "vendor_identity",
+      params: (s) => {
+        const vendor = req(s.supplierName);
+        const vat = req(s.vatNumber);
+        return vendor && vat ? { vendor, vat_number: vat } : null;
+      },
+    },
+    {
       mind: "tradeverify",
       dimension: "po_verify",
       params: (s) => {
@@ -917,11 +1077,12 @@ const TRADE_WORKFLOW: DeskWorkflowDef = {
     {
       id: "supplier_identity",
       title: "Supplier identity",
-      description: "Registry record, sanctions screening and firmographics for the supplier.",
+      description: "Registry record, sanctions screening, firmographics and VAT identity for the supplier.",
       capabilities: [
         "tradeverify:counterparty_registry",
         "sanctionsdesk:name_screening",
         "sanctionsdesk:b2b_enrichment",
+        "ownershipgraph:vendor_identity",
       ],
     },
     {
@@ -958,11 +1119,13 @@ const TRADE_WORKFLOW: DeskWorkflowDef = {
     "Bill-of-lading, cargo-document and customs parsing are unsupported; document-to-document discrepancy review needs that source.",
     "Terminal berth schedules are unsupported; port congestion is a port-level snapshot.",
     "Vessel screening is name-based only — no IMO/MMSI match or ownership link.",
+    "A VAT check validates a tax identity, not beneficial ownership; related-party ownership exposure has no verified route and stays a named gap.",
   ],
   samples: {
     supplierName: "Siemens AG",
     jurisdiction: "DE",
     website: "siemens.com",
+    vatNumber: "DE129273398",
     poNumber: "PO-2026-0042",
     invoiceRef: "INV-2026-1042",
     ledgerRef: "INV-2026-1042 12000 USD",

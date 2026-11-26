@@ -124,10 +124,11 @@ describe("desk create/parse", () => {
     expect(inv.owner).toBe("0xabc");
     expect(inv.spendLimitUsdCents).toBe(10);
     expect(inv.reference.startsWith("NS-CP")).toBe(true);
-    // The four named gaps, resolved from the matrix with reasons.
+    // The five named gaps, resolved from the matrix with reasons.
     expect(inv.unsupported.map((g) => g.capabilityKey)).toEqual([
       "counterparty-intelligence:group_structure",
       "ownershipgraph:beneficial_ownership",
+      "sanctionsdesk:related_parties",
       "caseledger:docket_retrieval",
       "caseledger:jurisdiction_coverage",
     ]);
@@ -178,8 +179,10 @@ describe("desk planning", () => {
     expect(keys).toContain("caseledger:fact_check");
     const registry = plan.capabilities.find((c) => c.key === "counterparty-intelligence:registry");
     expect(registry?.params).toEqual({ company: "Acme Holdings Limited", jurisdiction: "US" });
-    expect(plan.inputGaps).toEqual([]);
-    expect(plan.unsupported).toHaveLength(4);
+    // The two optional checks whose inputs cddSubject does not carry are
+    // named input gaps, never approximate asks.
+    expect(plan.inputGaps.map((g) => g.key)).toEqual(["ownershipgraph:vendor_identity", "ownershipgraph:sanctions_check"]);
+    expect(plan.unsupported).toHaveLength(5);
   });
 
   it("without the optional claim the claim-check capability is a named input gap, never asked", () => {
@@ -484,7 +487,7 @@ describe("desk evidence absorption and report", () => {
       expect(e.receiptHash).toBe("0xrcpt");
     }
     expect(probeOnly.length).toBe(0); // all routable dims were paid in intel mode
-    expect(missing.length).toBe(4); // the four named gaps
+    expect(missing.length).toBe(7); // the five named gaps + two input gaps (no VAT, no controller)
     // Declared inputs seeded
     expect(inv.evidence.some((e) => e.class === "declared")).toBe(true);
 
@@ -494,7 +497,8 @@ describe("desk evidence absorption and report", () => {
     expect(registry?.missingFields).toContain("lei");
 
     const report = buildDeskReport(inv, { mode: "intel", spendUsdCents: verified.length });
-    expect(report.findings.some((f) => f.severity === "info" && f.title.startsWith("Verified:"))).toBe(true);
+    // Findings carry what the answer actually said, not the capability label.
+    expect(report.findings.some((f) => f.severity === "info" && f.title.startsWith("Registry record:"))).toBe(true);
     // US → US-NV is recorded as a jurisdiction discrepancy, never resolved away.
     expect(report.discrepancies.some((d) => d.kind === "jurisdiction_refinement")).toBe(true);
     // The requested legal name differs from the registered name → name variance.
@@ -503,9 +507,16 @@ describe("desk evidence absorption and report", () => {
     expect(report.limitations.some((l) => l.includes("unsupported"))).toBe(true);
     expect(report.outstandingQuestions.length).toBeGreaterThan(3);
     expect(report.confidence).toBe("signal_verified");
-    expect(report.sections.length).toBe(6);
+    expect(report.sections.length).toBe(7);
     expect(report.sections.find((s) => s.id === "registered_identity")?.provenance).toBe("verified");
-    expect(report.counts.missing).toBe(4);
+    expect(report.counts.missing).toBe(7);
+    // The executive assessment: verified, no adverse signal → proceed_on_record.
+    expect(report.assessment.verdict).toBe("proceed_on_record");
+    expect(report.assessment.summary).toContain("verified record(s)");
+    expect(report.assessment.basis.length).toBeGreaterThan(0);
+    expect(report.assessment.nextActions.length).toBeGreaterThan(0);
+    // The unasked capabilities surface as concrete next steps.
+    expect(report.assessment.nextActions.some((a) => a.title.includes("Supply the missing inputs") && a.basis.length > 0)).toBe(true);
   });
 
   it("a free run yields route-verified-only confidence and an approval question", async () => {
