@@ -171,4 +171,8 @@ export interface AcpProviderStatus {
   /** Live transport only: whether the SSE stream to api.acp.virtuals.io is up
    *  (the SDK's onConnected callback). null for mock/disabled. */
   connected: boolean | null;
+  /** The startup attempt state in this process: idle = the boot hook has not
+   *  reached the ACP runtime here; starting = start() is in flight; started /
+   *  failed = resolved outcomes. */
+  attemptState: "idle" | "starting" | "started" | "failed";
 }
