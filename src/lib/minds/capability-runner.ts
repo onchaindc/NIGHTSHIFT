@@ -97,6 +97,11 @@ const FAILURE_CODE_PHRASES: Array<[RegExp, string]> = [
     "the payer wallet's balance of the challenged asset is short; nothing settled — fund it and resume"],
   [/none of the approved rails/i,
     "the live offer no longer matches what was approved — review and approve the fresh offer to continue"],
+  // The dev node flaps (observed live 2026-11-26: Cloudflare 522s interleaved
+  // with healthy 402 challenges minutes apart). A dead node must not read as
+  // a mystery: it is an operator problem, not a payer or approval problem.
+  [/fetch failed|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|network error|\b522\b|connection (refused|timed out)|terminated/i,
+    "the provider node is unreachable right now (it has been flapping) — nothing was spent; retry when the node is back up"],
 ];
 
 /**
