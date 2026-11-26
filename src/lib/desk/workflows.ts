@@ -1259,6 +1259,7 @@ const LISTING_UNDERWRITER_WORKFLOW: DeskWorkflowDef = {
       "chainforensics:fund_flow_tracing",
       "ownershipgraph:beneficial_ownership",
       "sanctionsdesk:related_parties",
+      "caseledger:docket_retrieval",
     ].includes(capabilityKey(ref)),
   ),
   sections: [
@@ -1271,13 +1272,13 @@ const LISTING_UNDERWRITER_WORKFLOW: DeskWorkflowDef = {
     {
       id: "token_integrity",
       title: "Token integrity",
-      description: "Network-verified total supply, holder count and holder concentration for the named token.",
+      description: "Network-verified total supply and holder count, alongside the provider-reported holder concentration signal.",
       capabilities: ["index-reconstitution-desk:supply", "index-reconstitution-desk:holders", "chainforensics:holder_concentration"],
     },
     {
       id: "market_quality",
       title: "Market quality",
-      description: "Point-in-time USD price, pool depth and provider wash-trading signals for the named market.",
+      description: "Point-in-time USD price and pool depth, alongside probe-verified wash-trading signals for the named market.",
       capabilities: ["index-reconstitution-desk:price", "index-reconstitution-desk:liquidity", "chainforensics:wash_trading"],
     },
     {
