@@ -3,4 +3,4 @@
  * whether a given commit is actually serving (a failed build leaves the previous
  * deployment live, which must never be mistaken for the fix being deployed).
  */
-export const BUILD_MARKER = "hang-watchdog-fallback-badges";
+export const BUILD_MARKER = "checkpoints-sse-budget";

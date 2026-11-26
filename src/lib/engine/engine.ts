@@ -352,6 +352,81 @@ export async function runTask(id: string, deps: EngineDeps = defaultDeps()): Pro
   return runPlan(task, deps);
 }
 
+/**
+ * Checkpoint after a completed plan step: records how many leading steps are
+ * done and snapshots the execution outputs, so an interrupted run can be
+ * resumed without re-paying for steps that already settled. Outputs too large
+ * to carry are dropped honestly — the resumed run re-derives them.
+ */
+async function markCheckpoint(task: TaskRecord, stepIndex: number, outputs: ExecutionOutputs): Promise<void> {
+  const done = Math.max(stepIndex + 1, task.progress?.completedSteps ?? 0);
+  task.progress = { completedSteps: done };
+  try {
+    const snap = JSON.stringify(outputs);
+    task.checkpointOutputs = snap.length <= 120_000 ? snap : null;
+  } catch {
+    task.checkpointOutputs = null;
+  }
+  await saveTask(task);
+}
+
+/**
+ * A failed run is resumable when at least one plan step completed before the
+ * interruption and steps remain — the checkpoint is exactly the honest
+ * boundary between "already paid for, already recorded" and "still to do".
+ */
+export function isResumableTask(task: TaskRecord): boolean {
+  if (task.state !== "failed") return false;
+  const done = task.progress?.completedSteps ?? 0;
+  return done > 0 && !!task.plan && done < task.plan.length;
+}
+
+/**
+ * Build the CONTINUATION task for an interrupted run: plan sliced past the
+ * checkpoint, remaining budget carried forward (original limit minus what
+ * already settled), outputs seed inherited, and the prior run linked for the
+ * audit trail. The continuation starts executing immediately — its plan is
+ * the prior run's own plan, already planned and approved.
+ */
+export async function buildResumedTask(id: string, deps: EngineDeps = defaultDeps()): Promise<TaskRecord> {
+  const prior = await getTask(id);
+  if (!prior) throw new EngineError(`task ${id} not found`);
+  if (!isResumableTask(prior)) {
+    throw new EngineError(
+      `task ${id} cannot be resumed: only a failed run that completed at least one plan step and has steps remaining qualifies`,
+    );
+  }
+  const done = prior.progress?.completedSteps ?? 0;
+  const remaining = (prior.plan ?? []).slice(done);
+  const remainingBudgetCents = Math.max(0, prior.spend.limitUsdCents - prior.spend.spentUsdCents);
+  const now = deps.now();
+  const cont: TaskRecord = {
+    ...structuredClone(prior),
+    id: randomUUID(),
+    createdAt: now,
+    updatedAt: now,
+    state: "created",
+    plan: remaining,
+    events: [],
+    spend: { limitUsdCents: remainingBudgetCents, spentUsdCents: 0, entries: [] },
+    result: null,
+    error: null,
+    progress: { completedSteps: 0 },
+    checkpointOutputs: prior.checkpointOutputs ?? null,
+    resumedFrom: prior.id,
+  };
+  cont.events.push({
+    id: randomUUID(),
+    ts: now,
+    type: "plan_created",
+    message: `Resuming interrupted run ${prior.id}: ${done} completed step(s) carried over (already paid for); continuing from step ${done + 1} with ${remaining.length} step(s) left. Remaining budget ${(remainingBudgetCents / 100).toFixed(2)} USD.`,
+  });
+  transition(cont, "planning");
+  transition(cont, "executing");
+  await saveTask(cont);
+  return cont;
+}
+
 /* ------------------------------------------------------------------ */
 /* Stall recovery                                                      */
 /* ------------------------------------------------------------------ */
@@ -426,13 +501,24 @@ export async function reapIfStalled(task: TaskRecord, now: number): Promise<Task
 async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> {
   await saveTask(task);
   const plan = task.plan ?? [];
-  const outputs: ExecutionOutputs = {};
+  // Revive the resume seed: a continuation task carries the outputs snapshot
+  // from its last checkpoint so later steps have the earlier steps' evidence.
+  const outputs: ExecutionOutputs = (() => {
+    if (!task.checkpointOutputs) return {} as ExecutionOutputs;
+    try {
+      return JSON.parse(task.checkpointOutputs) as ExecutionOutputs;
+    } catch {
+      return {} as ExecutionOutputs;
+    }
+  })();
   // Wall-clock deadline for THIS invocation: rather than starting a step the
   // window cannot fit (the kill would re-hang the task until stall recovery),
   // end the run honestly while we can still write the failure down.
   const startedAt = Date.now();
 
+  let stepIndex = -1;
   for (const step of plan) {
+    stepIndex++;
     try {
       if (runOverBudget(startedAt)) {
         finishWithError(
@@ -451,27 +537,35 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "watch_check") {
         await executeWatchCheck(task, deps, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "watch_corroborate") {
         await executeWatchCorroborate(task, deps, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "watch_repo_investigate") {
         await executeWatchRepoInvestigate(task, deps, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "watch_investigate") {
         await executeWatchInvestigate(task, deps, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "watch_deliver") {
         await executeWatchDeliver(task, deps, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "watch_report") {
         await executeWatchReport(task, deps, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "mind_baseline") {
         await executeMindBaseline(task, step.target, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "counterparty_ask") {
         await executeCounterpartyAsk(task, step.target, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "mind_report") {
         // Completes the task itself (verification invariants run inside).
         await executeMindReport(task, step.target, outputs);
@@ -479,9 +573,11 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "index_baseline") {
         await executeIndexBaseline(task, step.target, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "index_data_ask") {
         await executeIndexDataAsk(task, step.target, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "index_report") {
         // Completes the task itself (verification invariants run inside).
         await executeIndexReport(task, step.target, outputs);
@@ -489,9 +585,11 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "capability_baseline") {
         await executeCapabilityBaseline(task, step.target, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "capability_ask") {
         await executeCapabilityAsk(task, step.target, outputs);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "capability_report") {
         // Completes the task itself (verification invariants run inside).
         await executeCapabilityReport(task, step.target, outputs);
@@ -499,15 +597,19 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "free_chain_read") {
         outputs.freeRead = await executeFreeChainRead(task, deps);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "free_public_lookup") {
         outputs.freeLookup = await executeFreePublicLookup(task, deps, step);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "cross_check") {
         outputs.crossCheck = await executeCrossCheck(task, deps, outputs.primary ?? null);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "verify_settlement") {
         outputs.settlement = await executeSettlementCheck(task, deps, outputs.primary ?? null);
         if (task.state !== "executing") return task;
+      await markCheckpoint(task, stepIndex, outputs);
       } else if (step.kind === "verify_evidence") {
         transition(task, "verifying");
         event(task, "verification_started", "Verifying the goal outcome against all success criteria", deps.now);

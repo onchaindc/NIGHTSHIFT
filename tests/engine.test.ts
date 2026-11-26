@@ -12,6 +12,8 @@ import {
   type ExecutionOutputs,
 } from "@/lib/engine/engine";
 import { resetStore, saveTask } from "@/lib/engine/store";
+import { buildResumedTask, isResumableTask } from "@/lib/engine/engine";
+import type { PlanStep } from "@/lib/engine/types";
 import { verifyTask } from "@/lib/engine/verify";
 import {
   ALLOWED_TRANSITIONS,
@@ -797,5 +799,51 @@ describe("goal-specific verification", () => {
     );
     expect(flagged).toBeDefined();
     expect(done.spend.spentUsdCents).toBe(1); // only the delivered answer is accounted
+  });
+});
+
+describe("resume from checkpoint", () => {
+  it("builds a continuation with the remaining plan, carried budget, and outputs seed", async () => {
+    const prior = await createdTask();
+    prior.state = "failed";
+    prior.plan = [
+      { kind: "telegraph_ask" },
+      { kind: "cross_check" },
+      { kind: "verify_evidence" },
+    ] as unknown as PlanStep[];
+    prior.progress = { completedSteps: 1 };
+    prior.checkpointOutputs = JSON.stringify({ freeRead: { chain: "base", gasPriceWei: 1, gasPriceGwei: 1e-9, rpcUrl: "https://fake-rpc" } });
+    prior.spend.spentUsdCents = 3; // $0.03 settled before the interruption
+    await saveTask(prior);
+
+    expect(isResumableTask(prior)).toBe(true);
+    const cont = await buildResumedTask(prior.id);
+    expect(cont.id).not.toBe(prior.id);
+    expect(cont.plan?.length).toBe(2); // cross_check + verify_evidence remain
+    expect(cont.spend.limitUsdCents).toBe(7); // $0.10 limit − $0.03 settled
+    expect(cont.spend.spentUsdCents).toBe(0);
+    expect(cont.spend.entries).toHaveLength(0);
+    expect(cont.resumedFrom).toBe(prior.id);
+    expect(cont.state).toBe("executing");
+    expect(JSON.parse(cont.checkpointOutputs ?? "{}").freeRead.chain).toBe("base");
+    expect(cont.events[0].message).toContain("Resuming interrupted run");
+    expect(cont.events[0].message).toContain("carried over");
+  });
+
+  it("refuses tasks that are not interrupted mid-plan", async () => {
+    const fresh = await createdTask();
+    expect(isResumableTask(fresh)).toBe(false);
+    fresh.state = "failed";
+    fresh.progress = { completedSteps: 0 };
+    await saveTask(fresh);
+    expect(isResumableTask(fresh)).toBe(false);
+    await expect(buildResumedTask(fresh.id)).rejects.toThrow(/cannot be resumed/);
+
+    const done = await createdTask();
+    done.state = "failed";
+    done.plan = [{ kind: "verify_evidence" }] as unknown as PlanStep[];
+    done.progress = { completedSteps: 1 }; // all steps done — nothing to resume
+    await saveTask(done);
+    expect(isResumableTask(done)).toBe(false);
   });
 });

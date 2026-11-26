@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import type { IndexDeskReport } from "@/lib/indexdesk/report";
+import { openTaskStream } from "@/components/minds/task-stream";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import {
@@ -144,6 +145,18 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   useEffect(() => stopPolling, [stopPolling]);
 
   // Operator session state drives the sign-in panel and approval wording.
+  const apply = useCallback((body: unknown) => {
+    const payload = body as { task?: unknown };
+    if (!payload || !payload.task) return undefined;
+    let next = deskSnapshot(body);
+    if (next.terminal === "awaiting_approval" && Date.now() < approveGraceUntil.current) {
+      next = { ...next, state: "executing", terminal: null, stopPolling: false, plan: next.plan };
+    }
+    setSnap(next);
+    if (next.stopPolling) stopPolling();
+    return next;
+  }, [stopPolling]);
+
   const load = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(65_000) });
@@ -154,19 +167,18 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
         }
         return;
       }
-      const body = (await res.json()) as unknown;
-      let next = deskSnapshot(body);
-      if (next.terminal === "awaiting_approval" && Date.now() < approveGraceUntil.current) {
-        next = { ...next, state: "executing", terminal: null, stopPolling: false, plan: next.plan };
-      }
-      setSnap(next);
-      if (next.stopPolling) stopPolling();
-      return next;
+      return apply((await res.json()) as unknown);
     } catch {
       /* transient: the next poll retries */
       return undefined;
     }
-  }, [stopPolling]);
+  }, [apply]);
+
+  // SSE live stream with the 3s poll as fallback; both funnel through apply().
+  useEffect(() => {
+    if (!taskId) return;
+    return openTaskStream(taskId, (body) => void apply(body));
+  }, [taskId, apply]);
 
   const poll = useCallback(
     (id: string) => {
@@ -178,6 +190,32 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
     },
     [load, stopPolling],
   );
+
+  const [resuming, setResuming] = useState(false);
+  const resumeRun = useCallback(async () => {
+    if (!taskId || resuming) return;
+    setResuming(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(70_000),
+      });
+      const body = (await res.json()) as { task?: { id?: string }; error?: string };
+      if (!res.ok || !body.task?.id) {
+        setError(body.error ?? "resume failed; start a new investigation instead");
+        return;
+      }
+      setTaskId(body.task.id);
+      poll(body.task.id);
+    } catch {
+      setError("resume failed; start a new investigation instead");
+    } finally {
+      setResuming(false);
+    }
+  }, [taskId, resuming, poll]);
+
 
   // Restore an investigation from the URL on mount (refresh / back / Activity).
   useEffect(() => {
@@ -783,6 +821,16 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                   <p className="mt-1.5 break-words">
                     {snap?.error ? sanitizeDeskMessage(snap.error) : "No report was produced. Nothing further was signed."}
                   </p>
+                  {snap?.resumeSteps != null && (
+                    <div className="mt-3 rounded-lg border border-edge bg-panel-2 px-3 py-2.5 text-ink-soft">
+                      <p className="text-[11.5px] leading-relaxed">
+                        {snap.resumeSteps} completed step(s) are carried over — already paid for, nothing re-charged. The run continues with the remaining budget.
+                      </p>
+                      <button onClick={resumeRun} disabled={resuming} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-teal/30 bg-teal/5 px-3 py-1.5 text-[12px] font-medium text-teal disabled:opacity-50">
+                        {resuming ? "Resuming…" : "Resume from checkpoint"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -143,6 +143,8 @@ export interface DeskTaskSnapshot {
   /** Server timestamps for the client run watchdog (ms epoch); 0 when unknown. */
   createdAt: number;
   updatedAt: number;
+  /** Completed-step count of a resumable interrupted run; null when not resumable. */
+  resumeSteps: number | null;
   error: string | null;
   redacted: boolean;
   /** Actual spend from the task record (`task.spend.spentUsdCents`). */
@@ -170,6 +172,7 @@ interface RawDeskTask {
   state?: string;
   createdAt?: number;
   updatedAt?: number;
+  progress?: { completedSteps?: number };
   error?: string | null;
   plan?: PlanStep[] | null;
   events?: Array<{ message?: unknown; type?: unknown }>;
@@ -225,6 +228,14 @@ export function deskSnapshot(body: unknown): DeskTaskSnapshot {
   return {
     createdAt: typeof task?.createdAt === "number" ? task.createdAt : 0,
     updatedAt: typeof task?.updatedAt === "number" ? task.updatedAt : 0,
+    resumeSteps:
+      task?.state === "failed" &&
+      typeof task?.progress?.completedSteps === "number" &&
+      task.progress.completedSteps > 0 &&
+      Array.isArray(task?.plan) &&
+      task.progress.completedSteps < task.plan.length
+        ? task.progress.completedSteps
+        : null,
     state,
     error: !redacted && typeof task?.error === "string" ? task.error : null,
     redacted,

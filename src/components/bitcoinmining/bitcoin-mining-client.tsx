@@ -19,6 +19,7 @@ import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 import type { BitcoinMiningReport } from "@/lib/bitcoinmining/report";
+import { openTaskStream } from "@/components/minds/task-stream";
 
 export interface BitcoinDimensionView {
   id: string;
@@ -172,13 +173,9 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
 
   useEffect(() => stopPolling, [stopPolling]);
 
-  const load = useCallback(
-    async (id: string) => {
-      try {
-        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(65_000) });
-        if (!res.ok) return;
-        const body = (await res.json()) as { task?: TaskRecord; redacted?: boolean };
-        if (!body.task) return;
+  const apply = useCallback(
+    (body: { task?: TaskRecord; redacted?: boolean }) => {
+      if (!body.task) return;
         if (body.task.state === "awaiting_approval" && Date.now() < approveGraceUntil.current) {
           setTask({ ...body.task, state: "executing" });
           setRedacted(!!body.redacted);
@@ -186,13 +183,29 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
         }
         setTask(body.task);
         setRedacted(!!body.redacted);
-        if (TERMINAL.has(body.task.state)) stopPolling();
+      if (TERMINAL.has(body.task.state)) stopPolling();
+    },
+    [stopPolling],
+  );
+
+  const load = useCallback(
+    async (id: string) => {
+      try {
+        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(65_000) });
+        if (!res.ok) return;
+        apply((await res.json()) as { task?: TaskRecord; redacted?: boolean });
       } catch {
         /* transient; next poll retries */
       }
     },
-    [stopPolling],
+    [apply],
   );
+
+  // SSE live stream with the 3s poll as fallback; both funnel through apply().
+  useEffect(() => {
+    if (!taskId) return;
+    return openTaskStream(taskId, (body) => apply(body as { task?: TaskRecord; redacted?: boolean }));
+  }, [taskId, apply]);
 
   const poll = useCallback(
     (id: string) => {
@@ -217,6 +230,34 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
     const url = id ? `/minds/bitcoin-mining?task=${encodeURIComponent(id)}` : "/minds/bitcoin-mining";
     window.history.replaceState(null, "", url);
   };
+
+  const [resuming, setResuming] = useState(false);
+  const resumeRun = useCallback(async () => {
+    if (!taskId || resuming) return;
+    setResuming(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(70_000),
+      });
+      const body = (await res.json()) as { task?: TaskRecord; error?: string };
+      if (!res.ok || !body.task) {
+        setActionError(body.error ?? "resume failed; re-run the mining investigation instead");
+        return;
+      }
+      setTask(body.task);
+      setTaskId(body.task.id);
+      writeUrl(body.task.id);
+      poll(body.task.id);
+    } catch {
+      setActionError("resume failed; re-run the mining investigation instead");
+    } finally {
+      setResuming(false);
+    }
+  }, [taskId, resuming, poll, writeUrl]);
+
 
   const start = useCallback(async () => {
     setStarting(true);
@@ -567,6 +608,17 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
 
               {state === "failed" && task?.error && (
                 <p className="rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12px] leading-relaxed break-words [overflow-wrap:anywhere] text-risk">{task.error}</p>
+              )}
+
+              {state === "failed" && task && (task.progress?.completedSteps ?? 0) > 0 && task.plan && (task.progress?.completedSteps ?? 0) < task.plan.length && (
+                <div className="mt-2 rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+                  <p className="text-[11.5px] leading-relaxed text-ink-soft">
+                    {(task.progress?.completedSteps ?? 0)} completed step(s) are carried over — already paid for, nothing re-charged. The run continues from step {(task.progress?.completedSteps ?? 0) + 1} with the remaining budget.
+                  </p>
+                  <button onClick={resumeRun} disabled={resuming} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-teal/30 bg-teal/5 px-3 py-1.5 text-[12px] font-medium text-teal disabled:opacity-50">
+                    {resuming ? "Resuming…" : `Resume from step ${(task.progress?.completedSteps ?? 0) + 1}`}
+                  </button>
+                </div>
               )}
 
               {redacted && state === "completed" && (

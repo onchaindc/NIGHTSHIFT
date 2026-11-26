@@ -404,6 +404,16 @@ export interface TaskRecord {
    */
   terminal?: TerminalRunInfo;
   /**
+   * Resume checkpoint: how many leading plan steps completed in the last run.
+   * Written by the engine after each step that finished with the task still
+   * executing; >0 with steps remaining makes a failed run resumable.
+   */
+  progress?: { completedSteps?: number };
+  /** Serialized ExecutionOutputs snapshot as of the last checkpoint (resume seed). */
+  checkpointOutputs?: string | null;
+  /** Set on a continuation task built by buildResumedTask. */
+  resumedFrom?: string;
+  /**
    * Optional provenance labels set outside the engine (e.g. "audit-rehearsal"
    * marking tasks created by the automated interaction audit). Labels never
    * change task state, spending, or approval.

@@ -5,6 +5,7 @@ import { MINDS, mindIndex, mindsByStatus } from "@/lib/minds/registry";
 import { CAPABILITIES } from "@/lib/minds/capabilities";
 import { MIND_FOUNDATION } from "@/lib/minds/foundation";
 import { MindStatusChip } from "@/components/minds/status-chip";
+import { BudgetStrip } from "@/components/minds/budget-strip";
 
 export const metadata = {
   title: "Minds",
@@ -33,6 +34,7 @@ export default function MindsPage() {
           trail. They share the same engine — planning, approval, controlled spending, verification and history.
         </p>
       </header>
+        <BudgetStrip />
 
       <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-ink-faint">
         <span className="inline-flex items-center gap-1.5">
