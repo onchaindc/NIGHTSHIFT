@@ -126,16 +126,16 @@ export function realAcpConfigured(): boolean {
 }
 
 /**
- * Whether the v2 SDK is present in this deployment — checked WITHOUT
- * importing it, so status endpoints stay cheap and builds stay hermetic.
+ * Whether the v2 SDK is present and loadable in this deployment. The literal
+ * specifier keeps the import analyzable: with the package in
+ * `serverExternalPackages`, Next resolves it from node_modules at runtime
+ * AND Vercel's file tracing ships it inside the serverless bundle (a
+ * non-analyzable specifier is NOT traced — that exact gap produced
+ * `sdkInstalled: false` on production while package.json listed the SDK).
  */
 export async function acpSdkInstalled(): Promise<boolean> {
   try {
-    // Non-static specifier: the bundler cannot resolve it at build time, so
-    // deployments without the package never break; a real deployment with
-    // the package installed resolves it at runtime.
-    const specifier = ["@virtuals-protocol", "acp-node-v2"].join("/");
-    const mod = (await import(/* webpackIgnore: true */ specifier)) as Record<string, unknown>;
+    const mod = (await import("@virtuals-protocol/acp-node-v2")) as Record<string, unknown>;
     return typeof mod?.AcpAgent === "function";
   } catch {
     return false;
@@ -166,8 +166,7 @@ export async function acpSdkInstalled(): Promise<boolean> {
  * calls; the EVM key never leaves Privy.
  */
 export async function createRealAcpTransport(cfg: AcpConfig): Promise<AcpTransport> {
-  const specifier = ["@virtuals-protocol", "acp-node-v2"].join("/");
-  const sdk = (await import(specifier)) as typeof AcpSdk;
+  const sdk = (await import("@virtuals-protocol/acp-node-v2")) as typeof AcpSdk;
 
   const provider = await sdk.PrivyAlchemyEvmProviderAdapter.create({
     // The SDK bundles its own viem (2.58.x) and types `chains` against it;

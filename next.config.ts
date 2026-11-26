@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@x402/evm", "@x402/fetch", "@x402/core"],
+  serverExternalPackages: ["@x402/evm", "@x402/fetch", "@x402/core", "@virtuals-protocol/acp-node-v2"],
   async redirects() {
     return [
       // The pre-pivot console is retired but its URLs still circulate. Send each
