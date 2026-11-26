@@ -16,6 +16,7 @@ import {
 
 import type { TaskRecord } from "@/lib/engine/types";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
+import RunFlow from "@/components/minds/run-flow";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 import type { BitcoinMiningReport } from "@/lib/bitcoinmining/report";
@@ -83,31 +84,6 @@ function fmtNum(value: number | null | undefined, digits = 2): string {
 
 function shortHash(hash: string | undefined): string {
   return hash ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : "—";
-}
-
-function stateLabel(state: string | null): string {
-  switch (state) {
-    case "created":
-      return "Planning";
-    case "planning":
-      return "Planning";
-    case "awaiting_approval":
-      return "Awaiting approval";
-    case "executing":
-      return "Executing";
-    case "verifying":
-      return "Verifying evidence";
-    case "completed":
-      return "Report ready";
-    case "rejected":
-      return "Rejected";
-    case "failed":
-      return "Failed";
-    case "blocked":
-      return "Blocked";
-    default:
-      return "Objective";
-  }
 }
 
 function friendlyError(status: number, detail?: string): string {
@@ -408,24 +384,9 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   }, [poll]);
 
   const state = task?.state ?? null;
-  const awaiting = state === "awaiting_approval";
-  const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
   const watchdog = useRunWatchdog(task);
   const report = task?.result?.bitcoinMiningReport;
   const capabilityReport = task?.result?.capabilityReport;
-  const eventTail = (task?.events ?? []).filter((e) =>
-    [
-      "step_started",
-      "capability_baseline_ready",
-      "spend_recorded",
-      "step_failed",
-      "verification_started",
-      "verification_passed",
-      "task_completed",
-      "delivery_succeeded",
-      "delivery_skipped",
-    ].includes(e.type),
-  ).slice(-7);
 
   return (
     <div className="mt-8 space-y-6">
@@ -538,119 +499,34 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
       </section>
 
       <div ref={resultRef}>
-        {(task || running) && (
-          <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-live="polite">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
-              <div className="flex items-center gap-2">
-                <p className="x-label !mt-0">Investigation</p>
-                <span className="rounded-full border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] text-ink-soft">
-                  {stateLabel(state)}
-                </span>
-              </div>
-              {task && <span className="tabular text-[11px] text-ink-faint">spent {fmtUsd((task.spend?.spentUsdCents ?? 0) / 100)}</span>}
-            </div>
-
-            <div className="space-y-5 px-4 py-4 sm:px-5">
-              {task?.goal && <p className="text-[12px] leading-relaxed text-ink-soft">{task.goal}</p>}
-
-              {awaiting && (
-                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5">
-                  <p className="flex items-center gap-2 text-[12.5px] font-medium text-amber-deep">
-                    <ShieldCheck size={14} aria-hidden /> Approval gate
-                  </p>
-                  <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">
-                    The free probes priced three dimensions at {fmtUsd(guarantees.ceilingUsdCents / 100)} total. Approving releases
-                    one paid attempt per dimension, re-checked against each live offer. Pool concentration and fleet uptime are
-                    not part of the plan.
-                  </p>
-                  <ul className="mt-2 space-y-1 text-[11.5px] text-ink-soft">
-                    {guarantees.dimensions.filter((d) => d.status !== "gap").map((d) => (
-                      <li key={d.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                        <span>{d.label}</span>
-                        <span className="tabular text-[10.5px] text-ink-faint">
-                          {d.provider} · {fmtUsd((d.priceUsdCents ?? 1) / 100)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void act("approve")} disabled={!!acting || !canAct} className="btn-primary !min-h-9">
-                      {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Check size={13} aria-hidden />}
-                      Approve $0.03 run
-                    </button>
-                    <button type="button" onClick={() => void act("reject")} disabled={!!acting || !canAct} className="btn-secondary !min-h-9">
-                      Reject
-                    </button>
-                  </div>
-                  {!canAct && (
-                    <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-                      {signedIn
-                        ? "This run answers to its owner's wallet or the operator — this session can't release its spend."
-                        : "Sign in under Operator access to approve or reject this plan."}
-                    </p>
-                  )}
-                  {actionError && <p className="mt-2 text-[12px] text-risk">{actionError}</p>}
-                </div>
-              )}
-
-              {running && (
-                <div className="flex items-center gap-2 text-[12px] text-ink-soft">
-                  <Loader2 size={13} className="animate-spin text-teal" aria-hidden />
-                  {state === "verifying" ? "Verifying every committed answer against its node signal…" : "Working through the approved plan…"}
-                  <span className="ml-auto shrink-0 text-[10.5px] text-ink-faint">server update {watchdog.secondsSinceUpdate}s ago</span>
-                </div>
-              )}
-              {running && watchdog.silent && (
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-risk">
-                  No server update for {Math.floor(watchdog.secondsSinceUpdate / 60)}m {watchdog.secondsSinceUpdate % 60}s — the run may have been interrupted. The server fails it cleanly on its next check; nothing after the last recorded step is invented.
-                </p>
-              )}
-              {running && watchdog.longRun && !watchdog.silent && (
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-amber">
-                  Unusually long run (the server caps each run at 4 minutes of execution budget) — it will end or fail shortly; watch the timeline below.
-                </p>
-              )}
-
-              {eventTail.length > 0 && (
-                <ol className="space-y-1.5 border-t border-edge pt-3">
-                  {eventTail.map((e) => (
-                    <li key={e.id} className="grid grid-cols-[76px_1fr] gap-2 text-[11.5px] leading-relaxed">
-                      <span className="tabular text-ink-faint">{new Date(e.ts).toLocaleTimeString("en-US", { hour12: false })}</span>
-                      <span className={`min-w-0 break-words [overflow-wrap:anywhere] ${e.type === "step_failed" ? "text-risk" : "text-ink-soft"}`}>{e.message}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-
-              {state === "failed" && task?.error && (
-                <p className="rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12px] leading-relaxed break-words [overflow-wrap:anywhere] text-risk">{task.error}</p>
-              )}
-
-              {state === "failed" && task && (task.progress?.completedSteps ?? 0) > 0 && task.plan && (task.progress?.completedSteps ?? 0) < task.plan.length && (
-                <div className="mt-2 rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-                  <p className="text-[11.5px] leading-relaxed text-ink-soft">
-                    {(task.progress?.completedSteps ?? 0)} completed step(s) are carried over — already paid for, nothing re-charged. The run continues from step {(task.progress?.completedSteps ?? 0) + 1} with the remaining budget.
-                  </p>
-                  <button onClick={resumeRun} disabled={resuming} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-teal/30 bg-teal/5 px-3 py-1.5 text-[12px] font-medium text-teal disabled:opacity-50">
-                    {resuming ? "Resuming…" : `Resume from step ${(task.progress?.completedSteps ?? 0) + 1}`}
-                  </button>
-                </div>
-              )}
-
-              {redacted && state === "completed" && (
-                <div className="rounded-lg border border-dashed border-edge bg-panel-2 px-3.5 py-3">
-                  <p className="text-[12.5px] font-medium text-ink">The report is withheld from anonymous readers.</p>
-                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">
-                    Sign in under Operator access below to read the findings, hashes and receipts. No report is reconstructed from
-                    the public projection.
-                  </p>
-                </div>
-              )}
-            </div>
-          </section>
+        {task && (
+          <RunFlow
+            task={task}
+            mode={mode}
+            routableCount={guarantees.dimensions.filter((d) => d.status !== "gap").length}
+            ceilingUsdCents={task.spend.limitUsdCents || guarantees.ceilingUsdCents}
+            canAct={canAct}
+            signedIn={signedIn}
+            acting={acting}
+            actionError={actionError}
+            onApprove={() => void act("approve")}
+            onReject={() => void act("reject")}
+            onResume={() => void resumeRun()}
+            resuming={resuming}
+            onRunAgain={() => void start()}
+            onSignIn={() => {
+              if (opsRef.current) {
+                opsRef.current.open = true;
+                opsRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+              }
+            }}
+            onReadReport={() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            redacted={redacted}
+            watchdog={watchdog}
+          />
         )}
 
-        {!task && !running && (
+        {!task && (
           <p className="rounded-xl border border-dashed border-edge bg-panel-2 px-4 py-8 text-center text-[12.5px] leading-relaxed text-ink-faint">
             The report lands here — set the investigation above and run it.
           </p>

@@ -35,9 +35,10 @@ import {
 import type { IndexDeskReport } from "@/lib/indexdesk/report";
 import { openTaskStream } from "@/components/minds/task-stream";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
+import RunFlow from "@/components/minds/run-flow";
+import type { TaskRecord } from "@/lib/engine/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import {
-  DESK_STATE_META,
   deskHrefWithTask,
   deskSessionMode,
   deskSnapshot,
@@ -47,7 +48,6 @@ import {
   friendlyDeskError,
   parseCustomWeights,
   parseSpendLimitUsd,
-  restrictedViewVisible,
   sanitizeDeskMessage,
   type DeskEvidence,
   type DeskSession,
@@ -121,6 +121,9 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
 
   const [taskId, setTaskId] = useState<string | null>(null);
   const [snap, setSnap] = useState<DeskTaskSnapshot | null>(null);
+  // The raw engine task drives the shared RunFlow panel; the snapshot drives
+  // the desk's own report rendering. Both come from the same poll/stream.
+  const [rawTask, setRawTask] = useState<TaskRecord | null>(null);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const signedIn = session === "operator" || session === "user";
@@ -156,6 +159,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const apply = useCallback((body: unknown) => {
     const payload = body as { task?: unknown };
     if (!payload || !payload.task) return undefined;
+    setRawTask(payload.task as TaskRecord);
     let next = deskSnapshot(body);
     if (next.terminal === "awaiting_approval" && Date.now() < approveGraceUntil.current) {
       next = { ...next, state: "executing", terminal: null, stopPolling: false, plan: next.plan };
@@ -171,6 +175,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       if (!res.ok) {
         if (res.status === 404) {
           setSnap(deskSnapshot({ task: null, redacted: true }));
+          setRawTask(null);
           setError("That investigation could not be found. Start a new one.");
         }
         return;
@@ -392,9 +397,6 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const canRun = indexName.trim().length >= 2 && completeAssets >= 2 && !creating;
 
   const state = snap?.state ?? null;
-  const stateMeta = state ? (DESK_STATE_META[state] ?? DESK_STATE_META.created) : null;
-  const awaiting = state === "awaiting_approval";
-  const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
   const watchdog = useRunWatchdog(snap);
 
   return (
@@ -709,184 +711,50 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       {/* 2 · investigation */}
       <div ref={resultRef}>
         {taskId && (
-          <section className="mt-6 overflow-hidden rounded-xl border border-edge bg-panel">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
-              <p className="x-label">2 · The investigation <span className="text-ink-faint">— task {shortHash(taskId)}</span></p>
-              <div className="flex items-center gap-2">
-                {snap?.spendUsdCents !== null && snap?.spendUsdCents !== undefined && (
-                  <span className="tabular text-[11.5px] text-ink-soft">{money(snap.spendUsdCents)} spent</span>
-                )}
-                {stateMeta && <Chip label={stateMeta.label} tone={stateMeta.tone} />}
+          <div className="mt-6 space-y-4">
+            {rawTask && (
+              <RunFlow
+                task={rawTask}
+                mode={rawTask.permissions.requiresApproval ? "intel" : "free"}
+                routableCount={guarantees.coverage.length}
+                ceilingUsdCents={rawTask.spend.limitUsdCents}
+                canAct={canAct}
+                signedIn={signedIn}
+                acting={acting}
+                actionError={actionError}
+                onApprove={() => void act("approve")}
+                onReject={() => void act("reject")}
+                onResume={() => void resumeRun()}
+                resuming={resuming}
+                onRunAgain={reset}
+                onSignIn={() => {
+                  document.getElementById("operator-access")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
+                onReadReport={() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                redacted={snap?.redacted ?? false}
+                watchdog={watchdog}
+              />
+            )}
+
+            {/* completed — the desk's own proposal view, driven by the same task */}
+            {state === "completed" && snap?.report && (
+              <IndexReportView report={snap.report} spendUsdCents={snap.spendUsdCents ?? 0} evidence={snap.evidence} />
+            )}
+            {state === "completed" && !snap?.report && !snap?.redacted && (
+              <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] text-ink-soft">
+                <p className="flex items-center gap-1.5 font-medium text-amber-deep">
+                  <CircleAlert size={13} aria-hidden /> Completed without a readable report
+                </p>
+                <p className="mt-1.5">The task finished but carries no proposal. Open it from Activity to inspect the full record.</p>
               </div>
-            </div>
+            )}
 
-            <div className="space-y-4 px-4 py-4 sm:px-5">
-              {/* live progress */}
-              {running && !snap?.redacted && (
-                <div className="rounded-lg border border-edge bg-panel-2 p-3">
-                  <p className="flex items-center gap-2 text-[12.5px] font-medium text-ink-soft">
-                    <Loader2 size={13} className="animate-spin text-teal" aria-hidden />
-                    {state === "verifying"
-                      ? "Verifying evidence and reconciling the ledger…"
-                      : state === "executing"
-                        ? "Running the investigation…"
-                        : "Preparing the plan…"}
-                  </p>
-                  {snap && snap.progress.length > 0 ? (
-                    <ul className="mt-2 space-y-1 border-t border-edge pt-2 text-[11.5px] text-ink-faint">
-                      {snap.progress.map((p, i) => (
-                        <li key={i} className="flex items-start gap-1.5">
-                          <span aria-hidden className="mt-1.5 size-1 shrink-0 rounded-full bg-teal/70" />
-                          <span>{sanitizeDeskMessage(p)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-1.5 text-[11.5px] text-ink-faint">
-                      Free probes run first; paid asks start only after approval.
-                    </p>
-                  )}
-                  <p className="mt-2 flex items-center justify-between text-[10.5px] text-ink-faint">
-                    <span>server update {watchdog.secondsSinceUpdate}s ago</span>
-                    {watchdog.silent && <span className="text-risk">run may have been interrupted; the next check fails it cleanly</span>}
-                    {!watchdog.silent && watchdog.longRun && <span className="text-amber">unusually long run</span>}
-                  </p>
-                </div>
-              )}
-
-              {/* approval gate */}
-              {awaiting && (
-                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5">
-                  <p className="flex items-center gap-1.5 text-[13px] font-medium text-amber-deep">
-                    <Lock size={13} aria-hidden /> Awaiting your approval — nothing has been signed
-                  </p>
-                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
-                    Approving releases the paid asks for this exact plan, one attempt each. Rejecting ends the
-                    investigation with nothing spent.
-                  </p>
-                  {snap?.plan && snap.plan.length > 0 && (
-                    <ol className="mt-3 space-y-1.5 border-t border-amber/30 pt-3 text-[12px] text-ink-soft">
-                      {snap.plan.map((step) => (
-                        <li key={step.id} className="flex gap-2">
-                          <span aria-hidden className="mt-1.5 size-1 shrink-0 rounded-full bg-amber" />
-                          <span>
-                            {step.description}
-                            {typeof step.maxCostUsdCents === "number" && (
-                              <span className="text-ink-faint"> (ceiling {money(step.maxCostUsdCents)})</span>
-                            )}
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
-                  )}
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => act("approve")}
-                      disabled={acting !== null || !canAct}
-                      className="btn-primary inline-flex items-center gap-2"
-                    >
-                      {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
-                      Approve &amp; run paid asks
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => act("reject")}
-                      disabled={acting !== null || !canAct}
-                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink-soft transition-colors hover:border-risk/40 hover:text-risk"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                  {!canAct && (
-                    <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-                      {signedIn
-                        ? "This run answers to its owner's wallet or the operator — this session can't release its spend."
-                        : (
-                          <>
-                            <a href="#operator-access" className="text-teal hover:underline">Sign in under Operator access</a>{" "}
-                            to approve or reject this plan. Your approval releases the paid asks.
-                          </>
-                        )}
-                    </p>
-                  )}
-                  {actionError && <p className="mt-2 text-[12px] text-risk">{actionError}</p>}
-                </div>
-              )}
-
-              {/* terminal states */}
-              {state === "rejected" && (
-                <div className="rounded-lg border border-edge bg-panel-2 p-3.5 text-[12.5px] text-ink-soft">
-                  <p className="flex items-center gap-1.5 font-medium text-ink">Rejected — nothing was signed or spent.</p>
-                  <p className="mt-1.5">The plan ended at the approval gate. Adjust the universe or methodology and run it again.</p>
-                </div>
-              )}
-              {state === "blocked" && (
-                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] text-ink-soft">
-                  <p className="flex items-center gap-1.5 font-medium text-amber-deep">
-                    <AlertTriangle size={13} aria-hidden /> Blocked before execution
-                  </p>
-                  <p className="mt-1.5">{snap?.error ? sanitizeDeskMessage(snap.error) : "The engine refused to run this plan; nothing was spent."}</p>
-                </div>
-              )}
-              {state === "failed" && (
-                <div className="rounded-lg border border-risk/40 bg-risk/5 p-3.5 text-[12.5px] text-risk">
-                  <p className="font-medium">The investigation failed</p>
-                  <p className="mt-1.5 break-words">
-                    {snap?.error ? sanitizeDeskMessage(snap.error) : "No report was produced. Nothing further was signed."}
-                  </p>
-                  {snap?.resumeSteps != null && (
-                    <div className="mt-3 rounded-lg border border-edge bg-panel-2 px-3 py-2.5 text-ink-soft">
-                      <p className="text-[11.5px] leading-relaxed">
-                        {snap.resumeSteps} completed step(s) are carried over — already paid for, nothing re-charged. The run continues with the remaining budget.
-                      </p>
-                      <button onClick={resumeRun} disabled={resuming} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-teal/30 bg-teal/5 px-3 py-1.5 text-[12px] font-medium text-teal disabled:opacity-50">
-                        {resuming ? "Resuming…" : "Resume from checkpoint"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* restricted view: only when a completed report is withheld */}
-              {restrictedViewVisible(snap) && (
-                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] leading-relaxed text-ink-soft">
-                  <p className="flex items-center gap-1.5 font-medium text-amber-deep">
-                    <Lock size={13} aria-hidden /> Completed · private to the operator
-                  </p>
-                  <p className="mt-1.5">
-                    The investigation finished, but its proposal, per-asset evidence and spend ledger do not cross
-                    the public gate.{" "}
-                    <a href="#operator-access" className="text-teal hover:underline">Sign in under Operator access</a>{" "}
-                    to read the full report.
-                  </p>
-                </div>
-              )}
-
-              {/* completed */}
-              {state === "completed" && snap?.report && (
-                <IndexReportView report={snap.report} spendUsdCents={snap.spendUsdCents ?? 0} evidence={snap.evidence} />
-              )}
-              {state === "completed" && !snap?.report && !snap?.redacted && (
-                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5 text-[12.5px] text-ink-soft">
-                  <p className="flex items-center gap-1.5 font-medium text-amber-deep">
-                    <CircleAlert size={13} aria-hidden /> Completed without a readable report
-                  </p>
-                  <p className="mt-1.5">The task finished but carries no proposal. Open it from Activity to inspect the full record.</p>
-                </div>
-              )}
-
-              {(state === "completed" || state === "rejected" || state === "blocked" || state === "failed") && (
-                <button
-                  type="button"
-                  onClick={reset}
-                  className="text-[12.5px] font-medium text-teal hover:underline"
-                >
-                  Start a new investigation
-                </button>
-              )}
-            </div>
-          </section>
+            {state === "completed" && (
+              <button type="button" onClick={reset} className="text-[12.5px] font-medium text-teal hover:underline">
+                Start a new investigation
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

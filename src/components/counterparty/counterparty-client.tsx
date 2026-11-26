@@ -453,6 +453,57 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
 
   const classification = analysis?.kind === "analyzed" ? analysis.classification : null;
 
+  // State-first flow: the reader always knows where they are. Stages mirror
+  // the Terminal's tracker (Write → Price → Pay → Answer) plus the explicit
+  // approval gate this flow adds before the wallet signs.
+  const askStage: "compose" | "price" | "approve" | "pay" | "verify" | "done" =
+    answer
+      ? analysis?.kind === "analyzed"
+        ? "done"
+        : "verify"
+      : paying
+        ? "pay"
+        : probe.kind === "challenge"
+          ? "approve"
+          : probe.kind === "probing"
+            ? "price"
+            : probe.kind === "rejected" || probe.kind === "unavailable"
+              ? "price"
+              : "compose";
+  const askStageFailed = failure !== null || probe.kind === "rejected" || probe.kind === "unavailable";
+  const ASK_STAGES: Array<{ key: typeof askStage; label: string }> = [
+    { key: "compose", label: "Write" },
+    { key: "price", label: "Price" },
+    { key: "approve", label: "Approve" },
+    { key: "pay", label: "Pay" },
+    { key: "verify", label: "Verify" },
+  ];
+  const askStageIndex = ASK_STAGES.findIndex((s) => s.key === askStage);
+  const askHeadline = (() => {
+    if (failure) return { tone: "failed" as const, title: failure.heading, sub: failure.detail };
+    if (probe.kind === "rejected" || probe.kind === "unavailable")
+      return { tone: "failed" as const, title: "The price check did not go through", sub: "Nothing was signed and nothing was spent. Adjust the name or jurisdiction and check again." };
+    if (analysis?.kind === "analyzed")
+      return {
+        tone: "done" as const,
+        title: analysis.verification.status === "verified" ? "Done — the answer is verified" : analysis.verification.status === "recorded" ? "Done — the answer is on file" : "Done — read the answer with care",
+        sub: analysis.verification.status === "verified" ? "The committed payload re-derived against the node signal. Facts, gaps and conflicts are split below." : analysis.verification.note,
+      };
+    if (answer || analysis?.kind === "analyzing")
+      return { tone: "working" as const, title: "Answer returned — verifying against the signal…", sub: "The committed payload is being re-derived before anything is presented as a fact." };
+    if (paying)
+      return { tone: "working" as const, title: "Paying from your wallet — one signed approval", sub: "The payment is pinned to the exact offer you approved; a drifted offer is refused, never signed." };
+    if (probe.kind === "challenge")
+      return {
+        tone: "attention" as const,
+        title: approvedBox ? "Approved — send the ask when ready" : "Waiting for your approval",
+        sub: `The pinned specialist prices this ask at $${probe.offer.priceUsd.toFixed(2)}. Nothing is charged until you approve exactly this offer.`,
+      };
+    if (probe.kind === "probing")
+      return { tone: "working" as const, title: "Pricing the ask…", sub: "An unpaid probe validates the request against the pinned specialist and returns the live price. Nothing is signed." };
+    return { tone: "working" as const, title: "Start with a free price check", sub: "Name the company, check the price, approve the exact offer — only then does your wallet pay." };
+  })();
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <Link href="/minds" className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
@@ -472,6 +523,54 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
         <span className="inline-flex items-center gap-1.5">
           intent: <span className="text-ink-soft">{guarantees.intent}</span>
         </span>
+      </div>
+
+      {/* Where you are — the same state-first language as the run consoles */}
+      <ol className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-full border border-edge bg-panel/60 px-3 py-2 text-[11.5px] text-ink-faint" aria-label="Ask stages">
+        {ASK_STAGES.map((s, i) => {
+          const active = i === askStageIndex && !askStageFailed;
+          const done = i < askStageIndex;
+          const failed = askStageFailed && i === askStageIndex;
+          return (
+            <li key={s.key} className="flex items-center gap-2">
+              <span
+                aria-current={active ? "step" : undefined}
+                className={`tabular rounded-full px-2 py-0.5 ${
+                  failed ? "bg-risk/10 text-risk" : active ? "bg-amber-soft text-amber-deep" : done ? "text-teal" : ""
+                }`}
+              >
+                {i + 1}. {s.label}
+              </span>
+              {i < ASK_STAGES.length - 1 && <span aria-hidden className="text-edge">›</span>}
+            </li>
+          );
+        })}
+      </ol>
+      <div
+        role="status"
+        className={`mt-3 rounded-lg border px-3.5 py-3 ${
+          askHeadline.tone === "working"
+            ? "border-teal/30 bg-teal/5"
+            : askHeadline.tone === "attention"
+              ? "border-amber/40 bg-amber-soft/40"
+              : askHeadline.tone === "done"
+                ? "border-teal/30 bg-teal/5"
+                : "border-risk/30 bg-risk/5"
+        }`}
+      >
+        <p className="flex items-center gap-2 text-[14px] font-medium leading-snug text-ink">
+          {askHeadline.tone === "working" ? (
+            <Loader2 size={15} aria-hidden className="shrink-0 animate-spin text-teal" />
+          ) : askHeadline.tone === "attention" ? (
+            <ShieldCheck size={15} aria-hidden className="shrink-0 text-amber-deep" />
+          ) : askHeadline.tone === "done" ? (
+            <BadgeCheck size={15} aria-hidden className="shrink-0 text-teal" />
+          ) : (
+            <XCircle size={15} aria-hidden className="shrink-0 text-risk" />
+          )}
+          {askHeadline.title}
+        </p>
+        {askHeadline.sub && <p className="mt-1 text-[12px] leading-relaxed text-ink-soft break-words [overflow-wrap:anywhere]">{askHeadline.sub}</p>}
       </div>
 
       {/* compose */}

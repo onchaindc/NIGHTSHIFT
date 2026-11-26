@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, CircleAlert, CircleDashed, LoaderCircle, ShieldAlert } from "lucide-react";
 
 import { ASSURANCE_CAPABILITIES } from "@/lib/assurance/capabilities";
@@ -14,6 +14,10 @@ import type {
 } from "@/lib/assurance/types";
 import { SEVERITY_ORDER } from "@/lib/assurance/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
+import type { TaskRecord } from "@/lib/engine/types";
+import { useRunWatchdog } from "@/components/minds/run-watchdog";
+import { openTaskStream } from "@/components/minds/task-stream";
+import RunFlow from "@/components/minds/run-flow";
 
 interface RunView extends IntelligenceRun {
   taskState: string;
@@ -116,6 +120,15 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [signature, setSignature] = useState("");
+  // The latest run's raw engine task drives the shared RunFlow panel — the
+  // same state-first experience as the Minds consoles and the specialised
+  // investigation workspace. Older runs stay compact history rows.
+  const [runTask, setRunTask] = useState<TaskRecord | null>(null);
+  const [runRedacted, setRunRedacted] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const runTaskPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevRunStateRef = useRef<TaskRecord["state"] | null>(null);
+  const syncedRunRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -165,6 +178,62 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
     },
     [refresh],
   );
+
+  // ---- Latest-run task wiring for the shared RunFlow panel ----
+  const applyRunTask = useCallback(
+    (body: { task?: TaskRecord; redacted?: boolean }) => {
+      if (!body.task) return;
+      setRunTask(body.task);
+      setRunRedacted(!!body.redacted);
+      const prev = prevRunStateRef.current;
+      if (prev && prev !== body.task.state) {
+        // A completed run is absorbed into the evidence ledger exactly once.
+        if (body.task.state === "completed" && syncedRunRef.current !== body.task.id) {
+          syncedRunRef.current = body.task.id;
+          void act("sync", () =>
+            fetch(`/api/assurance/${investigationId}/intelligence`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "sync" }),
+            }),
+          );
+        }
+      }
+      prevRunStateRef.current = body.task.state;
+    },
+    [act, investigationId],
+  );
+
+  const loadRunTask = useCallback(
+    async (id: string) => {
+      try {
+        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(65_000) });
+        if (!res.ok) return;
+        applyRunTask((await res.json()) as { task?: TaskRecord; redacted?: boolean });
+      } catch {
+        /* transient; the next poll retries */
+      }
+    },
+    [applyRunTask],
+  );
+
+  const latestRun = payload?.runs.length ? payload.runs[payload.runs.length - 1] : null;
+  const latestRunTaskId = latestRun?.taskId ?? null;
+  useEffect(() => {
+    if (!latestRunTaskId) {
+      setRunTask(null);
+      return;
+    }
+    const stop = openTaskStream(latestRunTaskId, (body) => applyRunTask((body as { task?: TaskRecord; redacted?: boolean }) ?? {}));
+    const poll = setInterval(() => void loadRunTask(latestRunTaskId), 3000);
+    void loadRunTask(latestRunTaskId);
+    return () => {
+      stop();
+      clearInterval(poll);
+    };
+  }, [latestRunTaskId, applyRunTask, loadRunTask]);
+
+  const runWatchdog = useRunWatchdog(runTask);
 
   if (loadError && !payload) {
     return (
@@ -411,57 +480,119 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
 
             {payload.runs.length > 0 && (
               <div className="mt-5 space-y-2">
-                {payload.runs.map((run) => (
-                  <div key={run.taskId} className="rounded-md border border-edge bg-panel px-3.5 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12px] font-medium text-ink">{run.mode === "intel" ? "Paid intelligence run" : "Free pre-flight"}</span>
-                        <span className="tabular text-[10.5px] uppercase tracking-wide text-ink-faint">{run.taskState}</span>
+                {payload.runs.map((run, runIndex) => {
+                  const isLatest = runIndex === payload.runs.length - 1;
+                  if (isLatest && runTask && runTask.id === run.taskId) {
+                    const baselineEvent = runTask.events.find((e) => e.type === "capability_baseline_ready");
+                    const routable =
+                      typeof baselineEvent?.data?.routable === "number" ? baselineEvent.data.routable : ASSURANCE_CAPABILITIES.filter((d) => d.status !== "gap").length;
+                    return (
+                      <RunFlow
+                        key={run.taskId}
+                        task={runTask}
+                        mode={run.mode}
+                        routableCount={routable}
+                        ceilingUsdCents={run.ceilingUsdCents}
+                        canAct={run.canApprove}
+                        signedIn={session.mode === "operator" || session.mode === "user"}
+                        acting={busy === `approve-${run.taskId}` ? "approve" : busy === `reject-${run.taskId}` ? "reject" : null}
+                        actionError={actionError}
+                        onApprove={() =>
+                          void act(`approve-${run.taskId}`, () =>
+                            fetch(`/api/tasks/${run.taskId}/action`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ action: "approve" }),
+                            }),
+                          )
+                        }
+                        onReject={() =>
+                          void act(`reject-${run.taskId}`, () =>
+                            fetch(`/api/tasks/${run.taskId}/action`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ action: "reject" }),
+                            }),
+                          )
+                        }
+                        onResume={() =>
+                          void act(`resume-${run.taskId}`, () =>
+                            fetch(`/api/tasks/${run.taskId}/resume`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({}),
+                            }),
+                          )
+                        }
+                        resuming={busy === `resume-${run.taskId}`}
+                        onRunAgain={() =>
+                          void act("intel", () =>
+                            fetch(`/api/assurance/${inv.id}/intelligence`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ action: "run", mode: "intel" }),
+                            }),
+                          )
+                        }
+                        onSignIn={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                        onReadReport={() => document.getElementById("decision")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        redacted={runRedacted}
+                        watchdog={runWatchdog}
+                      />
+                    );
+                  }
+                  return (
+                    <div key={run.taskId} className="rounded-md border border-edge bg-panel px-3.5 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-medium text-ink">{run.mode === "intel" ? "Paid intelligence run" : "Free pre-flight"}</span>
+                          <span className="tabular text-[10.5px] uppercase tracking-wide text-ink-faint">{run.taskState}</span>
+                        </div>
+                        <span className="tabular text-[11px] text-ink-faint">
+                          {money(run.spendUsdCents)} spent · ceiling {money(run.ceilingUsdCents)}
+                        </span>
                       </div>
-                      <span className="tabular text-[11px] text-ink-faint">
-                        {money(run.spendUsdCents)} spent · ceiling {money(run.ceilingUsdCents)}
-                      </span>
+                      {run.taskError && <p className="mt-1 text-[11.5px] leading-relaxed text-risk">{run.taskError}</p>}
+                      {run.canApprove && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <p className="text-[11.5px] text-amber">Waiting for your approval before anything is signed.</p>
+                          <button
+                            type="button"
+                            disabled={busy !== null}
+                            onClick={() =>
+                              void act(`approve-${run.taskId}`, () =>
+                                fetch(`/api/tasks/${run.taskId}/action`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ action: "approve" }),
+                                }),
+                              )
+                            }
+                            className="btn-signal !min-h-8 !px-3 !text-[11.5px]"
+                          >
+                            Approve and run
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy !== null}
+                            onClick={() =>
+                              void act(`reject-${run.taskId}`, () =>
+                                fetch(`/api/tasks/${run.taskId}/action`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ action: "reject" }),
+                                }),
+                              )
+                            }
+                            className="btn-quiet !min-h-8 !px-3 !text-[11.5px]"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    {run.taskError && <p className="mt-1 text-[11.5px] leading-relaxed text-risk">{run.taskError}</p>}
-                    {run.canApprove && (
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <p className="text-[11.5px] text-amber">Waiting for your approval before anything is signed.</p>
-                        <button
-                          type="button"
-                          disabled={busy !== null}
-                          onClick={() =>
-                            void act(`approve-${run.taskId}`, () =>
-                              fetch(`/api/tasks/${run.taskId}/action`, {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ action: "approve" }),
-                              }),
-                            )
-                          }
-                          className="btn-signal !min-h-8 !px-3 !text-[11.5px]"
-                        >
-                          Approve and run
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy !== null}
-                          onClick={() =>
-                            void act(`reject-${run.taskId}`, () =>
-                              fetch(`/api/tasks/${run.taskId}/action`, {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ action: "reject" }),
-                              }),
-                            )
-                          }
-                          className="btn-quiet !min-h-8 !px-3 !text-[11.5px]"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
