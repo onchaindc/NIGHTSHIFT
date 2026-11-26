@@ -113,6 +113,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const [customWeights, setCustomWeights] = useState("");
   const [rows, setRows] = useState<AssetRow[]>(() => [createAssetRow(), createAssetRow()]);
   const [session, setSession] = useState<DeskSession>("loading");
+  const [sessionAddress, setSessionAddress] = useState<string | null>(null);
   const [mode, setMode] = useState<"free" | "intel">("free");
   const [spendLimit, setSpendLimit] = useState("");
   const [creating, setCreating] = useState(false);
@@ -122,6 +123,12 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const [snap, setSnap] = useState<DeskTaskSnapshot | null>(null);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const signedIn = session === "operator" || session === "user";
+  // Approval authority: the operator, or the wallet that owns THIS run. The
+  // server enforces the same rule; this keeps the UI honest up front.
+  const canAct =
+    session === "operator" ||
+    (session === "user" && !!sessionAddress && !!snap?.owner && snap.owner.toLowerCase() === sessionAddress);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   // Approval resumes in the background (after()), so the first poll or two can
@@ -132,7 +139,8 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   // WalletSignIn reports the session it loads; both wallet users and the
   // operator unlock the paid path, anonymous keeps the public view.
   const handleSession = useCallback((next: SessionState) => {
-    setSession(next.mode === "operator" || next.mode === "user" ? "authenticated" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+    setSession(next.mode === "operator" ? "operator" : next.mode === "user" ? "user" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+    setSessionAddress(next.address ?? null);
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -620,7 +628,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                 <option value="intel">Intel — paid asks after you approve</option>
               </select>
               <p className="mt-1.5 text-[11px] text-ink-faint">
-                {mode === "intel" && session !== "authenticated"
+                {mode === "intel" && !signedIn
                   ? "Paid intel needs the operator session above; running it anonymously is refused."
                   : mode === "intel"
                     ? "Plans one paid ask per verified dimension and waits for approval."
@@ -775,7 +783,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                     <button
                       type="button"
                       onClick={() => act("approve")}
-                      disabled={acting !== null || session === "anonymous"}
+                      disabled={acting !== null || !canAct}
                       className="btn-primary inline-flex items-center gap-2"
                     >
                       {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
@@ -784,16 +792,22 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                     <button
                       type="button"
                       onClick={() => act("reject")}
-                      disabled={acting !== null || session === "anonymous"}
+                      disabled={acting !== null || !canAct}
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-edge bg-panel px-4 text-[12.5px] text-ink-soft transition-colors hover:border-risk/40 hover:text-risk"
                     >
                       Reject
                     </button>
                   </div>
-                  {session === "anonymous" && (
+                  {!canAct && (
                     <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-                      <a href="#operator-access" className="text-teal hover:underline">Sign in under Operator access</a>{" "}
-                      to approve or reject this plan. Your approval releases the paid asks.
+                      {signedIn
+                        ? "This run answers to its owner's wallet or the operator — this session can't release its spend."
+                        : (
+                          <>
+                            <a href="#operator-access" className="text-teal hover:underline">Sign in under Operator access</a>{" "}
+                            to approve or reject this plan. Your approval releases the paid asks.
+                          </>
+                        )}
                     </p>
                   )}
                   {actionError && <p className="mt-2 text-[12px] text-risk">{actionError}</p>}

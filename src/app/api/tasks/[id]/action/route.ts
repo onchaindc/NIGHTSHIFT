@@ -40,12 +40,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const existing = await getTask(id);
   if (!existing) return NextResponse.json({ error: `task ${id} not found` }, { status: 404 });
 
-  // A signed-in user may only act on tasks they own.
+  // A signed-in user may only act on tasks they own; tasks with NO owner were
+  // created by the operator or an agent handoff and are operator-only.
   if (identity.kind === "user" && (existing.owner ?? "").toLowerCase() !== identity.address) {
-    return NextResponse.json(
-      { error: "this task belongs to a different wallet — only its owner or the operator can act on it" },
-      { status: 403 },
-    );
+    const reason = existing.owner
+      ? "this task belongs to a different wallet — only its owner or the operator can act on it"
+      : "this run has no wallet owner (created by the operator or an agent handoff) — only the operator can act on it";
+    return NextResponse.json({ error: reason }, { status: 403 });
   }
 
   try {

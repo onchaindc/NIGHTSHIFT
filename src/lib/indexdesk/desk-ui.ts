@@ -140,6 +140,8 @@ export interface DeskEvidence {
 
 export interface DeskTaskSnapshot {
   state: string | null;
+  /** Owner wallet address when visible to this caller (owner sees own tasks in full). */
+  owner: string | null;
   /** Server timestamps for the client run watchdog (ms epoch); 0 when unknown. */
   createdAt: number;
   updatedAt: number;
@@ -170,6 +172,7 @@ const TERMINAL: Record<string, DeskTerminalState> = {
 
 interface RawDeskTask {
   state?: string;
+  owner?: string;
   createdAt?: number;
   updatedAt?: number;
   progress?: { completedSteps?: number };
@@ -226,6 +229,7 @@ export function deskSnapshot(body: unknown): DeskTaskSnapshot {
   const stopPolling = !task || redacted || terminal !== null;
 
   return {
+    owner: typeof task?.owner === "string" ? task.owner : null,
     createdAt: typeof task?.createdAt === "number" ? task.createdAt : 0,
     updatedAt: typeof task?.updatedAt === "number" ? task.updatedAt : 0,
     resumeSteps:
@@ -253,7 +257,7 @@ export function deskSnapshot(body: unknown): DeskTaskSnapshot {
 /* Session + restricted view                                           */
 /* ------------------------------------------------------------------ */
 
-export type DeskSession = "loading" | "anonymous" | "authenticated" | "unavailable";
+export type DeskSession = "loading" | "anonymous" | "user" | "operator" | "unavailable";
 
 /**
  * Read the operator session from GET /api/status. "anonymous" is a valid,
@@ -262,14 +266,15 @@ export type DeskSession = "loading" | "anonymous" | "authenticated" | "unavailab
 export function deskSessionView(status: unknown): DeskSession {
   if (!status || typeof status !== "object") return "unavailable";
   const body = status as { operatorSession?: unknown };
-  return body.operatorSession === true ? "authenticated" : "anonymous";
+  return body.operatorSession === true ? "operator" : "anonymous";
 }
 
 /** Map GET /api/session's { mode } to the desk's session view. */
 export function deskSessionMode(body: unknown): DeskSession {
   if (!body || typeof body !== "object") return "unavailable";
   const mode = (body as { mode?: unknown }).mode;
-  if (mode === "operator") return "authenticated";
+  if (mode === "operator") return "operator";
+  if (mode === "user") return "user";
   if (mode === "anonymous") return "anonymous";
   return "unavailable";
 }

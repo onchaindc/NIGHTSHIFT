@@ -34,7 +34,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const prior = await getTask(id);
   if (!prior) return NextResponse.json({ error: `task ${id} not found` }, { status: 404 });
   if (identity.kind === "user" && (prior.owner ?? "").toLowerCase() !== identity.address) {
-    return NextResponse.json({ error: "only the task's owner or the operator can resume this run" }, { status: 403 });
+    const reason = prior.owner
+      ? "this task belongs to a different wallet — only its owner or the operator can resume it"
+      : "this run has no wallet owner (created by the operator or an agent handoff) — only the operator can resume it";
+    return NextResponse.json({ error: reason }, { status: 403 });
   }
   try {
     const cont = await buildResumedTask(id);

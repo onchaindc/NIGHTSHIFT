@@ -63,7 +63,7 @@ export interface CapabilityConsoleProps {
   probedAt?: string;
 }
 
-type Session = "loading" | "anonymous" | "authenticated" | "unavailable";
+type Session = "loading" | "anonymous" | "user" | "operator" | "unavailable";
 
 const TERMINAL = new Set(["completed", "failed", "rejected", "blocked"]);
 
@@ -98,7 +98,7 @@ function sessionMode(body: unknown): Session {
   if (!body || typeof body !== "object") return "unavailable";
   const mode = (body as { mode?: unknown }).mode;
   // "user" (wallet session) and "operator" both unlock the paid path.
-  return mode === "operator" || mode === "user" ? "authenticated" : mode === "anonymous" ? "anonymous" : "unavailable";
+  return mode === "operator" ? "operator" : mode === "user" ? "user" : mode === "anonymous" ? "anonymous" : "unavailable";
 }
 
 function fmtUsd(value: number | null | undefined, digits = 2): string {
@@ -180,8 +180,15 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   // Last state seen by the poller — haptics fire only on transitions.
   const prevStateRef = useRef<TaskRecord["state"] | null>(null);
   const [session, setSession] = useState<Session>("loading");
+  const [sessionAddress, setSessionAddress] = useState<string | null>(null);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const signedIn = session === "operator" || session === "user";
+  // Approval authority: the operator, or the wallet that owns THIS run. The
+  // server enforces the same rule; this keeps the UI honest up front.
+  const canAct =
+    session === "operator" ||
+    (session === "user" && !!sessionAddress && !!task?.owner && task.owner.toLowerCase() === sessionAddress);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const approveGraceUntil = useRef(0);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -190,7 +197,8 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   // WalletSignIn reports the session it loads (wallet user, operator, or
   // anonymous); both unlock the paid path, anonymous keeps the public view.
   const handleSession = useCallback((next: SessionState) => {
-    setSession(next.mode === "operator" || next.mode === "user" ? "authenticated" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+    setSession(next.mode === "operator" ? "operator" : next.mode === "user" ? "user" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+    setSessionAddress(next.address ?? null);
   }, []);
 
   useEffect(() => {
@@ -484,13 +492,13 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
             <button
               type="button"
               onClick={() => void start()}
-              disabled={starting || routable.length === 0 || (mode === "intel" && session !== "authenticated")}
+              disabled={starting || routable.length === 0 || (mode === "intel" && !signedIn)}
               className="btn-primary !min-h-10"
             >
               {starting ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <ArrowRight size={14} aria-hidden />}
               {mode === "free" ? "Run free preflight" : "Build plan & request approval"}
             </button>
-            {mode === "intel" && session !== "authenticated" && (
+            {mode === "intel" && !signedIn && (
               <button
                 type="button"
                 onClick={() => {
@@ -538,14 +546,21 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                     node's router. Spend never exceeds this ceiling.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void act("approve")} disabled={!!acting} className="btn-primary !min-h-9">
+                    <button type="button" onClick={() => void act("approve")} disabled={!!acting || !canAct} className="btn-primary !min-h-9">
                       {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Check size={13} aria-hidden />}
                       Approve {fmtUsd(ceilingUsdCents / 100)} run
                     </button>
-                    <button type="button" onClick={() => void act("reject")} disabled={!!acting} className="btn-secondary !min-h-9">
+                    <button type="button" onClick={() => void act("reject")} disabled={!!acting || !canAct} className="btn-secondary !min-h-9">
                       Reject
                     </button>
                   </div>
+                  {!canAct && (
+                    <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+                      {signedIn
+                        ? "This run answers to its owner's wallet or the operator — this session can't release its spend."
+                        : "Sign in to approve or reject this plan — the run's owner wallet or the operator."}
+                    </p>
+                  )}
                   {actionError && <p className="mt-2 text-[12px] text-risk">{actionError}</p>}
                 </div>
               )}
@@ -704,9 +719,9 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
       <details ref={opsRef} className="overflow-hidden rounded-xl border border-edge bg-panel">
         <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5">
           <span className="x-label !mt-0">Operator access</span>
-          {session === "authenticated" ? (
+          {signedIn ? (
             <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal">
-              <span aria-hidden className="size-1.5 rounded-full bg-teal" /> Signed in
+              <span aria-hidden className="size-1.5 rounded-full bg-teal" /> {session === "operator" ? "Signed in" : "Wallet linked"}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint">

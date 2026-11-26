@@ -41,7 +41,7 @@ export interface BitcoinMiningGuarantees {
   probedAt?: string;
 }
 
-type Session = "loading" | "anonymous" | "authenticated" | "unavailable";
+type Session = "loading" | "anonymous" | "user" | "operator" | "unavailable";
 
 const ZONES = ["HB_WEST", "HB_NORTH", "HB_SOUTH", "HB_HOUSTON", "LZ_WEST", "LZ_NORTH", "LZ_SOUTH", "LZ_HOUSTON"];
 
@@ -61,7 +61,7 @@ const MIND_HANDOFF_OBJECTIVE =
 function sessionMode(body: unknown): Session {
   if (!body || typeof body !== "object") return "unavailable";
   const mode = (body as { mode?: unknown }).mode;
-  return mode === "operator" || mode === "user" ? "authenticated" : mode === "anonymous" ? "anonymous" : "unavailable";
+  return mode === "operator" ? "operator" : mode === "user" ? "user" : mode === "anonymous" ? "anonymous" : "unavailable";
 }
 
 function previousHourUtc(): string {
@@ -138,6 +138,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   const [intervalStart, setIntervalStart] = useState<string>(() => previousHourUtc());
   const [mode, setMode] = useState<"free" | "intel">("free");
   const [session, setSession] = useState<Session>("loading");
+  const [sessionAddress, setSessionAddress] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -145,6 +146,13 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   const [redacted, setRedacted] = useState(false);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const signedIn = session === "operator" || session === "user";
+  // Approval authority: the operator, or the wallet that owns THIS run. The
+  // server enforces the same rule; this keeps the UI honest up front instead
+  // of letting a wallet session click a button the run will refuse.
+  const canAct =
+    session === "operator" ||
+    (session === "user" && !!sessionAddress && !!task?.owner && task.owner.toLowerCase() === sessionAddress);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const approveGraceUntil = useRef(0);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -161,7 +169,8 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   // WalletSignIn reports the session it loads; both wallet users and the
   // operator unlock the paid path, anonymous keeps the public view.
   const handleSession = useCallback((next: SessionState) => {
-    setSession(next.mode === "operator" || next.mode === "user" ? "authenticated" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+    setSession(next.mode === "operator" ? "operator" : next.mode === "user" ? "user" : next.mode === "unavailable" ? "unavailable" : next.mode === "loading" ? "loading" : "anonymous");
+    setSessionAddress(next.address ?? null);
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -495,14 +504,14 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
             <button
               type="button"
               onClick={() => void start()}
-              disabled={starting || (mode === "intel" && session !== "authenticated")}
+              disabled={starting || (mode === "intel" && !signedIn)}
               className="btn-primary !min-h-10"
             >
               {starting ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <ArrowRight size={14} aria-hidden />}
               {mode === "free" ? "Run free preflight" : "Build plan & request approval"}
             </button>
             <p className="text-[11.5px] text-ink-faint">
-              {mode === "intel" && session !== "authenticated" ? (
+              {mode === "intel" && !signedIn ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -565,14 +574,21 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
                     ))}
                   </ul>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void act("approve")} disabled={!!acting} className="btn-primary !min-h-9">
+                    <button type="button" onClick={() => void act("approve")} disabled={!!acting || !canAct} className="btn-primary !min-h-9">
                       {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Check size={13} aria-hidden />}
                       Approve $0.03 run
                     </button>
-                    <button type="button" onClick={() => void act("reject")} disabled={!!acting} className="btn-secondary !min-h-9">
+                    <button type="button" onClick={() => void act("reject")} disabled={!!acting || !canAct} className="btn-secondary !min-h-9">
                       Reject
                     </button>
                   </div>
+                  {!canAct && (
+                    <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+                      {signedIn
+                        ? "This run answers to its owner's wallet or the operator — this session can't release its spend."
+                        : "Sign in under Operator access to approve or reject this plan."}
+                    </p>
+                  )}
                   {actionError && <p className="mt-2 text-[12px] text-risk">{actionError}</p>}
                 </div>
               )}
@@ -671,9 +687,9 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
       <details ref={opsRef} className="overflow-hidden rounded-xl border border-edge bg-panel">
         <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5">
           <span className="x-label !mt-0">Operator access</span>
-          {session === "authenticated" ? (
+          {signedIn ? (
             <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal">
-              <span aria-hidden className="size-1.5 rounded-full bg-teal" /> Signed in
+              <span aria-hidden className="size-1.5 rounded-full bg-teal" /> {session === "operator" ? "Signed in" : "Wallet linked"}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint">
@@ -682,17 +698,18 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
           )}
         </summary>
         <div className="border-t border-edge px-4 py-3 sm:px-5">
-          {session === "authenticated" ? (
+          {session === "operator" ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-[12px] leading-relaxed text-ink-soft">
-                  This browser can approve the three-cent plan and read the full evidence trail.
+                  Operator session — this browser can approve paid runs and read the full evidence trail.
                 </p>
                 <button
                   type="button"
                   onClick={async () => {
                     await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
                     setSession("anonymous");
+                    setSessionAddress(null);
                     if (taskId) void load(taskId);
                   }}
                   className="text-[11.5px] font-medium text-ink-faint transition-colors hover:text-ink"
@@ -726,6 +743,31 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
                   </ul>
                 )}
               </div>
+            </>
+          ) : session === "user" ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[12px] leading-relaxed text-ink-soft">
+                  Wallet session — signed in as{" "}
+                  <span className="tabular">{sessionAddress ? `${sessionAddress.slice(0, 6)}…${sessionAddress.slice(-4)}` : "wallet"}</span>. You
+                  can approve runs this wallet owns; runs created by the operator or another wallet answer to the operator only.
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await fetch("/api/session", { method: "DELETE" }).catch(() => undefined);
+                    setSession("anonymous");
+                    setSessionAddress(null);
+                    if (taskId) void load(taskId);
+                  }}
+                  className="text-[11.5px] font-medium text-ink-faint transition-colors hover:text-ink"
+                >
+                  Sign out
+                </button>
+              </div>
+              <p className="mt-3 border-t border-edge pt-3 text-[11px] leading-relaxed text-ink-faint">
+                The Mind handoff controls are operator-only — sign in with the operator token to use them.
+              </p>
             </>
           ) : (
             <>
