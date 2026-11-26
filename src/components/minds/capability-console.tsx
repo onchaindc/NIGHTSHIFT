@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
-  Check,
   ChevronDown,
   CircleAlert,
   Loader2,
@@ -18,6 +17,7 @@ import { vibrate } from "@/lib/haptics";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { openTaskStream } from "@/components/minds/task-stream";
 import { REPORT_STATUS_DOT } from "@/components/minds/status-chip";
+import RunFlow, { fmtUsd } from "@/components/minds/run-flow";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 
@@ -25,8 +25,10 @@ import type { CapabilityReport } from "@/lib/minds/capability-runner";
  * The shared capability console — the same visual arrangement as the Bitcoin
  * Mining Intelligence page, generic over any Mind's verified matrix:
  *
- *   inputs (compact) → run mode → the live trail (state, spend, approval
- *   gate, events) → a plain-language capability report → operator access
+ *   inputs (compact) → run mode → the RunFlow panel (a five-stage tracker,
+ *   one plain-language headline per state, the state's action up front,
+ *   warnings as banners) → a plain-language capability report → operator
+ *   access
  *
  * Honesty rules carried over from the flagship: a free preflight prices the
  * routes and records gaps; a paid run is one attempt per dimension behind the
@@ -67,16 +69,6 @@ type Session = "loading" | "anonymous" | "user" | "operator" | "unavailable";
 
 const TERMINAL = new Set(["completed", "failed", "rejected", "blocked"]);
 
-const EVENT_TYPES = [
-  "step_started",
-  "capability_baseline_ready",
-  "spend_recorded",
-  "step_failed",
-  "verification_started",
-  "verification_passed",
-  "task_completed",
-];
-
 const REPORT_STATUS_TONE: Record<string, string> = {
   verified: "border-teal/30 bg-teal/5 text-teal",
   recorded: "border-amber/40 bg-amber-soft/40 text-amber-deep",
@@ -99,11 +91,6 @@ function sessionMode(body: unknown): Session {
   const mode = (body as { mode?: unknown }).mode;
   // "user" (wallet session) and "operator" both unlock the paid path.
   return mode === "operator" ? "operator" : mode === "user" ? "user" : mode === "anonymous" ? "anonymous" : "unavailable";
-}
-
-function fmtUsd(value: number | null | undefined, digits = 2): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
-  return `$${value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
 function shortHash(hash: string | undefined): string {
@@ -137,30 +124,6 @@ function plainDetail(status: string, detail: string): string {
   return detail;
 }
 
-function stateLabel(state: string | null): string {
-  switch (state) {
-    case "created":
-    case "planning":
-      return "Planning";
-    case "awaiting_approval":
-      return "Awaiting approval";
-    case "executing":
-      return "Executing";
-    case "verifying":
-      return "Verifying evidence";
-    case "completed":
-      return "Report ready";
-    case "rejected":
-      return "Rejected";
-    case "failed":
-      return "Failed";
-    case "blocked":
-      return "Blocked";
-    default:
-      return "Objective";
-  }
-}
-
 function friendlyError(status: number, detail?: string): string {
   if (status === 401) return "The session was not accepted. Sign in with your wallet and retry.";
   return detail || `The request failed (HTTP ${status}).`;
@@ -191,7 +154,9 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
     (session === "user" && !!sessionAddress && !!task?.owner && task.owner.toLowerCase() === sessionAddress);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const approveGraceUntil = useRef(0);
-  const resultRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
+  const flowRef = useRef<HTMLDivElement>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
   const opsRef = useRef<HTMLDetailsElement>(null);
 
   // WalletSignIn reports the session it loads (wallet user, operator, or
@@ -233,6 +198,14 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
           if (body.task.state === "completed") vibrate("success");
           else if (body.task.state === "failed" || body.task.state === "blocked") vibrate("error");
           else if (body.task.state === "awaiting_approval") vibrate("notify");
+          // The flow follows the reader: the approval gate and the finished
+          // report scroll into view on their transitions, so the state that
+          // needs a decision is never sitting below the fold.
+          const to = body.task.state;
+          setTimeout(() => {
+            if (to === "awaiting_approval") flowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+            else if (to === "completed") (body.redacted ? flowRef : reportRef).current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 120);
         }
         prevStateRef.current = body.task.state;
       if (TERMINAL.has(body.task.state)) stopPolling();
@@ -286,6 +259,20 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   };
 
   const [resuming, setResuming] = useState(false);
+  // Back to a clean slate: a dead run must not leave its machinery on the
+  // page — clear the record, clear the URL, put the reader back at the inputs.
+  const runAgain = useCallback(() => {
+    stopPolling();
+    setTask(null);
+    setTaskId(null);
+    setRedacted(false);
+    setError(null);
+    setActionError(null);
+    prevStateRef.current = null;
+    writeUrl(null);
+    topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [stopPolling]);
+
   const resumeRun = useCallback(async () => {
     if (!taskId || resuming) return;
     setResuming(true);
@@ -358,7 +345,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
       setTaskId(body.task.id);
       writeUrl(body.task.id);
       poll(body.task.id);
-      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      setTimeout(() => flowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch {
       setError(friendlyError(0));
     } finally {
@@ -401,18 +388,25 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   );
 
   const state = task?.state ?? null;
-  const awaiting = state === "awaiting_approval";
   const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
   const watchdog = useRunWatchdog(task);
   const report = task?.result?.capabilityReport as CapabilityReport | undefined;
-  const eventTail = (task?.events ?? []).filter((e) => EVENT_TYPES.includes(e.type)).slice(-5);
   const answers = report ? report.counts.verified + report.counts.recorded + report.counts.unverified : 0;
   const priced = report ? report.counts.routable_unverified : 0;
+
+  // The operator-access drawer doubles as the sign-in target: every "sign in
+  // to act" affordance on the page opens and scrolls to it.
+  const openOperatorAccess = useCallback(() => {
+    if (opsRef.current) {
+      opsRef.current.open = true;
+      opsRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, []);
 
   return (
     <div className="mt-8 space-y-5">
       {/* The run console */}
-      <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-labelledby="cap-console">
+      <section ref={topRef} className="overflow-hidden rounded-xl border border-edge bg-panel" aria-labelledby="cap-console">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
           <p className="x-label !mt-0" id="cap-console">Run an investigation</p>
           <span className="text-[11px] text-ink-faint">
@@ -501,12 +495,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
             {mode === "intel" && !signedIn && (
               <button
                 type="button"
-                onClick={() => {
-                  if (opsRef.current) {
-                    opsRef.current.open = true;
-                    opsRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-                  }
-                }}
+                onClick={openOperatorAccess}
                 className="text-[11.5px] font-medium text-teal hover:underline"
               >
                 Sign in with your wallet — paid runs need a session
@@ -521,104 +510,27 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
         </div>
       </section>
 
-      <div ref={resultRef}>
-        {(task || running) && (
-          <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-live="polite">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3 sm:px-5">
-              <div className="flex items-center gap-2">
-                <p className="x-label !mt-0">Run</p>
-                <span className="rounded-full border border-edge bg-panel-2 px-2 py-0.5 text-[10.5px] text-ink-soft">
-                  {stateLabel(state)}
-                </span>
-              </div>
-              {task && <span className="tabular text-[11px] text-ink-faint">spent {fmtUsd((task.spend?.spentUsdCents ?? 0) / 100)}</span>}
-            </div>
-
-            <div className="space-y-4 px-4 py-4 sm:px-5">
-              {awaiting && (
-                <div className="rounded-lg border border-amber/40 bg-amber-soft/40 p-3.5">
-                  <p className="flex items-center gap-2 text-[12.5px] font-medium text-amber-deep">
-                    <ShieldCheck size={14} aria-hidden /> Approval gate
-                  </p>
-                  <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">
-                    {routable.length} route{routable.length === 1 ? "" : "s"} priced at {fmtUsd(ceilingUsdCents / 100)} total. Approving
-                    releases each pinned route, re-checked against its live offer; a failed route is re-routed once through the
-                    node's router. Spend never exceeds this ceiling.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void act("approve")} disabled={!!acting || !canAct} className="btn-primary !min-h-9">
-                      {acting === "approve" ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Check size={13} aria-hidden />}
-                      Approve {fmtUsd(ceilingUsdCents / 100)} run
-                    </button>
-                    <button type="button" onClick={() => void act("reject")} disabled={!!acting || !canAct} className="btn-secondary !min-h-9">
-                      Reject
-                    </button>
-                  </div>
-                  {!canAct && (
-                    <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-                      {signedIn
-                        ? "This run answers to its owner's wallet or the operator — this session can't release its spend."
-                        : "Sign in to approve or reject this plan — the run's owner wallet or the operator."}
-                    </p>
-                  )}
-                  {actionError && <p className="mt-2 text-[12px] text-risk">{actionError}</p>}
-                </div>
-              )}
-
-              {running && (
-                <div className="flex items-center gap-2 text-[12px] text-ink-soft">
-                  <Loader2 size={13} className="animate-spin text-teal" aria-hidden />
-                  {state === "verifying" ? "Verifying every answer against its node signal…" : "Working through the plan…"}
-                  <span className="ml-auto shrink-0 text-[10.5px] text-ink-faint">server update {watchdog.secondsSinceUpdate}s ago</span>
-                </div>
-              )}
-              {running && watchdog.silent && (
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-risk">
-                  No server update for {Math.floor(watchdog.secondsSinceUpdate / 60)}m {watchdog.secondsSinceUpdate % 60}s — the run may have been interrupted. The server fails it cleanly on its next check; nothing after the last recorded step is invented.
-                </p>
-              )}
-              {running && watchdog.longRun && !watchdog.silent && (
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-amber">
-                  Unusually long run (the server caps each run at 4 minutes of execution budget) — it will end or fail shortly; watch the timeline below.
-                </p>
-              )}
-
-              {eventTail.length > 0 && (
-                  <ol className="space-y-1.5 border-t border-edge pt-3">
-                  {eventTail.map((e) => (
-                    <li key={e.id} className="grid grid-cols-[64px_1fr] gap-2 text-[11.5px] leading-relaxed">
-                      <span className="tabular text-ink-faint">{new Date(e.ts).toLocaleTimeString("en-US", { hour12: false })}</span>
-                      <span className={`min-w-0 break-words [overflow-wrap:anywhere] ${e.type === "step_failed" ? "text-risk" : "text-ink-soft"}`}>{e.message}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-
-              {state === "failed" && task?.error && (
-                <p className="rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12px] leading-relaxed break-words [overflow-wrap:anywhere] text-risk">{task.error}</p>
-              )}
-
-              {state === "failed" && task && (task.progress?.completedSteps ?? 0) > 0 && task.plan && (task.progress?.completedSteps ?? 0) < task.plan.length && (
-                <div className="mt-2 rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
-                  <p className="text-[11.5px] leading-relaxed text-ink-soft">
-                    {(task.progress?.completedSteps ?? 0)} completed step(s) are carried over — already paid for, nothing re-charged. The run continues from step {(task.progress?.completedSteps ?? 0) + 1} with the remaining budget.
-                  </p>
-                  <button onClick={resumeRun} disabled={resuming} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-teal/30 bg-teal/5 px-3 py-1.5 text-[12px] font-medium text-teal disabled:opacity-50">
-                    {resuming ? "Resuming…" : `Resume from step ${(task.progress?.completedSteps ?? 0) + 1}`}
-                  </button>
-                </div>
-              )}
-
-              {redacted && state === "completed" && (
-                <div className="rounded-lg border border-dashed border-edge bg-panel-2 px-3.5 py-3">
-                  <p className="text-[12.5px] font-medium text-ink">The report is withheld from anonymous readers.</p>
-                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">
-                    Sign in under Operator access below to read the findings.
-                  </p>
-                </div>
-              )}
-            </div>
-          </section>
+      <div ref={flowRef}>
+        {task && (
+          <RunFlow
+            task={task}
+            mode={mode}
+            routableCount={routable.length}
+            ceilingUsdCents={ceilingUsdCents}
+            canAct={canAct}
+            signedIn={signedIn}
+            acting={acting}
+            actionError={actionError}
+            onApprove={() => void act("approve")}
+            onReject={() => void act("reject")}
+            onResume={() => void resumeRun()}
+            resuming={resuming}
+            onRunAgain={runAgain}
+            onSignIn={openOperatorAccess}
+            onReadReport={() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            redacted={redacted}
+            watchdog={watchdog}
+          />
         )}
 
         {!task && !running && (
@@ -629,7 +541,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
 
         {/* The report — plain language first, evidence collapsed */}
         {!redacted && report && state === "completed" && (
-          <section className="overflow-hidden rounded-xl border border-edge bg-panel" aria-labelledby="cap-report">
+          <section ref={reportRef} className="overflow-hidden rounded-xl border border-edge bg-panel" aria-labelledby="cap-report">
             <div className="border-b border-edge px-4 py-3 sm:px-5">
               <h2 id="cap-report" className="text-[16px] font-medium tracking-[-0.01em] text-ink">
                 {name} — report
