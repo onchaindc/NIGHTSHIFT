@@ -213,7 +213,7 @@ describe("desk planning", () => {
     expect(keys).toContain("sanctionsdesk:name_screening");
     expect(keys).toContain("ownershipgraph:sanctions_check");
     expect(keys).toContain("caseledger:adverse_media");
-    expect(plan.capabilities.find((c) => c.key === "ownershipgraph:b2b_enrichment")?.params).toEqual({ company: "circle.com" });
+    expect(plan.capabilities.find((c) => c.key === "ownershipgraph:b2b_enrichment")?.params).toEqual({ company: "Circle Internet Group, Inc." });
     expect(plan.capabilities.find((c) => c.key === "sanctionsdesk:name_screening")?.params).toEqual({ name: "Circle Internet Group, Inc." });
     expect(plan.capabilities.find((c) => c.key === "ownershipgraph:sanctions_check")?.params).toEqual({ name: "Named Controller" });
     expect(plan.capabilities.find((c) => c.key === "caseledger:adverse_media")?.params?.query).toContain("Circle Internet Group, Inc.");
