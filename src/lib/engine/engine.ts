@@ -6,6 +6,13 @@ import { extractGasGwei, extractUsdCost } from "./planner";
 import { canTransition, type ActionId, type ExecutionEvent, type ExecutionEventType, type TaskRecord, type TaskState, type TelegraphAnswer, type Evidence, type PlanStep, type VerificationCriteria, type JobType, type WatchRef } from "./types";
 import * as telegraph from "@/lib/telegraph/client";
 import { executeWatchCheck, executeWatchCorroborate, executeWatchRepoInvestigate, executeWatchInvestigate, executeWatchDeliver, executeWatchReport } from "@/lib/watch/execute";
+import {
+  executeAssuranceBaseline,
+  executeAssuranceIntel,
+  executeAssuranceReport,
+  type AssuranceAsks,
+  type AssuranceBaseline,
+} from "@/lib/assurance/execute";
 import type { WatchRunState } from "@/lib/watch/types";
 import { executeCounterpartyAsk, executeMindBaseline, executeMindReport } from "@/lib/mind/execute";
 import type { MindBaseline, MindIntelResult } from "@/lib/mind/report";
@@ -61,6 +68,10 @@ export interface ExecutionOutputs {
   capabilityBaseline?: CapabilityBaselineOutput;
   /** Generic capability run: verified committed dimensions from paid asks. */
   capabilityAsks?: CapabilityAsksOutput;
+  /** Settlement assurance: the unpaid per-dimension pre-flight + offers. */
+  assuranceBaseline?: AssuranceBaseline;
+  /** Settlement assurance: verified committed dimensions from approved asks. */
+  assuranceAsks?: AssuranceAsks;
 }
 
 export interface EngineDeps {
@@ -593,6 +604,16 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "capability_report") {
         // Completes the task itself (verification invariants run inside).
         await executeCapabilityReport(task, step.target, outputs);
+        return task;
+      } else if (step.kind === "assurance_baseline") {
+        await executeAssuranceBaseline(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "assurance_intel") {
+        await executeAssuranceIntel(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "assurance_report") {
+        // Completes the task itself after assembling the verified ledger.
+        await executeAssuranceReport(task, step.target, outputs);
         return task;
       } else if (step.kind === "free_chain_read") {
         outputs.freeRead = await executeFreeChainRead(task, deps);
