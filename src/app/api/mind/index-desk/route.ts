@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 
-import { paidRunGate, requestedSpendCeilingCents } from "@/lib/api/userSpend";
+import { paidRunGate, type PaidRunGate, requestedSpendCeilingCents } from "@/lib/api/userSpend";
 import { tasksForCaller } from "@/lib/api/public";
 import { listTasks } from "@/lib/engine/store";
 import { createTask, runTask, EngineError, defaultDeps } from "@/lib/engine/engine";
@@ -50,14 +50,17 @@ export async function POST(req: NextRequest) {
   }
   // Only the paid mode is privileged: free investigations never plan a
   // purchase, so they stay usable without the operator token.
-  if (mode !== "free") {
-  const gate = await paidRunGate(
-    req,
-    "intel index desks",
-    typeof body.spendLimitUsdCents === "number" && body.spendLimitUsdCents > 0 ? Math.round(body.spendLimitUsdCents) : undefined,
-  );
+  // Wallet authority for the paid path, hoisted so the create call can stamp
+  // ownership; free mode never spends and gets a synthetic allow.
+  const gate =
+    mode !== "free"
+      ? await paidRunGate(
+          req,
+          "intel index desks",
+          typeof body.spendLimitUsdCents === "number" && body.spendLimitUsdCents > 0 ? Math.round(body.spendLimitUsdCents) : undefined,
+        )
+      : ({ kind: "allow", operator: true, userAddress: null } as PaidRunGate);
   if (gate.kind === "deny") return NextResponse.json({ error: gate.error }, { status: gate.status });
-  }
 
   const spendLimitUsdCents =
     typeof body.spendLimitUsdCents === "number" && body.spendLimitUsdCents > 0
@@ -75,6 +78,7 @@ export async function POST(req: NextRequest) {
       // desk always waits at the approval gate and cannot waive it.
       requiresApproval: mode === "intel",
       origin: { source: "web" },
+      ...(gate.operator ? {} : gate.userAddress ? { owner: gate.userAddress } : {}),
       jobType: "index_desk",
       plan: planned.steps,
       criteria: planned.criteria,

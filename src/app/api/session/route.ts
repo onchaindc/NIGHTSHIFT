@@ -12,6 +12,7 @@ import {
   userAddressFromRequest,
   userAddressFromSessionCookie,
   userSessionCookieValue,
+  isPayerAddress,
   userSessionsAvailable,
   userSignInMessageValid,
 } from "@/lib/api/auth";
@@ -51,6 +52,7 @@ export async function GET(req: NextRequest) {
   const operatorOk = requestAuthorizedFromParts("", operatorCookie);
   if (operatorOk) return NextResponse.json({ mode: "operator" });
   const userAddress = userAddressFromRequest(req);
+  if (userAddress && isPayerAddress(userAddress)) return NextResponse.json({ mode: "operator" });
   if (userAddress) return NextResponse.json({ mode: "user", address: userAddress });
   if (!operatorAvailable && !userSessionsAvailable()) {
     return NextResponse.json({ mode: "unavailable" });

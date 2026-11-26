@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { privateKeyToAccount } from "viem/accounts";
 
 /**
  * Operator gate for every API that can create, approve, execute or spend.
@@ -209,6 +210,23 @@ export function userAddressFromRequest(req: Request): string | null {
  * Who is calling: the deployment operator (token or operator cookie), a
  * signed-in wallet user, or an anonymous visitor. Checked in that order.
  */
+/**
+ * The payer wallet IS the deployment operator: its key funds every paid run,
+ * so a browser session verified to that address carries the same authority as
+ * the operator token. This is what lets the deployment owner approve operator-
+ * or agent-created runs (ownerless handoff tasks) from any browser signed in
+ * with the funding wallet — no token paste required.
+ */
+export function isPayerAddress(address: string | null | undefined): boolean {
+  const key = process.env.TELEGRAPH_EVM_PRIVATE_KEY;
+  if (!key || !address) return false;
+  try {
+    return privateKeyToAccount(key as `0x${string}`).address.toLowerCase() === address.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 export type CallerIdentity =
   | { kind: "operator" }
   | { kind: "user"; address: string }
@@ -217,6 +235,7 @@ export type CallerIdentity =
 export function callerIdentity(req: Request): CallerIdentity {
   if (requestAuthorized(req)) return { kind: "operator" };
   const address = userAddressFromRequest(req);
+  if (address && isPayerAddress(address)) return { kind: "operator" };
   return address ? { kind: "user", address } : { kind: "anonymous" };
 }
 

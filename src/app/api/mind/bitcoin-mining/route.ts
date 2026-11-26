@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 
-import { paidRunGate, requestedSpendCeilingCents } from "@/lib/api/userSpend";
+import { paidRunGate, type PaidRunGate, requestedSpendCeilingCents } from "@/lib/api/userSpend";
 import { tasksForCaller } from "@/lib/api/public";
 import { listTasks } from "@/lib/engine/store";
 import { createTask, defaultDeps, runTask } from "@/lib/engine/engine";
@@ -65,10 +65,13 @@ export async function POST(req: NextRequest) {
 
   const mode = body.mode === "free" ? "free" : body.mode === "intel" || body.mode === undefined ? "intel" : null;
   if (!mode) return NextResponse.json({ error: 'mode must be "free" or "intel"' }, { status: 400 });
-  if (mode === "intel") {
-  const gate = await paidRunGate(req, "paid mining runs");
+  // Wallet authority for the paid path, hoisted so the create call can stamp
+  // ownership; free mode never spends and gets a synthetic allow.
+  const gate =
+    mode === "intel"
+      ? await paidRunGate(req, "paid mining runs")
+      : ({ kind: "allow", operator: true, userAddress: null } as PaidRunGate);
   if (gate.kind === "deny") return NextResponse.json({ error: gate.error }, { status: gate.status });
-  }
 
   let blockHeight = body.blockHeight;
   if (blockHeight === undefined || blockHeight === null || blockHeight === "") {
@@ -104,6 +107,7 @@ export async function POST(req: NextRequest) {
       spendLimitUsdCents: planned.budgetCeilingUsdCents,
       requiresApproval: mode === "intel",
       origin: { source: "web" },
+      ...(gate.operator ? {} : gate.userAddress ? { owner: gate.userAddress } : {}),
       jobType: "capability_run",
       plan: planned.steps,
       criteria: planned.criteria,

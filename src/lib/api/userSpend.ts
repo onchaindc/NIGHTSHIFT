@@ -1,6 +1,6 @@
 import { listTasks } from "@/lib/engine/store";
 import { defaultSpendLimit } from "@/lib/engine/engine";
-import { requestAuthorized, userAddressFromRequest } from "@/lib/api/auth";
+import { isPayerAddress, requestAuthorized, userAddressFromRequest } from "@/lib/api/auth";
 
 /**
  * Per-user daily spend cap for payer-funded paid runs.
@@ -61,6 +61,7 @@ export type PaidRunGate =
 export async function paidRunGate(req: Request, label: string, ceilingCents?: number): Promise<PaidRunGate> {
   if (requestAuthorized(req)) return { kind: "allow", operator: true, userAddress: null };
   const userAddress = userAddressFromRequest(req);
+  if (userAddress && isPayerAddress(userAddress)) return { kind: "allow", operator: true, userAddress: null };
   if (!userAddress) {
     return {
       kind: "deny",
