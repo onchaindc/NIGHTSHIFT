@@ -194,6 +194,34 @@ describe("desk planning", () => {
     expect(gap?.required.join(" ")).toMatch(/claim/i);
   });
 
+  it("extends digital asset investigations with existing issuer specialists without creating duplicate Minds", () => {
+    const plan = planDeskCapabilities(deskInv("asset_intelligence", {
+      assetClass: "digital_asset",
+      assetName: "Token listing review",
+      tokenSymbol: "USDC",
+      chain: "ethereum",
+      issuerEntity: "Circle Internet Group, Inc.",
+      issuerJurisdiction: "US",
+      issuerWebsite: "circle.com",
+      controllerName: "Named Controller",
+    }));
+    const keys = plan.capabilities.map((c) => c.key);
+    expect(keys).toContain("index-reconstitution-desk:registry");
+    expect(keys).toContain("index-reconstitution-desk:supply");
+    expect(keys).toContain("index-reconstitution-desk:liquidity");
+    expect(keys).toContain("ownershipgraph:b2b_enrichment");
+    expect(keys).toContain("sanctionsdesk:name_screening");
+    expect(keys).toContain("ownershipgraph:sanctions_check");
+    expect(keys).toContain("caseledger:adverse_media");
+    expect(plan.capabilities.find((c) => c.key === "ownershipgraph:b2b_enrichment")?.params).toEqual({ company: "circle.com" });
+    expect(plan.capabilities.find((c) => c.key === "sanctionsdesk:name_screening")?.params).toEqual({ name: "Circle Internet Group, Inc." });
+    expect(plan.capabilities.find((c) => c.key === "ownershipgraph:sanctions_check")?.params).toEqual({ name: "Named Controller" });
+    expect(plan.capabilities.find((c) => c.key === "caseledger:adverse_media")?.params?.query).toContain("Circle Internet Group, Inc.");
+    expect(plan.unsupported.map((g) => g.key)).toContain("ownershipgraph:beneficial_ownership");
+    expect(plan.unsupported.map((g) => g.key)).toContain("sanctionsdesk:related_parties");
+    expect(plan.unsupported.map((g) => g.key)).toContain("caseledger:docket_retrieval");
+  });
+
   it("asset class decides the capability set — no route outside the class is planned", () => {
     const digital = planDeskCapabilities(deskInv("asset_intelligence", { assetClass: "digital_asset", assetName: "w1", walletAddress: "0xabc", chain: "base" }));
     const digitalKeys = digital.capabilities.map((c) => c.key);
