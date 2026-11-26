@@ -89,6 +89,14 @@ const FAILURE_CODE_PHRASES: Array<[RegExp, string]> = [
   [/INVALID_PARAM/i, "a parameter was rejected by the provider"],
   [/RATE_LIMIT/i, "the provider is rate-limiting right now"],
   [/\bTIMEOUT\b/i, "the provider timed out"],
+  // Payment-side failures must never collapse into "the ask could not be
+  // completed": they name a funding/authorization problem the OWNER can fix.
+  [/payload did not verify|bare 402/i,
+    "the node refused the signed payment — the payer wallet could not cover the challenged rail; nothing settled (fund the payer wallet or its Telegraph escrow ledger, then resume)"],
+  [/holds \d+ whole units|must cover the signed transfer/i,
+    "the payer wallet's balance of the challenged asset is short; nothing settled — fund it and resume"],
+  [/none of the approved rails/i,
+    "the live offer no longer matches what was approved — review and approve the fresh offer to continue"],
 ];
 
 /**
