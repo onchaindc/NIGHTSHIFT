@@ -7,7 +7,7 @@ import { DESK_TYPE_ORDER, describeDeskWorkflow } from "@/lib/desk/workflows";
 export const metadata: Metadata = {
   title: "Deal Desk",
   description:
-    "The Deal Desk is the entry point for three specialised investigation workflows: Counterparty Due Diligence, Asset Intelligence and Trade & Supplier Intelligence — one evidence engine, explicit provenance, named gaps.",
+    "The Deal Desk is the entry point for four specialised investigation workflows: Counterparty Due Diligence, Asset Intelligence, Trade & Supplier Intelligence and Listing Underwriter — one evidence engine, explicit provenance, named gaps.",
 };
 
 export const dynamic = "force-dynamic";
