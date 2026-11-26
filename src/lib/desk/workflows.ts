@@ -619,7 +619,7 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
       dimension: "b2b_enrichment",
       when: (s) => s.assetClass === "digital_asset",
       params: (s) => {
-        const company = req(s.issuerWebsite) ?? req(s.issuerEntity);
+        const company = req(s.issuerEntity) ?? req(s.issuerWebsite);
         return company ? { company } : null;
       },
     },
