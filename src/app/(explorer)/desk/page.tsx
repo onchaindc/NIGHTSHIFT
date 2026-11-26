@@ -1,15 +1,24 @@
 import type { Metadata } from "next";
 
 import { AssuranceIndex } from "@/components/assurance/assurance-index";
+import { DeskEntry } from "@/components/desk/desk-entry";
+import { DESK_TYPE_ORDER, describeDeskWorkflow } from "@/lib/desk/workflows";
 
 export const metadata: Metadata = {
   title: "Deal Desk",
   description:
-    "Institutional transaction intelligence: investigate a counterparty, its standing and its payment rails before a high-value settlement — one decision, every finding cited.",
+    "The Deal Desk is the entry point for three specialised investigation workflows: Counterparty Due Diligence, Asset Intelligence and Trade & Supplier Intelligence — one evidence engine, explicit provenance, named gaps.",
 };
 
 export const dynamic = "force-dynamic";
 
 export default function DealDeskPage() {
-  return <AssuranceIndex />;
+  const workflows = DESK_TYPE_ORDER.map((type) => describeDeskWorkflow(type));
+  return (
+    <>
+      <DeskEntry workflows={workflows} />
+      {/* The original settlement-assurance deal-file flow, preserved as-is. */}
+      <AssuranceIndex />
+    </>
+  );
 }

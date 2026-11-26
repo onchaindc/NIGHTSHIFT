@@ -267,8 +267,8 @@ export function AssuranceIndex() {
       {/* Header */}
       <header className="flex flex-wrap items-start justify-between gap-5">
         <div className="max-w-[56ch]">
-          <p className="x-eyebrow">Deal Desk</p>
-          <h1 className="x-display-1 mt-3 text-balance text-ink">Investigate before you settle.</h1>
+          <p className="x-eyebrow">Settlement assurance · deal files</p>
+          <h2 className="x-display-2 mt-3 text-balance text-ink">Investigate before you settle.</h2>
           <p className="mt-3 text-[14px] leading-relaxed text-pretty text-ink-soft">
             Open a file on a high-value payment: who you are paying, their standing, the rails the money moves on —
             one <span className="font-semibold text-ink">CLEARED</span> /{" "}

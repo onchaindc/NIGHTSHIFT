@@ -315,7 +315,11 @@ export type PlanStepKind =
   // Settlement assurance: pre-settlement verification of one transaction
   | "assurance_baseline"
   | "assurance_intel"
-  | "assurance_report";
+  | "assurance_report"
+  // Deal Desk specialised investigation workflows (three types, one engine path)
+  | "desk_baseline"
+  | "desk_intel"
+  | "desk_report";
 
 export interface PlanStep {
   id: string;

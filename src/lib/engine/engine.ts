@@ -25,6 +25,13 @@ import {
   type CapabilityBaselineOutput,
 } from "@/lib/mind/capability-execute";
 import type { IndexDeskBaselineOutput, IndexDeskAsksOutput } from "@/lib/mind/indexdesk-execute";
+import {
+  executeDeskBaseline,
+  executeDeskIntel,
+  executeDeskReport,
+  type DeskAsks,
+  type DeskBaseline,
+} from "@/lib/desk/execute";
 import { getGasPrice, getTransactionReceipt, rpcForChainId } from "@/lib/chain/rpc";
 import type { ChainReceipt, ChainGasPrice } from "@/lib/chain/rpc";
 import type { SignalRecord } from "@/lib/telegraph/client";
@@ -72,6 +79,10 @@ export interface ExecutionOutputs {
   assuranceBaseline?: AssuranceBaseline;
   /** Settlement assurance: verified committed dimensions from approved asks. */
   assuranceAsks?: AssuranceAsks;
+  /** Deal Desk investigation: the unpaid per-capability pre-flight + offers. */
+  deskBaseline?: DeskBaseline;
+  /** Deal Desk investigation: verified committed dimensions from approved asks. */
+  deskAsks?: DeskAsks;
 }
 
 export interface EngineDeps {
@@ -614,6 +625,16 @@ async function runPlan(task: TaskRecord, deps: EngineDeps): Promise<TaskRecord> 
       } else if (step.kind === "assurance_report") {
         // Completes the task itself after assembling the verified ledger.
         await executeAssuranceReport(task, step.target, outputs);
+        return task;
+      } else if (step.kind === "desk_baseline") {
+        await executeDeskBaseline(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "desk_intel") {
+        await executeDeskIntel(task, step.target, outputs);
+        if (task.state !== "executing") return task;
+      } else if (step.kind === "desk_report") {
+        // Completes the task itself after assembling the verified ledger.
+        await executeDeskReport(task, step.target, outputs);
         return task;
       } else if (step.kind === "free_chain_read") {
         outputs.freeRead = await executeFreeChainRead(task, deps);
