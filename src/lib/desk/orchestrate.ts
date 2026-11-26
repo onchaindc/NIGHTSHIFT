@@ -1143,7 +1143,10 @@ export function buildDeskReport(inv: DeskInvestigation, opts: { mode: "free" | "
 
   const outstandingQuestions: string[] = [];
   for (const gap of inv.unsupported) {
-    outstandingQuestions.push(gap.resolution);
+    // Name the gap in the question itself: a reader scanning the outstanding
+    // questions must be able to tell which one concerns beneficial ownership,
+    // which one court records, without cross-referencing the limitations.
+    outstandingQuestions.push(`"${gap.label}" is unsupported on the network — ${gap.resolution}`);
   }
   for (const gap of planDeskCapabilities(inv).inputGaps) {
     outstandingQuestions.push(`"${gap.label}" needs ${gap.required.join("; ")} — supply the inputs and re-run to ask it.`);

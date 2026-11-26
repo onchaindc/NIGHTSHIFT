@@ -1236,6 +1236,18 @@ const LISTING_UNDERWRITER_WORKFLOW: DeskWorkflowDef = {
   subjectNoun: "token",
   fields: ASSET_WORKFLOW.fields.filter((field) =>
     ["assetClass", "assetName", "chain", "tokenSymbol", "issuerEntity", "issuerJurisdiction", "issuerWebsite", "controllerName", "declaredSupply", "marketSubject", "spendLimitUsdCents"].includes(field.name),
+  ).map((field) =>
+    // Every listing capability is digital-asset-guarded, so the class select
+    // offers only the class the workflow can actually ask about — picking
+    // mining or energy here would plan zero capabilities and refuse to run.
+    field.name === "assetClass"
+      ? {
+          ...field,
+          kind: "select" as const,
+          options: [{ value: "digital_asset", label: "Digital asset (token listing)" }],
+          help: "A listing file investigates a token. Mining and energy assets belong to Asset Intelligence.",
+        }
+      : field,
   ),
   capabilities: ASSET_WORKFLOW.capabilities.filter((ref) =>
     [

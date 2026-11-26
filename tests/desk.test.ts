@@ -87,12 +87,59 @@ describe("desk workflow registry", () => {
     }
   });
 
-  it("never plans the same dimension twice inside one workflow", () => {
+  it("never asks the same capability or dimension twice inside one plan", () => {
+    // The paid executor maps dimension id → capability key per plan
+    // (execute.ts keyByDimension), so what must hold is per-plan uniqueness.
+    // A multi-class workflow can legitimately reference the same dimension
+    // name on different minds for different asset classes (e.g.
+    // caseledger:adverse_media for digital assets vs minewatch:adverse_media
+    // for mining) — those are different asks to different providers and can
+    // never co-plan because each subject carries exactly one asset class.
     for (const type of DESK_TYPE_ORDER) {
       const keys = DESK_WORKFLOWS[type].capabilities.map(capabilityKey);
       expect(new Set(keys).size).toBe(keys.length);
-      const dimIds = DESK_WORKFLOWS[type].capabilities.map((r) => r.dimension);
-      expect(new Set(dimIds).size).toBe(dimIds.length);
+    }
+    // Every reachable plan: representative subject per workflow class. For
+    // asset_intelligence that is one subject per asset class; for the single-
+    // class workflows the canonical subject covers every branch.
+    const planSubjects: Array<[DeskInvestigationType, Record<string, string>[]]> = [
+      [
+        "counterparty_due_diligence",
+        [
+          { legalName: "Acme Holdings Limited", jurisdiction: "US", website: "acme.example", claim: "Acme completed its 2025 audit.", controllerName: "Named Controller", vatNumber: "DE123456789" },
+          { legalName: "Acme Holdings Limited", jurisdiction: "US" },
+        ],
+      ],
+      [
+        "asset_intelligence",
+        [
+          { assetClass: "digital_asset", assetName: "Token", tokenSymbol: "USDC", chain: "ethereum", issuerEntity: "Circle Internet Group, Inc.", issuerJurisdiction: "US", issuerWebsite: "circle.com", controllerName: "Named Controller", marketSubject: "Uniswap USDC/ETH", walletAddress: "0xabc", txHash: "0xdef", blockNumber: "1000" },
+          { assetClass: "mining", assetName: "Site 4", operatorEntity: "BHP Group", jurisdiction: "AU", gridNode: "HB_WEST", intervalStart: "2026-11-23T00:00:00-06:00", blockNumber: "1000" },
+          { assetClass: "energy", assetName: "Substation", siteLocation: "Houston, TX", pastDate: "2026-11-20" },
+        ],
+      ],
+      [
+        "trade_supplier_intelligence",
+        [
+          { supplierName: "Siemens AG", jurisdiction: "DE", poNumber: "PO-1", invoiceRef: "INV-1", vesselName: "MV Example" },
+          { supplierName: "Siemens AG", jurisdiction: "DE" },
+        ],
+      ],
+      [
+        "listing_underwriter",
+        [
+          { assetClass: "digital_asset", assetName: "USDC", tokenSymbol: "USDC", chain: "ethereum", issuerEntity: "Circle Internet Group, Inc.", issuerJurisdiction: "US", issuerWebsite: "circle.com", controllerName: "Named Controller", declaredSupply: "1000000000", marketSubject: "Uniswap USDC/ETH" },
+        ],
+      ],
+    ];
+    for (const [type, subjects] of planSubjects) {
+      for (const subject of subjects) {
+        const plan = planDeskCapabilities(deskInv(type, subject));
+        const keys = plan.capabilities.map((c) => c.key);
+        expect(new Set(keys).size, `${type} plan double-asks a capability: ${keys.join(", ")}`).toBe(keys.length);
+        const dimIds = plan.capabilities.map((c) => c.key.split(":")[1]);
+        expect(new Set(dimIds).size, `${type} plan double-asks a dimension id: ${keys.join(", ")}`).toBe(dimIds.length);
+      }
     }
   });
 });
@@ -203,6 +250,9 @@ describe("desk planning", () => {
   });
 
   it("extends digital asset investigations with existing issuer specialists without creating duplicate Minds", () => {
+    // The liquidity ask answers for a named pool, so its market input is
+    // supplied here; without it the route is a named input gap, never an
+    // approximate ask (asserted below).
     const plan = planDeskCapabilities(deskInv("asset_intelligence", {
       assetClass: "digital_asset",
       assetName: "Token listing review",
@@ -212,6 +262,7 @@ describe("desk planning", () => {
       issuerJurisdiction: "US",
       issuerWebsite: "circle.com",
       controllerName: "Named Controller",
+      marketSubject: "Uniswap USDC/ETH",
     }));
     const keys = plan.capabilities.map((c) => c.key);
     expect(keys).toContain("index-reconstitution-desk:registry");
@@ -228,6 +279,19 @@ describe("desk planning", () => {
     expect(plan.unsupported.map((g) => g.capabilityKey)).toContain("ownershipgraph:beneficial_ownership");
     expect(plan.unsupported.map((g) => g.capabilityKey)).toContain("sanctionsdesk:related_parties");
     expect(plan.unsupported.map((g) => g.capabilityKey)).toContain("caseledger:docket_retrieval");
+  });
+
+  it("without a named market the liquidity route is a named input gap, never an approximate ask", () => {
+    const plan = planDeskCapabilities(deskInv("asset_intelligence", {
+      assetClass: "digital_asset",
+      assetName: "Token listing review",
+      tokenSymbol: "USDC",
+      chain: "ethereum",
+    }));
+    expect(plan.capabilities.map((c) => c.key)).not.toContain("index-reconstitution-desk:liquidity");
+    const gap = plan.inputGaps.find((g) => g.key === "index-reconstitution-desk:liquidity");
+    expect(gap).toBeDefined();
+    expect(gap?.required.join(" ")).toMatch(/pool/i);
   });
 
 
@@ -645,6 +709,121 @@ describe("desk evidence absorption and report", () => {
     expect(critical?.title).toMatch(/Sanctions name match/);
     expect(report.findings.some((f) => f.severity === "material" && f.title.includes("not active"))).toBe(true);
     expect(report.confidence).toBe("signal_verified");
+  });
+
+  it("listing underwriter: a stated supply that contradicts the verified supply is a recorded conflict, never averaged away", async () => {
+    const inv = deskInv("listing_underwriter", {
+      assetClass: "digital_asset",
+      assetName: "USDC",
+      tokenSymbol: "USDC",
+      chain: "ethereum",
+      issuerEntity: "Circle Internet Group, Inc.",
+      issuerJurisdiction: "US",
+      declaredSupply: "1000000000",
+    });
+    // Declared inputs are seeded by the sync pass; the network-verified
+    // supply that contradicts them is injected as a hash-committed answer.
+    await syncDeskInvestigation(inv);
+    expect(inv.evidence.some((e) => e.id === "declared:declaredSupply")).toBe(true);
+    inv.evidence.push({
+      id: "e-supply",
+      provenance: "verified",
+      class: "node_verified",
+      capability: "index-reconstitution-desk:supply",
+      label: "Total supply",
+      title: "Total supply",
+      detail: "verified answer",
+      facts: { token: "USDC", chain: "ethereum", total_supply: 63000000000 },
+      source: { kind: "telegraph", ref: "0xs3", label: "index-reconstitution-desk", observedAt: new Date().toISOString() },
+      signalHash: "0xs3",
+      receiptHash: "0xr3",
+    });
+    const report = buildDeskReport(inv, { mode: "intel", spendUsdCents: 1 });
+    const conflict = report.discrepancies.find((d) => d.title.includes("Stated supply differs"));
+    expect(conflict).toBeDefined();
+    expect(conflict?.kind).toBe("field_conflict");
+    expect(conflict?.evidenceIds).toEqual(["declared:declaredSupply", "e-supply"]);
+    expect(conflict?.detail).toContain("63,000,000,000");
+    // A supply conflict is material: the verdict cannot be a clean proceed.
+    expect(report.assessment.verdict).toBe("proceed_with_conditions");
+    expect(report.assessment.summary).toContain("cannot speak to");
+    // The underwriting gaps the network cannot answer stay named.
+    expect(report.limitations.some((l) => l.includes("unsupported"))).toBe(true);
+    expect(report.sections.map((s) => s.id)).toEqual(["issuer_identity", "token_integrity", "market_quality", "issuer_exposure"]);
+  });
+
+  it("listing underwriter: incomplete evidence yields insufficient_verified_evidence, no findings and no manufactured score", async () => {
+    // Only the guided-form inputs exist: nothing was asked, nothing verified.
+    const inv = deskInv("listing_underwriter", {
+      assetClass: "digital_asset",
+      assetName: "New Token",
+      tokenSymbol: "NEW",
+      issuerJurisdiction: "US",
+    });
+    const report = buildDeskReport(inv, { mode: "free", spendUsdCents: 0 });
+    expect(report.assessment.verdict).toBe("insufficient_verified_evidence");
+    expect(report.assessment.summary).toMatch(/insufficient verified evidence/i);
+    expect(report.findings).toHaveLength(0);
+    expect(report.confidence).toBe("unverified");
+    expect(report.headline).toMatch(/Route-verified only/);
+    // The four underwriting sections are present but honestly missing.
+    expect(report.sections.every((s) => s.provenance === "missing")).toBe(true);
+    // The named gaps remain the outstanding questions — beneficial ownership
+    // and court records are never inferred from what is missing.
+    expect(report.outstandingQuestions.some((q) => q.toLowerCase().includes("beneficial ownership"))).toBe(true);
+    expect(report.outstandingQuestions.some((q) => q.toLowerCase().includes("court"))).toBe(true);
+    // The liquidity route was never asked (no market named) — it is a named
+    // input gap, not an unverified answer.
+    expect(inv.evidence.some((e) => e.capability === "index-reconstitution-desk:liquidity")).toBe(false);
+  });
+
+  it("listing underwriter: a clean verified record set still reports named exposure gaps, not a confident listing", async () => {
+    const inv = deskInv("listing_underwriter", {
+      assetClass: "digital_asset",
+      assetName: "USDC",
+      tokenSymbol: "USDC",
+      chain: "ethereum",
+      issuerEntity: "Circle Internet Group, Inc.",
+      issuerJurisdiction: "US",
+      controllerName: "Named Controller",
+      marketSubject: "Uniswap USDC/ETH",
+    });
+    inv.evidence.push(
+      {
+        id: "e-reg",
+        provenance: "verified",
+        class: "node_verified",
+        capability: "index-reconstitution-desk:registry",
+        label: "Issuer registry record",
+        title: "Issuer registry record",
+        detail: "active",
+        facts: { legal_name: "Circle Internet Group, Inc.", jurisdiction: "US-DE", active: true, registration_id: "DE-12345" },
+        source: { kind: "telegraph", ref: "0xs4", label: "index-reconstitution-desk", observedAt: new Date().toISOString() },
+        signalHash: "0xs4",
+        receiptHash: "0xr4",
+      },
+      {
+        id: "e-screen",
+        provenance: "verified",
+        class: "node_verified",
+        capability: "sanctionsdesk:name_screening",
+        label: "Issuer sanctions screening",
+        title: "Issuer sanctions screening",
+        detail: "no match",
+        facts: { name: "Circle Internet Group, Inc.", matched: false },
+        source: { kind: "telegraph", ref: "0xs5", label: "zk-sanctions", observedAt: new Date().toISOString() },
+        signalHash: "0xs5",
+        receiptHash: "0xr5",
+      },
+    );
+    const report = buildDeskReport(inv, { mode: "intel", spendUsdCents: 2 });
+    expect(report.assessment.verdict).toBe("proceed_on_record");
+    // Even a clean proceed names what underwriting still lacks: ownership,
+    // group structure and court records are unsupported — screening the
+    // issuer does not establish control.
+    expect(report.assessment.basis.some((b) => b.includes("Unsupported on the network"))).toBe(true);
+    expect(report.limitations.join(" ")).toMatch(/not legal, sanctions, credit or investment advice/);
+    expect(report.sections.find((s) => s.id === "issuer_exposure")?.provenance).toBe("verified");
   });
 });
 

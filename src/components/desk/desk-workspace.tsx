@@ -536,7 +536,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
               {inv.report.findings.length === 0 ? (
                 <p className="mt-3 text-[12.5px] leading-relaxed text-ink-soft">
                   No findings — verified evidence produces findings; unverified routes never do. What this run did
-                  establish sits one tap away in the activity trail below.
+                  establish sits one tap away in the verified facts below.
                 </p>
               ) : (
                 <>
@@ -574,6 +574,35 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
                   )}
                 </>
               )}
+
+              {/* Verified facts — the records themselves are the main report,
+                  so they sit in the spotlight with the assessment, each with
+                  its committed facts, source and signal/receipt hashes. The
+                  activity trail below keeps the process (routes, declared
+                  inputs, gaps) and no longer repeats these records. */}
+              {(() => {
+                const verifiedRecords = inv.evidence.filter((e) => e.provenance === "verified");
+                return (
+                  <div className="mt-4 border-t border-edge pt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink-faint">Verified facts — the records behind this report</p>
+                      <span className="rounded-full border border-teal/30 bg-teal/5 px-2 py-0.5 text-[10.5px] font-semibold text-teal tabular">{verifiedRecords.length}</span>
+                    </div>
+                    {verifiedRecords.length === 0 ? (
+                      <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">
+                        No verified facts yet. A free pre-flight prices routes only — approving a paid run is what
+                        turns answers into hash-committed records here.
+                      </p>
+                    ) : (
+                      <ul className="mt-2 space-y-2">
+                        {verifiedRecords.map((e) => (
+                          <EvidenceCard key={e.id} e={e} />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Secondary sections — present, counted, closed by default. */}
@@ -664,6 +693,9 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
           <div className="mt-3 space-y-2">
             {grouped
               .filter(([, list]) => list.length > 0)
+              // Verified facts render in the report spotlight above; the trail
+              // is the process, so it carries everything except them.
+              .filter(([key]) => key !== "verified")
               .map(([key, list]) => (
                 <ReportDisclosure
                   key={key}
