@@ -3,14 +3,16 @@
  * process, exposes the handler for entries, and offers one guarded entry
  * point for the boot hook and the API routes.
  *
- * Startup honesty: `attemptState` says idle / starting / started / failed
- * about the ACTUAL `transport.start(...)` call in THIS server process,
- * `startupError` carries the exact failure, and `connected` reflects the live
- * SSE stream (the SDK's onConnected callback) — readable even while session
- * hydration is still in flight. Configuration alone never reports a
- * connection, and a startup that never resolves is failed visibly after the
- * timeout, not silently forever.
+ * Startup honesty across bundle boundaries: Next compiles `instrumentation.ts`
+ * separately from route handlers, so module-level state in the boot bundle is
+ * INVISIBLE to /api/acp/status. The authoritative runtime state therefore
+ * lives in a persisted named document (`acp-runtime-state`): the boot bundle
+ * writes its attempt outcome and stream events there, and the status endpoint
+ * reads it back. A configured-but-broken real mode, a hanging connect, and a
+ * live connected stream are all distinguishable in production.
  */
+
+import { persistence } from "@/lib/storage";
 
 import { handleAcpEntry, tickAcpJobs } from "./lifecycle";
 import { acpConfig, realAcpConfigured, selectAcpTransport, MockAcpTransport, acpSdkInstalled } from "./transport";
@@ -21,61 +23,129 @@ import type { AcpEntry, AcpProviderStatus, AcpSessionRef, AcpTransport } from ".
  *  must see that the runtime never became usable. */
 const START_TIMEOUT_MS = 45_000;
 
+const STATE_DOC = "acp-runtime-state";
+
+export interface AcpRuntimeState {
+  attemptState: "idle" | "starting" | "started" | "failed";
+  startupError: string | null;
+  connected: boolean | null;
+  mode: "real" | "mock" | null;
+  startedAt: string | null;
+  streamObservedAt: string | null;
+  updatedAt: string;
+  note: string | null;
+}
+
 let transport: AcpTransport | null = null;
 let startNote = "not started";
-let attemptState: "idle" | "starting" | "started" | "failed" = "idle";
 let startupError: string | null = null;
-/** Diagnostics of a transport that is constructed but still starting — the
- *  only window into the stream state while hydration is in flight. */
-let startingDiagnostics: (() => { connected: boolean | null; lastError: string | null }) | null = null;
 let starting: Promise<void> | null = null;
+
+async function writeRuntimeState(state: AcpRuntimeState): Promise<void> {
+  try {
+    await persistence().writeNamed(STATE_DOC, state);
+  } catch (err) {
+    console.error("failed to persist the ACP runtime state:", err instanceof Error ? err.message : err);
+  }
+}
+
+async function readRuntimeState(): Promise<AcpRuntimeState | null> {
+  try {
+    const stored = await persistence().readNamed<AcpRuntimeState>(STATE_DOC);
+    return stored && stored.attemptState ? stored : null;
+  } catch {
+    return null; // store unreachable — status degrades to local truth only
+  }
+}
 
 /** Start (once) and return the active transport, or null when off/failed. */
 export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
   if (transport) return transport;
-  if (attemptState === "failed") return null; // sticky failure — the status shows why
-  if (!starting) {
-    attemptState = "starting";
-    startupError = null;
-    starting = (async () => {
-      const selected = await selectAcpTransport();
-      if (!selected.transport) {
-        startNote = selected.reason;
-        attemptState = "failed";
-        startupError = selected.reason.includes("failed to start") ? selected.reason : null;
-        startingDiagnostics = null;
-        return;
-      }
-      startingDiagnostics = selected.transport.diagnostics?.bind(selected.transport) ?? null;
-      try {
-        await Promise.race([
-          selected.transport.start({
-            onEntry: async (ref, entry) => {
-              await handleAcpEntry(selected.transport!, ref, entry);
-            },
-          }),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`transport.start() did not resolve within ${Math.round(START_TIMEOUT_MS / 1000)}s — the SSE connect or session hydration is hanging`)),
-              START_TIMEOUT_MS,
-            ),
+  if (starting) return starting.then(() => transport);
+  starting = (async () => {
+    const selected = await selectAcpTransport();
+    if (!selected.transport) {
+      startNote = selected.reason;
+      transport = null;
+      startupError = selected.reason.includes("failed to start") ? selected.reason : null;
+      starting = null;
+      await writeRuntimeState({
+        attemptState: "failed",
+        startupError,
+        connected: null,
+        mode: null,
+        startedAt: null,
+        streamObservedAt: null,
+        updatedAt: new Date().toISOString(),
+        note: selected.reason,
+      });
+      return;
+    }
+    startingDiagnostics = selected.transport.diagnostics?.bind(selected.transport) ?? null;
+    try {
+      await Promise.race([
+        selected.transport.start({
+          onEntry: async (ref, entry) => {
+            await handleAcpEntry(selected.transport!, ref, entry);
+          },
+          onStreamState: (connected) => {
+            void writeRuntimeState({
+              attemptState: "started",
+              startupError: null,
+              connected,
+              mode: selected.transport!.mode,
+              startedAt: new Date().toISOString(),
+              streamObservedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              note: `live SSE stream ${connected ? "connected" : "closed"}`,
+            });
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`transport.start() did not resolve within ${Math.round(START_TIMEOUT_MS / 1000)}s — the SSE connect or session hydration is hanging`)),
+            START_TIMEOUT_MS,
           ),
-        ]);
-        transport = selected.transport;
-        attemptState = "started";
-        startupError = null;
-        startNote = selected.reason;
-      } catch (err) {
-        transport = null;
-        attemptState = "failed";
-        startupError = (err instanceof Error ? err.message : String(err)).slice(0, 400);
-        startNote = `transport startup failed: ${startupError}`;
-      }
-    })();
-  }
+        ),
+      ]);
+      transport = selected.transport;
+      startupError = null;
+      startNote = selected.reason;
+      await writeRuntimeState({
+        attemptState: "started",
+        startupError: null,
+        connected: selected.transport.diagnostics?.().connected ?? null,
+        mode: selected.transport.mode,
+        startedAt: new Date().toISOString(),
+        streamObservedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        note: selected.reason,
+      });
+    } catch (err) {
+      transport = null;
+      startupError = (err instanceof Error ? err.message : String(err)).slice(0, 400);
+      startNote = `transport startup failed: ${startupError}`;
+      await writeRuntimeState({
+        attemptState: "failed",
+        startupError,
+        connected: startingDiagnostics?.().connected ?? null,
+        mode: realAcpConfigured() ? "real" : "mock",
+        startedAt: null,
+        streamObservedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        note: startNote,
+      });
+    } finally {
+      starting = null;
+    }
+  })();
   await starting;
   return transport;
 }
+
+/** Diagnostics of a transport that is constructed but still starting — the
+ *  only window into the stream state while hydration is in flight. */
+let startingDiagnostics: (() => { connected: boolean | null; lastError: string | null }) | null = null;
 
 /** Process one entry through the real pipeline (used by the simulate action).
  *  When the provider is disabled, a standalone mock still runs the pipeline —
@@ -85,32 +155,57 @@ export async function processAcpEntry(ref: AcpSessionRef, entry: AcpEntry): Prom
   await handleAcpEntry(active, ref, entry);
 }
 
-/** Advance every open job (delivery/tick). */
+/** Advance every open job (delivery/tick) and refresh the persisted stream
+ *  state, so the status stays truthful between stream events. */
 export async function runAcpTick(): Promise<{ advanced: number; submitted: string[]; notes: string[] }> {
   const active = await ensureAcpRuntime();
   if (!active) return { advanced: 0, submitted: [], notes: [startNote] };
-  return tickAcpJobs(active);
+  const result = await tickAcpJobs(active);
+  const diag = active.diagnostics?.() ?? null;
+  if (diag) {
+    await writeRuntimeState({
+      attemptState: "started",
+      startupError: null,
+      connected: diag.connected,
+      mode: active.mode,
+      startedAt: null,
+      streamObservedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      note: diag.lastError ? `last entry-handler error: ${diag.lastError}` : null,
+    });
+  }
+  return result;
 }
 
 /** The provider connection status, honest to the field. Never starts the
- *  transport itself — status must stay cheap. */
+ *  transport itself — status must stay cheap. Local state (same bundle) wins;
+ *  the persisted record carries the truth across bundle boundaries. */
 export async function acpProviderStatus(): Promise<AcpProviderStatus> {
   const cfg = acpConfig();
   const sdkInstalled = cfg.enabled ? await acpSdkInstalled() : false;
   const active = transport;
+  const stored = active ? null : await readRuntimeState();
   const mode: AcpProviderStatus["mode"] = !cfg.enabled ? "disabled" : active ? active.mode : realAcpConfigured() ? "real" : "mock";
-  const diag = (active ?? null)?.diagnostics?.() ?? startingDiagnostics?.() ?? null;
+  const diag = active?.diagnostics?.() ?? null;
+  const started = active !== null || stored?.attemptState === "started";
+  const connected = active ? (diag?.connected ?? null) : (stored?.connected ?? null);
+  const streamObservedAt = active ? new Date().toISOString() : (stored?.streamObservedAt ?? null);
+  const startupError = active ? null : (stored?.startupError ?? null);
   const note = active
     ? diag?.lastError
       ? `${startNote} — last entry-handler error: ${diag.lastError}`
       : startNote
     : !cfg.enabled
       ? "ACP_ENABLED is not set — the ACP provider is off; offerings below are published configuration, not a live connection."
-      : startupError
-        ? `Live ACP transport is configured but its startup FAILED: ${startupError}`
-        : realAcpConfigured()
-          ? "Live ACP transport configured; starts with the server boot (instrumentation hook)."
-          : "No ACP credentials configured — the mock transport serves simulated buyers only; nothing connects to the ACP network.";
+      : stored?.attemptState === "started"
+        ? `The live transport started at ${stored.startedAt ?? "?"} (recorded from the server boot) and the SSE stream was last observed ${streamObservedAt}.`
+        : stored?.attemptState === "starting"
+          ? "A startup attempt is in flight (recorded from the server boot)."
+          : startupError
+            ? `Live ACP transport is configured but its startup FAILED: ${startupError}`
+            : realAcpConfigured()
+              ? "Live ACP transport configured; starts with the server boot (instrumentation hook). No boot attempt has been recorded yet."
+              : "No ACP credentials configured — the mock transport serves simulated buyers only; nothing connects to the ACP network.";
   return {
     mode,
     enabled: cfg.enabled,
@@ -123,9 +218,11 @@ export async function acpProviderStatus(): Promise<AcpProviderStatus> {
     agentWalletAddress: mode === "real" ? cfg.walletAddress || null : null,
     chainId: cfg.chainId,
     note,
-    runtimeStarted: attemptState === "started" && active !== null,
+    runtimeStarted: started,
     startupError: startupError ?? (diag?.lastError ? `last entry-handler error: ${diag.lastError}` : null),
-    connected: mode === "real" ? (diag?.connected ?? null) : null,
-    attemptState,
+    connected: mode === "real" ? connected : null,
+    attemptState: active ? "started" : (stored?.attemptState ?? "idle"),
+    startedAt: stored?.startedAt ?? null,
+    streamObservedAt,
   };
 }

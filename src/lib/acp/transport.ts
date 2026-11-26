@@ -184,7 +184,8 @@ export async function createRealAcpTransport(cfg: AcpConfig): Promise<AcpTranspo
   // later provider actions (setBudget on funding, submit on delivery).
   const sessions = new Map<string, AcpSdk.JobSession>();
   const keyOf = (ref: AcpSessionRef): string => `${ref.chainId}:${ref.jobId}`;
-  let handlers: { onEntry: (ref: AcpSessionRef, entry: AcpEntry) => Promise<void> } | null = null;
+  type AcpHandlers = Parameters<AcpTransport["start"]>[0];
+  let handlers: AcpHandlers | null = null;
   let connected = false;
   let lastError: string | null = null;
 
@@ -213,9 +214,19 @@ export async function createRealAcpTransport(cfg: AcpConfig): Promise<AcpTranspo
       });
       await agent.start(() => {
         connected = true;
+        // The stream is up (before session hydration finishes) — report it so
+        // the persisted runtime record can be written outside this bundle.
+        try {
+          handlers?.onStreamState?.(true);
+        } catch { /* state reporting must never break the transport */ }
       });
     },
     async stop() {
+      if (connected) {
+        try {
+          handlers?.onStreamState?.(false);
+        } catch { /* ignore */ }
+      }
       connected = false;
       await agent.stop();
     },

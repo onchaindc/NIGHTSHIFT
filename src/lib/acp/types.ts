@@ -75,7 +75,12 @@ export interface AcpEntry {
 
 export interface AcpTransport {
   mode: "mock" | "real";
-  start(handlers: { onEntry: (ref: AcpSessionRef, entry: AcpEntry) => Promise<void> }): Promise<void>;
+  /** Handlers: `onEntry` for every job-room entry; `onStreamState` when the
+   *  live SSE stream opens/closes (mock never calls it). */
+  start(handlers: {
+    onEntry: (ref: AcpSessionRef, entry: AcpEntry) => Promise<void>;
+    onStreamState?: (connected: boolean) => void;
+  }): Promise<void>;
   stop(): Promise<void>;
   /** The provider's price/acceptance act (v2 `session.setBudget`). */
   setBudget(ref: AcpSessionRef, amountUsdCents: number): Promise<void>;
@@ -171,8 +176,12 @@ export interface AcpProviderStatus {
   /** Live transport only: whether the SSE stream to api.acp.virtuals.io is up
    *  (the SDK's onConnected callback). null for mock/disabled. */
   connected: boolean | null;
-  /** The startup attempt state in this process: idle = the boot hook has not
-   *  reached the ACP runtime here; starting = start() is in flight; started /
-   *  failed = resolved outcomes. */
+  /** The startup attempt state: local to a process is invisible across
+   *  Next's separate compilation bundles (instrumentation vs routes), so the
+   *  authoritative state is the persisted runtime record read here. */
   attemptState: "idle" | "starting" | "started" | "failed";
+  /** When the live transport last started successfully (ISO), if ever. */
+  startedAt: string | null;
+  /** When the SSE stream state was last observed (ISO). */
+  streamObservedAt: string | null;
 }
