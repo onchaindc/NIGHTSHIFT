@@ -195,16 +195,34 @@ export async function runAcpTick(): Promise<{ advanced: number; submitted: strin
   return result;
 }
 
-/** The provider connection status, honest to the field. Never starts the
- *  transport itself — status must stay cheap. Local state (same bundle) wins;
- *  the persisted record carries the truth across bundle boundaries. */
+/** How stale the persisted stream observation may get before a status call
+ *  is allowed to boot (or re-boot) the transport from the route bundle —
+ *  a serverless instance can die between stream events, and a record that
+ *  nobody refreshes must not masquerade as a live provider. */
+const STREAM_STALE_MS = 3 * 60_000;
+
+/** The provider connection status, honest to the field. If the persisted
+ *  record is stale (no live writer) and the provider is configured, status
+ *  LAZILY BOOTS the transport in this process — self-healing: the status page
+ *  is operator-facing and must reflect and restore the actual state, not
+ *  repeat a dead instance's last word. */
 export async function acpProviderStatus(): Promise<AcpProviderStatus> {
   const cfg = acpConfig();
   const sdkInstalled = cfg.enabled ? await acpSdkInstalled() : false;
-  const active = transport;
+  let active = transport;
   // Read the persisted record even when a transport runs in THIS process:
   // the boot bundle wrote the authoritative startup + registration facts.
-  const stored = await readRuntimeState();
+  let stored = await readRuntimeState();
+  const stale =
+    cfg.enabled &&
+    realAcpConfigured() &&
+    !active &&
+    (!stored || stored.attemptState !== "started" || !stored.streamObservedAt || Date.now() - Date.parse(stored.streamObservedAt) > STREAM_STALE_MS);
+  if (stale) {
+    await ensureAcpRuntime();
+    active = transport;
+    stored = await readRuntimeState();
+  }
   const mode: AcpProviderStatus["mode"] = !cfg.enabled ? "disabled" : active ? active.mode : realAcpConfigured() ? "real" : "mock";
   const diag = active?.diagnostics?.() ?? null;
   const started = active !== null || stored?.attemptState === "started";
