@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BrainCircuit, Compass, Radar, ReceiptText, Wallet, type LucideIcon } from "lucide-react";
+import { BrainCircuit, Compass, Radar, ReceiptText, ShieldCheck, Wallet, type LucideIcon } from "lucide-react";
 
 /**
  * The phone's map. The areas live within thumb reach at the bottom while the
@@ -14,6 +14,7 @@ const ITEMS: Item[] = [
   { href: "/miners", label: "Explorer", icon: Compass, activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
   { href: "/minds", label: "Minds", icon: BrainCircuit },
   { href: "/signals", label: "Signals", icon: Radar },
+  { href: "/assurance", label: "Assurance", icon: ShieldCheck },
   { href: "/funds", label: "Wallet", icon: Wallet },
   { href: "/activity", label: "Activity", icon: ReceiptText },
 ];

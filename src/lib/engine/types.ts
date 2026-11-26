@@ -311,7 +311,11 @@ export type PlanStepKind =
   // Generic capability runs over the verified Mind matrix
   | "capability_baseline"
   | "capability_ask"
-  | "capability_report";
+  | "capability_report"
+  // Settlement assurance: pre-settlement verification of one transaction
+  | "assurance_baseline"
+  | "assurance_intel"
+  | "assurance_report";
 
 export interface PlanStep {
   id: string;
