@@ -20,13 +20,14 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 
 import { parseCreateDeskBody, declaredInputEvidence, deskSubjectLine } from "@/lib/desk/create";
 import { resetDeskCapabilityDeps, setDeskCapabilityDeps, parseDeskConfig, executeDeskBaseline, executeDeskIntel, executeDeskReport } from "@/lib/desk/execute";
-import { buildDeskReport, planDeskCapabilities, syncDeskInvestigation } from "@/lib/desk/orchestrate";
+import { buildDeskReport, planDeskCapabilities, reclassifyVerificationFailures, syncDeskInvestigation } from "@/lib/desk/orchestrate";
 import { saveTask } from "@/lib/engine/store";
 import type { TaskRecord } from "@/lib/engine/types";
 import type { CapabilityRunnerDeps, CommittedDimension } from "@/lib/minds/capability-runner";
 import type { ApprovedOffer, ProbeOutcome, VerifyOutcome } from "@/lib/terminal/ask";
-import type { DeskInvestigation, DeskInvestigationType } from "@/lib/desk/types";
-import { DESK_TYPE_LABEL } from "@/lib/desk/types";
+import type { DeskEvidence, DeskInvestigation, DeskInvestigationType } from "@/lib/desk/types";
+import { DESK_TYPE_LABEL, DESK_VERDICT_LABEL } from "@/lib/desk/types";
+import { buildDeskWalkthrough } from "@/lib/desk/walkthrough";
 import {
   capabilityKey,
   DESK_TYPE_ORDER,
@@ -824,6 +825,411 @@ describe("desk evidence absorption and report", () => {
     expect(report.assessment.basis.some((b) => b.includes("Unsupported on the network"))).toBe(true);
     expect(report.limitations.join(" ")).toMatch(/not legal, sanctions, credit or investment advice/);
     expect(report.sections.find((s) => s.id === "issuer_exposure")?.provenance).toBe("verified");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Verification integrity: failures, node-asserted answers, disagreements */
+/* ------------------------------------------------------------------ */
+
+// The two verification notes verifySignal itself writes, verbatim — the
+// historical-reclassification repair keys on exactly these signatures.
+const MISMATCH_NOTE =
+  "The signal is recorded, but re-deriving the hash over the recorded payload gave 0xdeadbeef, which does not match. The node's own verified flag: true.";
+const NODE_ASSERTED_NOTE =
+  "The node reports verification.verified = true, but the payload could not be re-serialized here for an independent re-derivation, so treat this as the network's word, not proof.";
+
+describe("desk verification integrity", () => {
+  function luSubject(): Record<string, string> {
+    return {
+      assetClass: "digital_asset",
+      assetName: "USDC",
+      tokenSymbol: "USDC",
+      chain: "ethereum",
+      issuerEntity: "Circle Internet Group, Inc.",
+      issuerJurisdiction: "US",
+      issuerWebsite: "circle.com",
+      marketSubject: "Uniswap USDC/ETH",
+      declaredSupply: "1000000000",
+    };
+  }
+
+  function holderEvidence(capability: string, label: string, holders: number, id: string): DeskEvidence {
+    return {
+      id,
+      provenance: "verified",
+      class: "node_verified",
+      capability,
+      label,
+      title: label,
+      detail: "verified against the node signal",
+      facts: { token: "USDC", chain: "ethereum", holders_count: holders },
+      source: { kind: "telegraph", ref: `0x${id}`, label: "provider", observedAt: new Date().toISOString() },
+      signalHash: `0xsignal-${id}`,
+      receiptHash: `0xreceipt-${id}`,
+      costUsdCents: 1,
+    };
+  }
+
+  /** A completed paid run whose capability report carries the given dims. */
+  function runWithDims(taskId: string, dims: unknown[]): TaskRecord {
+    const counts = { verified: 0, recorded: 0, unverified: 0, routable_unverified: 0, gap: 0 };
+    for (const d of dims as Array<{ status: string }>) counts[d.status as keyof typeof counts] += 1;
+    const task = taskFor();
+    task.id = taskId;
+    task.state = "completed";
+    task.spend = { limitUsdCents: 12, spentUsdCents: dims.length, entries: [] };
+    task.result = {
+      summary: "paid run",
+      evidence: [],
+      completedAt: 1,
+      capabilityReport: {
+        slug: "listing_underwriter",
+        preparedAt: new Date().toISOString(),
+        dimensions: dims,
+        missing: [],
+        spendUsdCents: dims.length,
+        counts,
+        note: "",
+      },
+    } as never;
+    return task;
+  }
+
+  it("a paid answer whose payload fails the independent hash re-derivation is a verification failure, never a verified fact", async () => {
+    const inv = deskInv("listing_underwriter", luSubject());
+    const task = runWithDims("task-lu-mismatch", [
+      {
+        dimension: "index-reconstitution-desk:holders",
+        label: "Holder count",
+        status: "verified",
+        detail: "verified against the node signal; Independent re-derivation matches: the recorded payload is exactly the one this signal hash commits to.",
+        intent: "TOKEN_HOLDER_COUNT",
+        provider: "index-reconstitution-desk",
+        priceUsdCents: 1,
+        signalHash: "0xhold",
+        receiptHash: "0xholdr",
+        verifiedAt: new Date().toISOString(),
+        values: { token: "USDC", chain: "ethereum", holders_count: 9641462 },
+        missingFields: [],
+        viaRouterFallback: false,
+      },
+      {
+        // The real NS-LU-A803A739 failure mode: the node asserts verified,
+        // but the recorded payload does not re-derive the signal hash.
+        dimension: "index-reconstitution-desk:filings",
+        label: "Regulatory filings",
+        status: "recorded",
+        detail: `paid answer is recorded; ${MISMATCH_NOTE}`,
+        intent: "REGULATORY_FILINGS",
+        provider: "index-reconstitution-desk",
+        priceUsdCents: 1,
+        signalHash: "0xfile",
+        receiptHash: "0xfiler",
+        values: { company: "Circle Internet Group, Inc.", filing_count: 42 },
+        missingFields: [],
+        committed: { company: "Circle Internet Group, Inc.", filing_count: 42 },
+        verificationReason: "hash_mismatch",
+        viaRouterFallback: false,
+      },
+      {
+        dimension: "index-reconstitution-desk:registry",
+        label: "Issuer registry record",
+        status: "recorded",
+        detail: `paid answer is recorded; ${NODE_ASSERTED_NOTE}`,
+        intent: "CORPORATE_REGISTRY_LOOKUP_GENERAL",
+        provider: "index-reconstitution-desk",
+        priceUsdCents: 1,
+        signalHash: "0xreg",
+        receiptHash: "0xregr",
+        values: { legal_name: "Circle Internet Group, Inc.", active: true },
+        missingFields: [],
+        committed: { legal_name: "Circle Internet Group, Inc.", active: true },
+        verificationReason: "node_asserted",
+        viaRouterFallback: false,
+      },
+    ]);
+    await saveTask(task);
+    inv.runs.push({ taskId: task.id, mode: "intel", createdAt: new Date().toISOString(), taskState: "completed", ceilingUsdCents: 12, absorbed: false });
+    await syncDeskInvestigation(inv);
+
+    const failedRec = inv.evidence.find((e) => e.capability === "index-reconstitution-desk:filings");
+    expect(failedRec?.provenance).toBe("verification_failed");
+    expect(failedRec?.class).toBe("verification_failed");
+    expect(failedRec?.verificationReason).toBe("hash_mismatch");
+    // The record is preserved for investigation: signal, receipt, facts and
+    // the full committed payload stay attached — nothing is discarded.
+    expect(failedRec?.signalHash).toBe("0xfile");
+    expect(failedRec?.receiptHash).toBe("0xfiler");
+    expect(failedRec?.facts.filing_count).toBe(42);
+    expect(failedRec?.committedPayload).toEqual({ company: "Circle Internet Group, Inc.", filing_count: 42 });
+
+    // A node-asserted answer is unverified with its own class, distinct from
+    // a probe-only route.
+    const asserted = inv.evidence.find((e) => e.capability === "index-reconstitution-desk:registry");
+    expect(asserted?.provenance).toBe("unverified");
+    expect(asserted?.class).toBe("node_asserted");
+    expect(asserted?.signalHash).toBe("0xreg");
+
+    // A genuine re-derivation match is still a verified fact.
+    const holders = inv.evidence.find((e) => e.capability === "index-reconstitution-desk:holders");
+    expect(holders?.provenance).toBe("verified");
+    expect(holders?.class).toBe("node_verified");
+
+    const report = buildDeskReport(inv, { mode: "intel", spendUsdCents: 9 });
+    expect(report.counts).toMatchObject({ verified: 1, verification_failed: 1, node_asserted: 1 });
+    // A file with a failed re-derivation is never "signal verified".
+    expect(report.confidence).toBe("partially_verified");
+    expect(report.headline).toContain("verification failure");
+    expect(report.limitations.join(" ")).toMatch(/FAILED the independent hash re-derivation/);
+    expect(report.limitations.join(" ")).toMatch(/node's assertion only/);
+
+    // The failure is a material finding in its own right, and it is the ONLY
+    // finding citing the failed record — its values never surface as facts.
+    const citing = report.findings.filter((f) => f.evidenceIds.includes(failedRec?.id ?? ""));
+    expect(citing).toHaveLength(1);
+    expect(citing[0].severity).toBe("material");
+    expect(citing[0].title).toMatch(/failed independent verification/);
+
+    // The executive assessment states the failure and holds the file on it.
+    expect(report.assessment.verdict).toBe("proceed_with_conditions");
+    expect(report.assessment.summary).toMatch(/FAILED independent hash re-derivation/);
+    expect(report.assessment.summary).toMatch(/not fully verified/);
+    expect(report.assessment.nextActions.some((a) => /Investigate the verification failure/.test(a.title))).toBe(true);
+    expect(report.assessment.basis.some((b) => b.includes("failed independent re-derivation"))).toBe(true);
+  });
+
+  it("two providers answering the holder count keep both answers and record the six-unit difference — no average, no silent pick", () => {
+    const inv = deskInv("listing_underwriter", luSubject());
+    inv.evidence.push(
+      holderEvidence("index-reconstitution-desk:holders", "Holder count", 9641462, "e-h1"),
+      holderEvidence("chainforensics:holder_concentration", "Holder concentration", 9641456, "e-h2"),
+    );
+    const report = buildDeskReport(inv, { mode: "intel", spendUsdCents: 9 });
+    const d = report.discrepancies.find((x) => x.kind === "provider_disagreement");
+    expect(d).toBeDefined();
+    expect(d?.material).toBe(false);
+    // Both answers appear by value and by evidence id; neither is averaged
+    // away and neither replaces the other.
+    expect(d?.detail).toContain("9,641,462");
+    expect(d?.detail).toContain("9,641,456");
+    expect(d?.detail).toMatch(/neither is averaged away and neither is silently preferred/);
+    expect(d?.evidenceIds).toEqual(["e-h1", "e-h2"]);
+    expect(report.counts.verified).toBe(2);
+    // A within-tolerance measurement difference does not degrade the verdict
+    // on its own.
+    expect(report.assessment.verdict).toBe("proceed_on_record");
+  });
+
+  it("a material provider disagreement is a contradiction the assessment must hold the file on", () => {
+    const inv = deskInv("listing_underwriter", luSubject());
+    inv.evidence.push(
+      holderEvidence("index-reconstitution-desk:holders", "Holder count", 1000000, "e-m1"),
+      holderEvidence("chainforensics:holder_concentration", "Holder concentration", 1600000, "e-m2"),
+    );
+    const report = buildDeskReport(inv, { mode: "intel", spendUsdCents: 9 });
+    const d = report.discrepancies.find((x) => x.kind === "provider_disagreement");
+    expect(d?.material).toBe(true);
+    expect(d?.title).toMatch(/disagree materially on holders count/);
+    expect(report.assessment.verdict).toBe("proceed_with_conditions");
+    expect(report.assessment.nextActions.some((a) => /material provider disagreement/.test(a.title))).toBe(true);
+  });
+
+  it("a historical record whose own verification note says it never re-derived is reclassified, not rewritten", () => {
+    const inv = deskInv("listing_underwriter", luSubject());
+    const now = new Date().toISOString();
+    inv.evidence.push(
+      {
+        id: "old-failed",
+        provenance: "verified",
+        class: "node_verified",
+        capability: "index-reconstitution-desk:filings",
+        label: "Regulatory filings",
+        title: "Regulatory filings",
+        detail: `paid answer is recorded; ${MISMATCH_NOTE}`,
+        facts: { filing_count: 42 },
+        source: { kind: "telegraph", ref: "0xfile", label: "index-reconstitution-desk", observedAt: now },
+        signalHash: "0xfile",
+        receiptHash: "0xfiler",
+        costUsdCents: 1,
+      },
+      {
+        id: "old-asserted",
+        provenance: "verified",
+        class: "node_verified",
+        capability: "index-reconstitution-desk:registry",
+        label: "Issuer registry record",
+        title: "Issuer registry record",
+        detail: `paid answer is recorded; ${NODE_ASSERTED_NOTE}`,
+        facts: { legal_name: "Circle Internet Group, Inc." },
+        source: { kind: "telegraph", ref: "0xreg", label: "index-reconstitution-desk", observedAt: now },
+        signalHash: "0xreg",
+        receiptHash: "0xregr",
+        costUsdCents: 1,
+      },
+      holderEvidence("index-reconstitution-desk:holders", "Holder count", 9641462, "old-verified"),
+    );
+    expect(reclassifyVerificationFailures(inv)).toBe(2);
+
+    const failedRec = inv.evidence.find((e) => e.id === "old-failed");
+    expect(failedRec?.provenance).toBe("verification_failed");
+    expect(failedRec?.class).toBe("verification_failed");
+    // The record itself is preserved: signal, receipt, facts and detail stay.
+    expect(failedRec?.signalHash).toBe("0xfile");
+    expect(failedRec?.receiptHash).toBe("0xfiler");
+    expect(failedRec?.facts.filing_count).toBe(42);
+    expect(failedRec?.detail).toMatch(/which does not match/);
+    expect(failedRec?.detail).toMatch(/Reclassified from verified on review/);
+    expect(failedRec?.title).toBe("Regulatory filings · verification failed");
+
+    const asserted = inv.evidence.find((e) => e.id === "old-asserted");
+    expect(asserted?.provenance).toBe("unverified");
+    expect(asserted?.class).toBe("node_asserted");
+
+    // A genuinely verified record is untouched.
+    expect(inv.evidence.find((e) => e.id === "old-verified")?.provenance).toBe("verified");
+    // The correction is audited, and a second pass changes nothing.
+    expect(inv.audit.filter((a) => a.action === "desk_evidence_reclassified")).toHaveLength(2);
+    expect(reclassifyVerificationFailures(inv)).toBe(0);
+  });
+
+  it("the walkthrough replays the stored ledger: inputs, approval, asks, receipts, verification, disagreements and assessment", async () => {
+    // Mirrors the recorded shape of the first real paid listing run
+    // (NS-LU-A803A739): a $0.12 ceiling with $0.09 spent across several asks,
+    // holder answers from two providers six apart, one regulatory-filings
+    // answer that failed the independent re-derivation.
+    const inv = deskInv("listing_underwriter", luSubject());
+    const task = runWithDims("task-lu-walkthrough", [
+      {
+        dimension: "index-reconstitution-desk:holders",
+        label: "Holder count",
+        status: "verified",
+        detail: "verified against the node signal; Independent re-derivation matches.",
+        intent: "TOKEN_HOLDER_COUNT",
+        provider: "index-reconstitution-desk",
+        priceUsdCents: 1,
+        signalHash: "0xhold",
+        receiptHash: "0xholdr",
+        values: { token: "USDC", chain: "ethereum", holders_count: 9641462 },
+        missingFields: [],
+        viaRouterFallback: false,
+      },
+      {
+        dimension: "chainforensics:holder_concentration",
+        label: "Holder concentration",
+        status: "verified",
+        detail: "verified against the node signal; Independent re-derivation matches.",
+        intent: "HOLDER_CONCENTRATION",
+        provider: "chainforensics",
+        priceUsdCents: 1,
+        signalHash: "0xconc",
+        receiptHash: "0xconcr",
+        values: { token: "USDC", chain: "ethereum", holders_count: 9641456, top10_pct: 31.2 },
+        missingFields: [],
+        viaRouterFallback: false,
+      },
+      {
+        dimension: "index-reconstitution-desk:filings",
+        label: "Regulatory filings",
+        status: "recorded",
+        detail: `paid answer is recorded; ${MISMATCH_NOTE}`,
+        intent: "REGULATORY_FILINGS",
+        provider: "index-reconstitution-desk",
+        priceUsdCents: 1,
+        signalHash: "0xfile",
+        receiptHash: "0xfiler",
+        values: { company: "Circle Internet Group, Inc.", filing_count: 42 },
+        missingFields: [],
+        committed: { company: "Circle Internet Group, Inc.", filing_count: 42 },
+        verificationReason: "hash_mismatch",
+        viaRouterFallback: false,
+      },
+      {
+        dimension: "index-reconstitution-desk:registry",
+        label: "Issuer registry record",
+        status: "recorded",
+        detail: `paid answer is recorded; ${NODE_ASSERTED_NOTE}`,
+        intent: "CORPORATE_REGISTRY_LOOKUP_GENERAL",
+        provider: "index-reconstitution-desk",
+        priceUsdCents: 1,
+        signalHash: "0xreg",
+        receiptHash: "0xregr",
+        values: { legal_name: "Circle Internet Group, Inc.", active: true },
+        missingFields: [],
+        committed: { legal_name: "Circle Internet Group, Inc.", active: true },
+        verificationReason: "node_asserted",
+        viaRouterFallback: false,
+      },
+      {
+        dimension: "sanctionsdesk:name_screening",
+        label: "Issuer sanctions screening",
+        status: "verified",
+        detail: "verified against the node signal; Independent re-derivation matches.",
+        intent: "NAME_SCREENING",
+        provider: "zk-sanctions",
+        priceUsdCents: 1,
+        signalHash: "0xscreen",
+        receiptHash: "0xscreenr",
+        values: { name: "Circle Internet Group, Inc.", matched: false },
+        missingFields: [],
+        viaRouterFallback: false,
+      },
+    ]);
+    task.spend = {
+      limitUsdCents: 12,
+      spentUsdCents: 5,
+      entries: [
+        { ts: 1, description: "NS-LU: Holder count via Telegraph", amountUsdCents: 1, source: "telegraph", receiptHash: "0xholdr", signalHash: "0xhold" },
+        { ts: 2, description: "NS-LU: Holder concentration via Telegraph", amountUsdCents: 1, source: "telegraph", receiptHash: "0xconcr", signalHash: "0xconc" },
+        { ts: 3, description: "NS-LU: Regulatory filings via Telegraph", amountUsdCents: 1, source: "telegraph", receiptHash: "0xfiler", signalHash: "0xfile" },
+        { ts: 4, description: "NS-LU: Issuer registry via Telegraph", amountUsdCents: 1, source: "telegraph", receiptHash: "0xregr", signalHash: "0xreg" },
+        { ts: 5, description: "NS-LU: Issuer sanctions via Telegraph", amountUsdCents: 1, source: "telegraph", receiptHash: "0xscreenr", signalHash: "0xscreen" },
+      ],
+    };
+    task.events.push({
+      id: "ev-approve",
+      ts: 1,
+      type: "step_succeeded",
+      message: "Operator approved the priced plan: 5 dimension(s) for $0.05 inside the $0.12 ceiling",
+    });
+    await saveTask(task);
+    inv.runs.push({ taskId: task.id, mode: "intel", createdAt: new Date().toISOString(), taskState: "completed", ceilingUsdCents: 12, absorbed: false });
+    await syncDeskInvestigation(inv);
+    const report = buildDeskReport(inv, { mode: "intel", spendUsdCents: 5 });
+    inv.report = report;
+
+    const wt = buildDeskWalkthrough(inv, [task]);
+    expect(wt.reference).toBe(inv.reference);
+    expect(wt.typeLabel).toBe("Listing Underwriter");
+    // 1 — inputs exactly as entered, with the named unsupported requirements.
+    expect(wt.steps.inputs.fields.find((f) => f.name === "tokenSymbol")?.value).toBe("USDC");
+    expect(wt.steps.inputs.fields.find((f) => f.name === "declaredSupply")?.value).toBe("1000000000");
+    expect(wt.steps.inputs.unsupported.length).toBe(inv.unsupported.length);
+    // 2 — the budget and the human approval.
+    expect(wt.steps.budgetApproval[0]).toMatchObject({ mode: "intel", ceilingUsdCents: 12, spentUsdCents: 5, taskState: "completed", approved: true });
+    expect(wt.steps.budgetApproval[0].approvalDetail).toMatch(/approved the priced plan/);
+    // 3 — the actual paid asks, each with provider, price and signal hash.
+    expect(wt.steps.paidRequests).toHaveLength(5);
+    expect(wt.steps.paidRequests.every((r) => r.signalHash && r.receiptHash)).toBe(true);
+    // 4 — provider responses keep the failed record's facts for investigation.
+    const failedAnswer = wt.steps.providerResponses.find((r) => r.capability === "index-reconstitution-desk:filings");
+    expect(failedAnswer?.verification).toContain("FAILED");
+    expect(failedAnswer?.verificationReason).toBe("hash_mismatch");
+    expect(failedAnswer?.facts.filing_count).toBe(42);
+    // 5 — verification outcomes: three re-derived, one failed, one asserted.
+    expect(wt.steps.verification.filter((v) => v.outcome === "independently_verified")).toHaveLength(3);
+    expect(wt.steps.verification.some((v) => v.outcome === "verification_failed" && v.capability === "index-reconstitution-desk:filings")).toBe(true);
+    expect(wt.steps.verification.some((v) => v.outcome === "node_asserted")).toBe(true);
+    // 6 — the six-holder provider difference is recorded as a measurement
+    // difference with both evidence ids; nothing was averaged.
+    const holderDiff = wt.steps.discrepanciesAndGaps.discrepancies.find((d) => d.title.includes("holders count"));
+    expect(holderDiff?.material).toBe(false);
+    expect(holderDiff?.evidenceIds).toHaveLength(2);
+    expect(wt.steps.discrepanciesAndGaps.unsupported.length).toBe(inv.unsupported.length);
+    // 7 — the assessment, verbatim from the rebuilt report.
+    expect(wt.steps.assessment?.counts.verification_failed).toBe(1);
+    expect(wt.steps.assessment?.verdictLabel).toBe(DESK_VERDICT_LABEL[report.assessment.verdict]);
+    expect(wt.steps.assessment?.summary).toBe(report.assessment.summary);
   });
 });
 

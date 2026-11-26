@@ -273,14 +273,64 @@ function inputGapEvidence(inv: DeskInvestigation, gaps: Array<{ key: string; lab
 }
 
 /**
+ * Repair evidence that an older pipeline classified as verified but whose own
+ * retained verification note says it never independently re-derived. The
+ * records are NOT rewritten or deleted — signal, receipt, facts and payload
+ * stay untouched; only the provenance verdict moves to the state the record's
+ * own verification note already declares, and the correction is audited:
+ *
+ *  - hash mismatch ("re-deriving the hash over the recorded payload gave …,
+ *    which does not match")  → verification_failed;
+ *  - node-asserted / unconfirmed ("the payload could not be re-serialized…",
+ *    "neither the node's verified flag nor an independent re-derivation
+ *    confirms it")          → unverified, class node_asserted.
+ */
+const HASH_MISMATCH_NOTE = /re-deriving the hash over the recorded payload gave .+?, which does not match/i;
+const NODE_ASSERTED_NOTE = /payload could not be re-serialized here for an independent re-derivation|neither the node's verified flag nor an independent re-derivation confirms it/i;
+
+export function reclassifyVerificationFailures(inv: DeskInvestigation): number {
+  let changed = 0;
+  for (const e of inv.evidence) {
+    if (e.provenance !== "verified" || e.class !== "node_verified") continue;
+    if (HASH_MISMATCH_NOTE.test(e.detail)) {
+      e.provenance = "verification_failed";
+      e.class = "verification_failed";
+      e.verificationReason = "hash_mismatch";
+      e.title = `${e.label} · verification failed`;
+      e.detail = `${e.detail} Reclassified from verified on review: the recorded payload does not re-derive the signal hash, so the record is retained as a verification failure — signal, receipt and facts preserved for investigation, never presented as a fact.`;
+      auditDesk(inv, "desk", "desk_evidence_reclassified", `${e.label} (${e.capability}): failed the independent hash re-derivation; reclassified verified → verification_failed.`);
+      changed += 1;
+    } else if (NODE_ASSERTED_NOTE.test(e.detail)) {
+      e.provenance = "unverified";
+      e.class = "node_asserted";
+      e.verificationReason = /could not be re-serialized/i.test(e.detail) ? "node_asserted" : "no_confirmation";
+      e.title = `${e.label} · node-asserted, not independently verified`;
+      e.detail = `${e.detail} Reclassified from verified on review: the answer is the node's word without an independent re-derivation, not an established fact.`;
+      auditDesk(inv, "desk", "desk_evidence_reclassified", `${e.label} (${e.capability}): node-asserted only; reclassified verified → unverified (node_asserted).`);
+      changed += 1;
+    }
+  }
+  return changed;
+}
+
+/**
  * Pull completed runs into the evidence ledger. Idempotent per run: a run is
- * absorbed once, and an answer is provenance-verified only when its
- * committed payload re-derived against the node signal (or was recorded by
- * the node with a retained signal).
+ * absorbed once, and an answer is provenance-verified ONLY when its committed
+ * payload independently re-derived against the node signal (keccak match). A
+ * recorded signal whose payload does NOT re-derive is a verification failure
+ * with its own provenance — the node's verified flag never overrides it.
  */
 export async function syncDeskInvestigation(inv: DeskInvestigation): Promise<{ added: number; notes: string[] }> {
   const notes: string[] = [];
   let added = 0;
+
+  // Repair any historical misclassification first, so a file recorded before
+  // the verification-failure provenance existed still reports honestly.
+  const reclassified = reclassifyVerificationFailures(inv);
+  if (reclassified > 0) {
+    notes.push(`Reclassified ${reclassified} record(s) whose verification note says they never independently re-derived.`);
+    added += reclassified;
+  }
 
   const plan = planDeskCapabilities(inv);
   if (inv.evidence.length === 0) {
@@ -333,6 +383,72 @@ export async function syncDeskInvestigation(inv: DeskInvestigation): Promise<{ a
       if (dim.status === "verified" || dim.status === "recorded") {
         if (!dim.signalHash) {
           notes.push(`${dim.label}: ${dim.status} without a signal hash, so it is not admissible.`);
+          continue;
+        }
+        // A recorded answer is NOT a verified one: either its payload failed
+        // the independent hash re-derivation (a verification failure, even
+        // when the node's own flag asserts true), or it is the node's word
+        // that could not be independently re-derived. Only a re-derived match
+        // absorbs as a verified fact.
+        if (dim.status === "recorded" && dim.verificationReason === "hash_mismatch") {
+          inv.evidence.push({
+            id: `${run.taskId}:${key}:verification-failed`,
+            provenance: "verification_failed",
+            class: "verification_failed",
+            capability: key,
+            label: dim.label,
+            title: `${dim.label} · verification failed`,
+            detail: `${dim.detail}${dim.missingFields?.length ? ` Missing fields: ${dim.missingFields.join(", ")}.` : ""}`,
+            facts: factsFromValues(dim.values),
+            source: {
+              kind: "telegraph",
+              ref: dim.signalHash,
+              label: `${dim.provider ?? "router"} · ${dim.intent ?? "intent"}`,
+              observedAt: dim.verifiedAt ?? report.preparedAt,
+            },
+            taskId: run.taskId,
+            signalHash: dim.signalHash,
+            receiptHash: dim.receiptHash,
+            minerId: dim.provider,
+            costUsdCents: dim.priceUsdCents,
+            missingFields: dim.missingFields,
+            viaRouterFallback: dim.viaRouterFallback,
+            committedPayload: dim.committed ?? null,
+            verificationReason: "hash_mismatch",
+          });
+          added += 1;
+          continue;
+        }
+        if (dim.status === "recorded") {
+          // node_asserted / no_confirmation: the signal exists, the answer is
+          // the network's word — retained verbatim with its payload, never a
+          // verified fact.
+          inv.evidence.push({
+            id: `${run.taskId}:${key}:node-asserted`,
+            provenance: "unverified",
+            class: "node_asserted",
+            capability: key,
+            label: dim.label,
+            title: `${dim.label} · node-asserted, not independently verified`,
+            detail: `${dim.detail}${dim.missingFields?.length ? ` Missing fields: ${dim.missingFields.join(", ")}.` : ""}`,
+            facts: factsFromValues(dim.values),
+            source: {
+              kind: "telegraph",
+              ref: dim.signalHash,
+              label: `${dim.provider ?? "router"} · ${dim.intent ?? "intent"}`,
+              observedAt: dim.verifiedAt ?? report.preparedAt,
+            },
+            taskId: run.taskId,
+            signalHash: dim.signalHash,
+            receiptHash: dim.receiptHash,
+            minerId: dim.provider,
+            costUsdCents: dim.priceUsdCents,
+            missingFields: dim.missingFields,
+            viaRouterFallback: dim.viaRouterFallback,
+            committedPayload: dim.committed ?? null,
+            verificationReason: dim.verificationReason ?? "no_confirmation",
+          });
+          added += 1;
           continue;
         }
         inv.evidence.push({
@@ -401,7 +517,9 @@ export async function syncDeskInvestigation(inv: DeskInvestigation): Promise<{ a
       added += 1;
     }
     run.absorbed = true;
-    notes.push(`Absorbed ${report.counts.verified} verified and ${report.counts.routable_unverified} probe-only dimension(s) from run ${run.taskId}.`);
+    notes.push(
+      `Absorbed ${report.counts.verified} verified, ${report.counts.recorded} recorded (verification failure or node-asserted, never a fact) and ${report.counts.routable_unverified} probe-only dimension(s) from run ${run.taskId}.`,
+    );
   }
 
   return { added, notes };
@@ -696,6 +814,23 @@ function buildFindings(inv: DeskInvestigation): DeskFinding[] {
       });
     }
   }
+  // A failed independent re-derivation is a finding in its own right: the
+  // answer was paid for, the node may assert it verified, but the recorded
+  // payload does not re-derive the signal hash — so it is unresolved
+  // evidence, surfaced as such, never rendered as a fact.
+  for (const e of inv.evidence) {
+    if (e.provenance !== "verification_failed") continue;
+    findings.push({
+      id: `finding:${i++}`,
+      severity: "material",
+      title: `${e.label}: the paid answer failed independent verification`,
+      detail: e.detail,
+      significance:
+        "The recorded payload does not re-derive the committed signal hash; the node's own verified flag does not override an independent mismatch. The record is retained with its signal, receipt and full payload for investigation, and neighbouring answers stay provisional until this is explained.",
+      evidenceIds: [e.id],
+      provenance: "verification_failed",
+    });
+  }
   const order: Record<DeskSeverity, number> = { critical: 0, material: 1, minor: 2, info: 3 };
   return findings.sort((a, b) => order[a.severity] - order[b.severity]);
 }
@@ -856,10 +991,62 @@ function buildDiscrepancies(inv: DeskInvestigation): DeskDiscrepancy[] {
     }
   }
 
+  // Cross-provider numeric disagreement: two different capabilities answered
+  // the same semantic field with different numbers. Both answers stay on the
+  // ledger with their own provenance; the difference is named and classified
+  // as a harmless measurement difference or a material contradiction. Nothing
+  // is averaged and no provider is silently preferred.
+  const recordsByFact = new Map<string, DeskEvidence[]>();
+  for (const e of inv.evidence) {
+    if (e.provenance !== "verified") continue;
+    for (const [k, v] of Object.entries(e.facts)) {
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      const list = recordsByFact.get(k) ?? [];
+      list.push(e);
+      recordsByFact.set(k, list);
+    }
+  }
+  for (const [factKey, records] of recordsByFact) {
+    const byCapability = new Map<string, DeskEvidence>();
+    for (const e of records) if (!byCapability.has(e.capability)) byCapability.set(e.capability, e);
+    if (byCapability.size < 2) continue;
+    const entries = [...byCapability.entries()];
+    let min = entries[0];
+    let max = entries[0];
+    for (const entry of entries.slice(1)) {
+      if (Number(entry[1].facts[factKey]) < Number(min[1].facts[factKey])) min = entry;
+      if (Number(entry[1].facts[factKey]) > Number(max[1].facts[factKey])) max = entry;
+    }
+    const low = Number(min[1].facts[factKey]);
+    const high = Number(max[1].facts[factKey]);
+    const spread = relDiff(low, high);
+    if (spread <= 0) continue;
+    const material = spread > 0.005;
+    const field = factKey.replace(/_/g, " ");
+    const fmt = (n: number): string => n.toLocaleString("en-US");
+    out.push({
+      id: `disc:${i++}`,
+      kind: "provider_disagreement",
+      material,
+      title: material
+        ? `Providers disagree materially on ${field} (${fmt(low)} vs ${fmt(high)})`
+        : `Providers differ slightly on ${field} (${fmt(low)} vs ${fmt(high)})`,
+      detail: `${min[1].label} (${min[0]}) reports ${fmt(low)}; ${max[1].label} (${max[0]}) reports ${fmt(high)}. Both answers are independently verified against their own signals; both are retained with their provenance — neither is averaged away and neither is silently preferred.${
+        material
+          ? " The divergence exceeds the 0.5% tolerance the desk treats as measurement difference, so this is a material contradiction: resolve it before either value is relied on."
+          : " The divergence is within the 0.5% tolerance the desk treats as a measurement difference (providers observe at different moments and from different data) — recorded for transparency, not treated as an adverse signal."
+      }`,
+      evidenceIds: entries.map(([, e]) => e.id),
+    });
+  }
+
   return out;
 }
 
 function sectionProvenance(evidence: DeskEvidence[]): ProvenanceClass {
+  // A verification failure is the strongest caveat a section can carry: the
+  // chip reads "Verification failed" even when verified records outnumber it.
+  if (evidence.some((e) => e.provenance === "verification_failed")) return "verification_failed";
   if (evidence.some((e) => e.provenance === "verified")) return "verified";
   if (evidence.some((e) => e.provenance === "unverified")) return "unverified";
   return "missing";
@@ -871,12 +1058,13 @@ function buildSections(inv: DeskInvestigation): DeskReportSection[] {
   for (const section of workflow.sections) {
     const relevant = inv.evidence.filter((e) => section.capabilities.includes(e.capability));
     const verified = relevant.filter((e) => e.provenance === "verified").length;
+    const failed = relevant.filter((e) => e.provenance === "verification_failed").length;
     const unverified = relevant.filter((e) => e.provenance === "unverified").length;
     const missing = relevant.filter((e) => e.provenance === "missing").length;
     const summary =
       relevant.length === 0
         ? "No capability from this section was planned or asked."
-        : `${relevant.length} record(s): ${verified} verified, ${unverified} unverified, ${missing} missing.`;
+        : `${relevant.length} record(s): ${verified} verified, ${failed} failed verification, ${unverified} unverified, ${missing} missing.`;
     sections.push({
       id: section.id,
       title: section.title,
@@ -890,7 +1078,11 @@ function buildSections(inv: DeskInvestigation): DeskReportSection[] {
 }
 
 function confidenceOf(inv: DeskInvestigation, verified: number, askedVerifiedOrUnverified: number): DeskConfidence {
-  if (verified > 0 && verified === askedVerifiedOrUnverified) return "signal_verified";
+  // A verification failure caps confidence: a file whose recorded payload
+  // failed the independent hash re-derivation is never "signal verified",
+  // whatever else checked out.
+  const failed = inv.evidence.some((e) => e.provenance === "verification_failed");
+  if (verified > 0 && verified === askedVerifiedOrUnverified && !failed) return "signal_verified";
   if (verified > 0) return "partially_verified";
   const routable = inv.evidence.filter((e) => e.provenance === "unverified" && e.class === "probe_verified").length;
   if (routable > 0) return "route_verified_only";
@@ -942,7 +1134,12 @@ function buildAssessment(
 ): DeskAssessment {
   const criticals = parts.findings.filter((f) => f.severity === "critical");
   const materials = parts.findings.filter((f) => f.severity === "material");
-  const conflicts = parts.discrepancies.filter((d) => d.kind === "field_conflict");
+  // Conflicts the assessment must hold the file on: direct field conflicts and
+  // MATERIAL provider disagreements. A within-tolerance measurement difference
+  // is recorded for transparency but does not degrade the verdict.
+  const conflicts = parts.discrepancies.filter((d) => d.kind === "field_conflict" || (d.kind === "provider_disagreement" && d.material === true));
+  const failedVerification = inv.evidence.filter((e) => e.provenance === "verification_failed");
+  const nodeAsserted = inv.evidence.filter((e) => e.class === "node_asserted");
   const verified = inv.evidence.filter((e) => e.provenance === "verified");
   const verifiedCapabilities = new Set(verified.map((e) => e.capability)).size;
   const inputGapCount = inv.evidence.filter((e) => e.id.startsWith("input-gap:")).length;
@@ -952,7 +1149,7 @@ function buildAssessment(
   const verdict: DeskVerdict =
     criticals.length > 0
       ? "hold_pending_review"
-      : materials.length > 0 || conflicts.length > 0
+      : materials.length > 0 || conflicts.length > 0 || (failedVerification.length > 0 && verified.length > 0)
         ? "proceed_with_conditions"
         : verified.length === 0
           ? "insufficient_verified_evidence"
@@ -973,6 +1170,16 @@ function buildAssessment(
   } else {
     summaryParts.push(`This is a route-only pre-flight: ${parts.counts.unverified} route(s) were priced and schema-checked, no answer was purchased, and nothing here is established fact.`);
   }
+  // Verification failures are stated in the assessment itself, never only in
+  // a footnote: a file with a failed re-derivation is never fully verified.
+  if (failedVerification.length > 0) {
+    summaryParts.push(
+      `${failedVerification.length} paid answer(s) FAILED independent hash re-derivation — retained with signal, receipt and payload for investigation and excluded from the facts${verified.length > 0 ? "; the verified records above stand on their own re-derived signals" : ""}. This file is therefore not fully verified.`,
+    );
+  }
+  if (nodeAsserted.length > 0) {
+    summaryParts.push(`${nodeAsserted.length} answer(s) rest on the node's assertion only, without an independent re-derivation.`);
+  }
   if (criticals.length > 0) {
     summaryParts.push(`Decisive adverse signal(s): ${criticals.map((f) => f.title.toLowerCase()).join("; ")}.`);
   } else if (materials.length > 0) {
@@ -985,6 +1192,7 @@ function buildAssessment(
   if (inv.unsupported.length > 0) cannotSpeakTo.push(`${inv.unsupported.length} requirement(s) unsupported on the network (${inv.unsupported.map((g) => g.label).join(", ")})`);
   if (inputGapCount > 0) cannotSpeakTo.push(`${inputGapCount} capability(ies) not asked for lack of inputs`);
   if (declaredCount > 0) cannotSpeakTo.push(`${declaredCount} declared input(s) never verified`);
+  if (failedVerification.length > 0) cannotSpeakTo.push(`${failedVerification.length} paid answer(s) excluded as verification failures`);
   if (parts.counts.unverified > 0) cannotSpeakTo.push(`${parts.counts.unverified} unverified record(s)`);
   if (cannotSpeakTo.length > 0) {
     summaryParts.push(`The file cannot speak to: ${cannotSpeakTo.join("; ")}.`);
@@ -1000,6 +1208,9 @@ function buildAssessment(
   }
   basis.push(...cleanCheckLines(inv));
   if (conflicts.length > 0) basis.push(`${conflicts.length} unresolved conflict(s) between sources — each names the evidence on both sides.`);
+  if (failedVerification.length > 0) {
+    basis.push(`${failedVerification.length} paid answer(s) failed independent re-derivation — excluded from the facts, retained for investigation (${failedVerification.map((e) => e.id).join(", ")}).`);
+  }
   if (inv.unsupported.length > 0) basis.push(`Unsupported on the network, named not approximated: ${inv.unsupported.map((g) => g.label).join(", ")}.`);
   if (inputGapCount > 0) basis.push(`${inputGapCount} capability(ies) were never asked — their required inputs were not supplied.`);
   if (declaredCount > 0) basis.push(`${declaredCount} declared input(s) come from the guided form and are never verified by this workflow.`);
@@ -1067,6 +1278,21 @@ function buildAssessment(
       basis: conflicts.flatMap((d) => d.evidenceIds).slice(0, 8),
     });
   }
+  const materialDisagreements = parts.discrepancies.filter((d) => d.kind === "provider_disagreement" && d.material === true);
+  if (materialDisagreements.length > 0) {
+    nextActions.push({
+      title: `Resolve the ${materialDisagreements.length} material provider disagreement(s)`,
+      detail: "Two independently verified providers answered the same question with materially different values. Both answers are retained; neither was averaged or preferred. Determine the authoritative source per field, or re-ask, before the value is relied on.",
+      basis: materialDisagreements.flatMap((d) => d.evidenceIds).slice(0, 8),
+    });
+  }
+  if (failedVerification.length > 0) {
+    nextActions.push({
+      title: "Investigate the verification failure(s) before relying on this file",
+      detail: "A recorded payload does not re-derive its committed signal hash. Read the retained signal, receipt and full payload; if the node's record is corrupt or was amended, re-ask the capability. Until resolved, the neighbouring answers stay provisional.",
+      basis: failedVerification.map((e) => e.id).slice(0, 8),
+    });
+  }
   const inputGaps = planDeskCapabilities(inv).inputGaps;
   for (const gap of inputGaps.slice(0, 6)) {
     nextActions.push({
@@ -1110,7 +1336,9 @@ export function buildDeskReport(inv: DeskInvestigation, opts: { mode: "free" | "
   const sections = buildSections(inv);
   const counts = {
     verified: inv.evidence.filter((e) => e.provenance === "verified").length,
+    verification_failed: inv.evidence.filter((e) => e.provenance === "verification_failed").length,
     unverified: inv.evidence.filter((e) => e.provenance === "unverified").length,
+    node_asserted: inv.evidence.filter((e) => e.class === "node_asserted").length,
     missing: inv.evidence.filter((e) => e.provenance === "missing").length,
     analysis: 0,
   };
@@ -1122,6 +1350,12 @@ export function buildDeskReport(inv: DeskInvestigation, opts: { mode: "free" | "
       ? `${counts.verified} record(s) rest on paid, hash-committed answers; ${counts.unverified} remain unverified.`
       : `Free run: no answer was purchased. The ${counts.unverified} route-verified record(s) carry schema, routing and price only — they are not findings.`,
   );
+  if (counts.verification_failed > 0) {
+    limitations.push(`${counts.verification_failed} paid answer(s) FAILED the independent hash re-derivation and are retained as verification failures — never presented as facts.`);
+  }
+  if (counts.node_asserted > 0) {
+    limitations.push(`${counts.node_asserted} answer(s) are the node's assertion only — recorded with signal and payload, not independently re-derived.`);
+  }
   if (inv.unsupported.length > 0) {
     limitations.push(
       `${inv.unsupported.length} requirement(s) are unsupported on the network and are named, not approximated: ${inv.unsupported.map((g) => g.label).join(", ")}.`,
@@ -1163,15 +1397,19 @@ export function buildDeskReport(inv: DeskInvestigation, opts: { mode: "free" | "
     outstandingQuestions.push("No run has been executed yet — start with the free pre-flight.");
   }
 
-  const verifiedAsked = paid ? counts.verified + inv.evidence.filter((e) => e.class === "paid_unverified").length : 0;
+  const verifiedAsked = paid
+    ? counts.verified + inv.evidence.filter((e) => e.class === "paid_unverified" || e.class === "node_asserted").length
+    : 0;
   const confidence = confidenceOf(inv, counts.verified, verifiedAsked);
   const spend = opts.spendUsdCents ?? 0;
   const headline =
-    counts.verified > 0
-      ? `${counts.verified} verified record(s), ${counts.missing} named missing, $${(spend / 100).toFixed(2)} spent — confidence ${confidence.replace("_", " ")}.`
-      : paid
-        ? `No verified answer in this run. ${counts.unverified} unverified, ${counts.missing} missing — nothing is presented as data.`
-        : `Route-verified only: ${counts.unverified} route(s) priced and schema-checked; no answer purchased and none presented as data.`;
+    counts.verification_failed > 0
+      ? `${counts.verified} verified record(s) and ${counts.verification_failed} verification failure(s), ${counts.missing} named missing, $${(spend / 100).toFixed(2)} spent — confidence ${confidence.replace("_", " ")}.`
+      : counts.verified > 0
+        ? `${counts.verified} verified record(s), ${counts.missing} named missing, $${(spend / 100).toFixed(2)} spent — confidence ${confidence.replace("_", " ")}.`
+        : paid
+          ? `No verified answer in this run. ${counts.unverified} unverified, ${counts.missing} missing — nothing is presented as data.`
+          : `Route-verified only: ${counts.unverified} route(s) priced and schema-checked; no answer purchased and none presented as data.`;
 
   const assessment = buildAssessment(inv, { findings, discrepancies, counts, mode: opts.mode, routableOffers: opts.routableOffers });
 
@@ -1223,6 +1461,7 @@ export async function reportDeskInvestigation(inv: DeskInvestigation, mode: "fre
       findings: report.findings.length,
       discrepancies: report.discrepancies.length,
       verified: report.counts.verified,
+      verification_failed: report.counts.verification_failed,
       unverified: report.counts.unverified,
       missing: report.counts.missing,
       confidence: report.confidence,
@@ -1236,4 +1475,18 @@ export async function reportDeskInvestigation(inv: DeskInvestigation, mode: "fre
   auditDesk(inv, "desk", "desk_report_built", report.headline);
   await saveDeskInvestigation(inv);
   return { added: sync.added, notes: sync.notes, report };
+}
+
+/**
+ * Read-time integrity repair for files recorded by an older pipeline: evidence
+ * whose own retained verification note says it never independently re-derived
+ * is reclassified (nothing deleted, no hash or fact touched), the report is
+ * rebuilt from the corrected ledger and the file is persisted. One-shot: on a
+ * clean file this is a no-op that writes nothing.
+ */
+export async function healDeskVerification(inv: DeskInvestigation): Promise<boolean> {
+  if (reclassifyVerificationFailures(inv) === 0) return false;
+  const mode = inv.runs.some((r) => r.mode === "intel") ? "intel" : "free";
+  await reportDeskInvestigation(inv, mode);
+  return true;
 }

@@ -357,6 +357,10 @@ export interface CommittedDimension {
   verifiedAt?: string;
   costUsdCents: number;
   verification: "verified" | "recorded" | "unverified";
+  /** Set only when verification === "recorded": why the answer is not
+   *  independently verified. "hash_mismatch" is a verification FAILURE — the
+   *  node's own flag must never override it. */
+  verificationReason?: "hash_mismatch" | "node_asserted" | "no_confirmation";
   verificationNote: string;
   /** Fields the committed answer carried among the dimension's expected fields. */
   values: Record<string, unknown>;
@@ -453,6 +457,7 @@ export async function executeApprovedDimension(input: ApprovedDimensionInput): P
     costUsdCents: priceUsdCents,
     verification:
       verification.kind === "verified" ? "verified" : verification.kind === "recorded" ? "recorded" : "unverified",
+    ...(verification.kind === "recorded" && verification.reason ? { verificationReason: verification.reason } : {}),
     verificationNote: verification.kind === "unverified" ? verification.detail : verification.note,
     values,
     missingFields,
@@ -502,8 +507,14 @@ export interface CapabilityReport {
     verifiedAt?: string;
     values?: Record<string, unknown>;
     missingFields?: string[];
+    /** The full committed response, carried through so a failed re-derivation
+     *  keeps its payload for investigation. */
+    committed?: Record<string, unknown> | null;
+    /** Why a recorded answer is not independently verified (see
+     *  CommittedDimension.verificationReason). */
+    verificationReason?: "hash_mismatch" | "node_asserted" | "no_confirmation";
     /** True when this answer was served by the router's fallback ranking
-     * rather than the Mind's pinned provider. */
+     *  rather than the Mind's pinned provider. */
     viaRouterFallback?: boolean;
   }>;
   missing: Array<{ dimension: string; reason: string }>;
@@ -553,6 +564,9 @@ export function buildCapabilityReport(input: {
       verifiedAt: done.verifiedAt,
       values: done.values,
       missingFields: done.missingFields,
+      committed: done.committed,
+      ...(done.verificationReason ? { verificationReason: done.verificationReason } : {}),
+      viaRouterFallback: done.viaRouterFallback,
     };
   });
 

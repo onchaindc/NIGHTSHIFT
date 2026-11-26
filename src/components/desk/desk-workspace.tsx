@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, CircleAlert, LoaderCircle } from "lucide-react";
 
 import type { TaskRecord } from "@/lib/engine/types";
 import type { DeskEvidence, DeskInvestigation } from "@/lib/desk/types";
+import type { DeskWalkthrough } from "@/lib/desk/walkthrough";
 import { DESK_TYPE_LABEL, DESK_VERDICT_LABEL } from "@/lib/desk/types";
 import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { vibrate } from "@/lib/haptics";
@@ -20,6 +21,7 @@ const TERMINAL = new Set(["completed", "failed", "rejected", "blocked"]);
 
 const PROVENANCE_CHIP: Record<string, { chip: string; word: string }> = {
   verified: { chip: "border-teal/30 bg-teal/5 text-teal", word: "Verified fact" },
+  verification_failed: { chip: "border-risk/40 bg-risk/5 text-risk", word: "Verification failed" },
   unverified: { chip: "border-amber/40 bg-amber-soft/40 text-amber-deep", word: "Unverified" },
   missing: { chip: "border-edge bg-panel-2 text-ink-faint", word: "Missing evidence" },
   analysis: { chip: "border-[--accent]/30 bg-[--accent]/5 text-[--accent]", word: "Desk analysis" },
@@ -46,6 +48,13 @@ const CONFIDENCE_WORD: Record<string, string> = {
   unverified: "Unverified",
 };
 
+const WALKTHROUGH_OUTCOME: Record<string, { word: string; chip: string }> = {
+  independently_verified: { word: "Independently verified", chip: "border-teal/30 bg-teal/5 text-teal" },
+  verification_failed: { word: "Verification failed", chip: "border-risk/40 bg-risk/5 text-risk" },
+  node_asserted: { word: "Node-asserted only", chip: "border-amber/40 bg-amber/10 text-amber" },
+  not_purchased: { word: "Not purchased", chip: "border-edge bg-panel-2 text-ink-faint" },
+};
+
 function money(cents: number | undefined): string {
   return cents === undefined ? "—" : `$${(cents / 100).toFixed(2)}`;
 }
@@ -70,13 +79,22 @@ function humanizeValue(v: unknown): string | null {
 
 function EvidenceCard({ e }: { e: DeskEvidence }) {
   const tone = PROVENANCE_CHIP[e.provenance] ?? PROVENANCE_CHIP.missing;
+  // A node-asserted answer is unverified for a specific reason the reader
+  // should see, not the generic unverified word.
+  const word = e.class === "node_asserted" ? "Node-asserted only" : tone.word;
+  const failed = e.provenance === "verification_failed";
   const facts = Object.entries(e.facts).filter(([, v]) => humanizeValue(v) !== null);
   return (
-    <li className="rounded-2xl border border-edge bg-panel p-4">
+    <li className={`rounded-2xl border bg-panel p-4 ${failed ? "border-risk/40" : "border-edge"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[13px] font-semibold text-ink">{e.title}</p>
-        <span className={`rounded-full border px-2.5 py-0.5 text-[10.5px] font-semibold tracking-wide ${tone.chip}`}>{tone.word}</span>
+        <span className={`rounded-full border px-2.5 py-0.5 text-[10.5px] font-semibold tracking-wide ${tone.chip}`}>{word}</span>
       </div>
+      {failed && (
+        <p className="mt-1.5 text-[11.5px] font-medium text-risk">
+          The recorded payload does not re-derive the committed signal hash — the node&apos;s verified flag does not override the mismatch. Retained here with signal, receipt and payload for investigation; never a fact.
+        </p>
+      )}
       <p className="mt-1.5 break-words text-[12px] leading-relaxed text-ink-soft">{e.detail}</p>
       {facts.length > 0 && (
         <dl className="mt-2.5 grid gap-x-4 gap-y-1 sm:grid-cols-2">
@@ -93,6 +111,7 @@ function EvidenceCard({ e }: { e: DeskEvidence }) {
         {e.source.kind === "telegraph" && <span>{e.source.label}</span>}
         {e.signalHash && <span className="font-mono">signal {shortHash(e.signalHash)}</span>}
         {e.receiptHash && <span className="font-mono">receipt {shortHash(e.receiptHash)}</span>}
+        {e.committedPayload && <span>payload retained ({Object.keys(e.committedPayload).length} field(s))</span>}
         {e.costUsdCents !== undefined && <span className="tabular">{money(e.costUsdCents)}</span>}
         {e.viaRouterFallback && <span className="text-amber">router fallback</span>}
         <span>{new Date(e.source.observedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
@@ -113,6 +132,8 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
   const [redacted, setRedacted] = useState(false);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [paidConfirmOpen, setPaidConfirmOpen] = useState(false);
+  const [walkthrough, setWalkthrough] = useState<DeskWalkthrough | null>(null);
+  const [walkthroughState, setWalkthroughState] = useState<"idle" | "loading" | "error">("idle");
   const prevTaskState = useRef<TaskRecord["state"] | null>(null);
   const syncedForRef = useRef<string | null>(null);
   const justFinishedRef = useRef(false);
@@ -149,6 +170,21 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
   useEffect(() => {
     if (session.mode !== "loading") void refresh();
   }, [session.mode, session.address, refresh]);
+
+  // The demonstration walkthrough is read back from the stored ledger on
+  // demand — nothing is re-run and no funds are spent.
+  const loadWalkthrough = useCallback(async () => {
+    setWalkthroughState("loading");
+    try {
+      const res = await fetch(`/api/desk/${investigationId}/walkthrough`, { cache: "no-store", signal: AbortSignal.timeout(65_000) });
+      const body = (await res.json().catch(() => ({}))) as { walkthrough?: DeskWalkthrough; error?: string };
+      if (!res.ok || !body.walkthrough) throw new Error(body.error ?? `status ${res.status}`);
+      setWalkthrough(body.walkthrough);
+      setWalkthroughState("idle");
+    } catch {
+      setWalkthroughState("error");
+    }
+  }, [investigationId]);
 
   const act = useCallback(
     async (key: string, run: () => Promise<Response>) => {
@@ -276,12 +312,14 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
 
   const counts = {
     verified: inv.evidence.filter((e) => e.provenance === "verified"),
+    verification_failed: inv.evidence.filter((e) => e.provenance === "verification_failed"),
     unverified: inv.evidence.filter((e) => e.provenance === "unverified"),
     missing: inv.evidence.filter((e) => e.provenance === "missing"),
     analysis: inv.evidence.filter((e) => e.provenance === "analysis"),
   };
   const grouped: Array<[string, DeskEvidence[]]> = [
     ["verified", counts.verified],
+    ["verification_failed", counts.verification_failed],
     ["unverified", counts.unverified],
     ["missing", counts.missing],
     ["analysis", counts.analysis],
@@ -484,7 +522,8 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
                 {inv.report.mode === "intel" ? "Paid run" : "Free pre-flight"} · prepared{" "}
                 {new Date(inv.report.preparedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} ·{" "}
                 <span className="tabular">
-                  {inv.report.counts.verified} verified · {inv.report.counts.unverified} unverified · {inv.report.counts.missing} missing ·{" "}
+                  {inv.report.counts.verified} verified · {inv.report.counts.unverified} unverified
+                  {inv.report.counts.verification_failed > 0 ? ` · ${inv.report.counts.verification_failed} verification failed` : ""} · {inv.report.counts.missing} missing ·{" "}
                   {inv.report.counts.analysis} analysis
                 </span>
               </p>
@@ -603,6 +642,29 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
                   </div>
                 );
               })()}
+
+              {/* Verification failures — every record whose paid answer failed
+                  the independent hash re-derivation, rendered in the spotlight
+                  with the same prominence as the verified facts but in the
+                  failure tone: a mismatch must be impossible to miss and can
+                  never read as an established fact. */}
+              {(() => {
+                const failedRecords = inv.evidence.filter((e) => e.provenance === "verification_failed");
+                if (failedRecords.length === 0) return null;
+                return (
+                  <div className="mt-3 border-t border-edge pt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[10.5px] font-medium uppercase tracking-[0.12em] text-risk">Verification failures — retained for investigation, never facts</p>
+                      <span className="rounded-full border border-risk/30 bg-risk/5 px-2 py-0.5 text-[10.5px] font-semibold text-risk tabular">{failedRecords.length}</span>
+                    </div>
+                    <ul className="mt-2 space-y-2">
+                      {failedRecords.map((e) => (
+                        <EvidenceCard key={e.id} e={e} />
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Secondary sections — present, counted, closed by default. */}
@@ -631,8 +693,15 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
                 ) : (
                   <ul className="space-y-2">
                     {inv.report.discrepancies.map((d) => (
-                      <li key={d.id} className="rounded-xl border border-amber/40 bg-amber/5 px-3.5 py-3">
-                        <p className="text-[12.5px] font-semibold text-ink">{d.title}</p>
+                      <li key={d.id} className={`rounded-xl border px-3.5 py-3 ${d.material ? "border-risk/40 bg-risk/5" : "border-amber/40 bg-amber/5"}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="min-w-0 text-[12.5px] font-semibold text-ink">{d.title}</p>
+                          {d.kind === "provider_disagreement" && (
+                            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${d.material ? "border-risk/40 bg-risk/5 text-risk" : "border-edge bg-panel-2 text-ink-faint"}`}>
+                              {d.material ? "material contradiction" : "measurement difference"}
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">{d.detail}</p>
                         <p className="mt-1.5 text-[10.5px] text-ink-faint">Evidence: {d.evidenceIds.join(", ")}</p>
                       </li>
@@ -682,6 +751,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
         <h2 className="x-label">How this was investigated — the activity trail</h2>
         <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-faint">
           <span className="tabular">{counts.verified.length} verified</span>
+          {counts.verification_failed.length > 0 && <span className="tabular text-risk">{counts.verification_failed.length} verification failed</span>}
           <span className="tabular">{counts.unverified.length} unverified</span>
           <span className="tabular">{counts.missing.length} missing</span>
           <span className="tabular">{counts.analysis.length} analysis</span>
@@ -701,7 +771,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
                   key={key}
                   title={`${PROVENANCE_CHIP[key]?.word ?? key} records`}
                   count={list.length}
-                  tone={key === "verified" ? "teal" : key === "unverified" ? "amber" : "neutral"}
+                  tone={key === "verified" ? "teal" : key === "verification_failed" ? "risk" : key === "unverified" ? "amber" : "neutral"}
                 >
                   <ul className="space-y-2">
                     {list.map((e) => (
@@ -737,9 +807,45 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
         </ReportDisclosure>
       </div>
 
+      {/* Demonstration walkthrough — the reproducible, ordered narrative of how
+          this file actually ran, read back from the stored ledger on demand.
+          Nothing is re-run and no funds are spent. */}
+      <section aria-label="Demonstration walkthrough" className="mt-6 sm:mt-8">
+        <ReportDisclosure title="Demonstration walkthrough — how this file actually ran" tone="teal">
+          {walkthrough ? (
+            <WalkthroughView w={walkthrough} />
+          ) : (
+            <div>
+              <p className="text-[12px] leading-relaxed text-ink-soft">
+                The ordered story of this investigation: the inputs as entered, the budget approval, the actual paid
+                Telegraph requests, the provider responses with their receipts, the independent verification outcomes
+                (failures named as such), the discrepancies and missing evidence, and the final assessment — all read
+                back from the recorded ledger. Nothing is re-run; nothing is spent.
+              </p>
+              <button
+                type="button"
+                className="btn-quiet mt-3 !min-h-10"
+                disabled={walkthroughState === "loading" || !isOwner}
+                title={isOwner ? undefined : "Only the file's owner or the operator can read the walkthrough"}
+                onClick={() => void loadWalkthrough()}
+              >
+                {walkthroughState === "loading" ? <LoaderCircle size={14} aria-hidden className="motion-safe:animate-spin" /> : null}
+                Build the walkthrough
+              </button>
+              {walkthroughState === "error" && (
+                <p role="alert" className="mt-2 text-[12px] text-risk">
+                  The walkthrough could not be read — try again.
+                </p>
+              )}
+            </div>
+          )}
+        </ReportDisclosure>
+      </section>
+
       <p className="mt-10 text-[11px] leading-relaxed text-ink-faint">
-        Every verified fact re-derived against its node signal; every route priced by an unpaid probe is labelled
-        unverified; every unsupported requirement is named. The desk never signs or broadcasts a payment.
+        Every verified fact re-derived against its node signal; a recorded payload that fails the re-derivation is
+        shown as a verification failure, never as a fact; every route priced by an unpaid probe is labelled unverified;
+        every unsupported requirement is named. The desk never signs or broadcasts a payment.
       </p>
 
       {/* The paid run asks before it starts — a stray tap while scrolling must
@@ -764,5 +870,183 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
         onCancel={() => setPaidConfirmOpen(false)}
       />
     </div>
+  );
+}
+
+/** One numbered step of the demonstration walkthrough. */
+function WalkthroughStep({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <li className="rounded-xl border border-edge bg-panel-2 px-3.5 py-3">
+      <p className="flex items-center gap-2 text-[12.5px] font-semibold text-ink">
+        <span aria-hidden className="shrink-0 font-semibold text-ink-faint tabular">{n}.</span>
+        {title}
+      </p>
+      <div className="mt-2 min-w-0 space-y-2">{children}</div>
+    </li>
+  );
+}
+
+function WalkthroughView({ w }: { w: DeskWalkthrough }) {
+  const { inputs, budgetApproval, paidRequests, providerResponses, verification, discrepanciesAndGaps, assessment } = w.steps;
+  const totalSpent = budgetApproval.reduce((n, r) => n + r.spentUsdCents, 0);
+  return (
+    <ol className="space-y-2">
+      <WalkthroughStep n={1} title="Investigation inputs (as entered — operator-declared, never verified)">
+        <ul className="space-y-1">
+          {inputs.fields.map((f) => (
+            <li key={f.name} className="flex min-w-0 gap-1.5 text-[11.5px]">
+              <span className="shrink-0 text-ink-faint">{humanizeKey(f.name)}:</span>
+              <span className="min-w-0 break-words text-ink">{f.value}</span>
+            </li>
+          ))}
+          {inputs.declaredInputs.map((d) => (
+            <li key={d.label} className="flex min-w-0 gap-1.5 text-[11.5px]">
+              <span className="shrink-0 text-ink-faint">Declared — {d.label}:</span>
+              <span className="min-w-0 break-words text-ink">{d.value}</span>
+            </li>
+          ))}
+          {inputs.unsupported.map((g) => (
+            <li key={g.label} className="text-[11.5px] text-amber">
+              Unsupported on the network — {g.label}: {g.reason}
+            </li>
+          ))}
+          {inputs.missingInputs.map((g) => (
+            <li key={g.capability} className="text-[11.5px] text-ink-soft">
+              Not asked for lack of inputs — {g.capability}
+            </li>
+          ))}
+        </ul>
+      </WalkthroughStep>
+
+      <WalkthroughStep n={2} title="Budget and the human approval gate">
+        {budgetApproval.length === 0 ? (
+          <p className="text-[11.5px] text-ink-soft">No run recorded on this file yet.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {budgetApproval.map((r, i) => (
+              <li key={i} className="text-[11.5px] text-ink-soft">
+                <span className="font-medium text-ink">{r.mode === "intel" ? "Paid run" : "Free pre-flight"}</span> · ceiling {money(r.ceilingUsdCents)} · spent{" "}
+                <span className="tabular">{money(r.spentUsdCents)}</span> · ended {r.taskState} ·{" "}
+                {r.approved ? "approved through the human gate before anything was signed" : "not approved"}
+                {r.approvalDetail ? ` — ${r.approvalDetail}` : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+      </WalkthroughStep>
+
+      <WalkthroughStep n={3} title={`Actual paid Telegraph requests (${paidRequests.length} ask(s), ${money(totalSpent)} spent)`}>
+        <ul className="space-y-1.5">
+          {paidRequests.map((r) => (
+            <li key={r.capability} className="min-w-0 text-[11.5px] text-ink-soft">
+              <span className="font-medium text-ink">{r.label}</span>{" "}
+              <span className="rounded border border-edge bg-panel-2 px-1 py-px font-mono text-[10px]">{r.capability}</span>{" "}
+              {r.provider ? `via ${r.provider}` : "via router"} · {r.priceUsdCents !== null ? money(r.priceUsdCents) : "price unrecorded"}
+              {r.signalHash ? (
+                <>
+                  {" "}
+                  · signal <span className="font-mono">{shortHash(r.signalHash)}</span>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </WalkthroughStep>
+
+      <WalkthroughStep n={4} title="Provider responses and receipts (facts verbatim, nothing summarised away)">
+        <ul className="space-y-2">
+          {providerResponses.map((r) => (
+            <li key={r.capability} className="min-w-0 text-[11.5px]">
+              <p className="font-medium text-ink">
+                {r.label} <span className="text-ink-faint">({r.verification}{r.costUsdCents !== null ? `, ${money(r.costUsdCents)}` : ""})</span>
+              </p>
+              <dl className="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
+                {Object.entries(r.facts)
+                  .filter(([, v]) => humanizeValue(v) !== null)
+                  .map(([k, v]) => (
+                    <div key={k} className="flex min-w-0 gap-1.5 text-[11px]">
+                      <dt className="shrink-0 text-ink-faint">{humanizeKey(k)}:</dt>
+                      <dd className="min-w-0 break-words text-ink">{humanizeValue(v)}</dd>
+                    </div>
+                  ))}
+              </dl>
+              <p className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-ink-faint">
+                {r.signalHash && <span className="font-mono">signal {shortHash(r.signalHash)}</span>}
+                {r.receiptHash && <span className="font-mono">receipt {shortHash(r.receiptHash)}</span>}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </WalkthroughStep>
+
+      <WalkthroughStep n={5} title="Independent verification (keccak re-derivation over the recorded payload)">
+        <ul className="space-y-1.5">
+          {verification.map((v) => {
+            const tone = WALKTHROUGH_OUTCOME[v.outcome] ?? WALKTHROUGH_OUTCOME.not_purchased;
+            return (
+              <li key={`${v.capability}:${v.outcome}`} className="flex flex-wrap items-center gap-2 text-[11.5px]">
+                <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone.chip}`}>{tone.word}</span>
+                <span className="min-w-0 text-ink-soft">
+                  {v.label} {v.signalHash ? <span className="font-mono text-[10px] text-ink-faint">{shortHash(v.signalHash)}</span> : null}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </WalkthroughStep>
+
+      <WalkthroughStep n={6} title="Discrepancies, missing evidence and unsupported requirements">
+        <ul className="space-y-1.5">
+          {discrepanciesAndGaps.discrepancies.map((d) => (
+            <li key={d.title} className="text-[11.5px] text-ink-soft">
+              <span className={`font-medium ${d.material ? "text-risk" : "text-ink"}`}>{d.title}</span>
+              {d.material !== null && (
+                <span className={`ml-1.5 rounded-full border px-1.5 py-px text-[9.5px] font-semibold uppercase ${d.material ? "border-risk/40 bg-risk/5 text-risk" : "border-edge bg-panel-2 text-ink-faint"}`}>
+                  {d.material ? "material" : "measurement difference"}
+                </span>
+              )}
+            </li>
+          ))}
+          {discrepanciesAndGaps.missingEvidence.map((m) => (
+            <li key={m.capability} className="text-[11.5px] text-ink-soft">
+              Missing evidence — {m.title}
+            </li>
+          ))}
+          {discrepanciesAndGaps.unsupported.map((g) => (
+            <li key={g.label} className="text-[11.5px] text-amber">
+              Unsupported — {g.label}
+            </li>
+          ))}
+          {discrepanciesAndGaps.discrepancies.length === 0 &&
+            discrepanciesAndGaps.missingEvidence.length === 0 &&
+            discrepanciesAndGaps.unsupported.length === 0 && <li className="text-[11.5px] text-ink-soft">Nothing disagreed, nothing missing, nothing unsupported.</li>}
+        </ul>
+      </WalkthroughStep>
+
+      <WalkthroughStep n={7} title="Final underwriting assessment">
+        {assessment ? (
+          <div className="min-w-0">
+            <p className="flex flex-wrap items-center gap-2 text-[12px]">
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${VERDICT_CHIP[assessment.verdict] ?? VERDICT_CHIP.insufficient_verified_evidence}`}>
+                {assessment.verdictLabel}
+              </span>
+              <span className="text-ink-faint">{CONFIDENCE_WORD[assessment.confidence] ?? assessment.confidence}</span>
+              <span className="tabular text-[10.5px] text-ink-faint">
+                {assessment.counts.verified} verified · {assessment.counts.unverified} unverified
+                {assessment.counts.verification_failed > 0 ? ` · ${assessment.counts.verification_failed} failed` : ""} · {assessment.counts.missing} missing
+              </span>
+            </p>
+            <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-soft">{assessment.summary}</p>
+            <ul className="mt-1.5 space-y-1">
+              {assessment.nextActions.slice(0, 4).map((a, i) => (
+                <li key={i} className="text-[11px] text-ink-soft">— {a.title}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="text-[11.5px] text-ink-soft">The report has not been built yet — run sync/report to assemble the assessment.</p>
+        )}
+      </WalkthroughStep>
+    </ol>
   );
 }

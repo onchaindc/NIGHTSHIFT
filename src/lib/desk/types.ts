@@ -13,14 +13,21 @@
  * deal-file flow keeps its own record untouched.
  *
  * Provenance invariant (the product's central promise):
- *   verified   — a paid Telegraph answer whose committed payload re-derived
- *                against the node signal, or a direct on-chain read
- *   unverified — route/price verified by an UNPAID probe, a paid answer that
- *                could not be re-derived, or an operator-declared input
- *   missing    — an unsupported requirement (a named network gap) or a
- *                required input that was never supplied; never guessed
- *   analysis   — the desk's own synthesis, always labelled and always
- *                traced to the evidence records it used
+ *   verified            — a paid Telegraph answer whose committed payload
+ *                         INDEPENDENTLY re-derived against the node signal
+ *                         (keccak match), or a direct on-chain read
+ *   unverified          — route/price verified by an UNPAID probe, a paid
+ *                         answer that is only the node's word (asserted or
+ *                         unconfirmed — class node_asserted), or an
+ *                         operator-declared input
+ *   verification_failed — a paid answer whose recorded payload FAILED the
+ *                         independent hash re-derivation; the record is
+ *                         retained with its signal, receipt and payload for
+ *                         investigation, and is never rendered as a fact
+ *   missing             — an unsupported requirement (a named network gap) or
+ *                         a required input that was never supplied; never guessed
+ *   analysis            — the desk's own synthesis, always labelled and always
+ *                         traced to the evidence records it used
  */
 
 import type { AuditEntry } from "@/lib/assurance/types";
@@ -31,8 +38,8 @@ export type DeskInvestigationType =
   | "trade_supplier_intelligence"
   | "listing_underwriter";
 
-/** The four provenance classes every claim must declare. */
-export type ProvenanceClass = "verified" | "unverified" | "missing" | "analysis";
+/** The provenance classes every claim must declare. */
+export type ProvenanceClass = "verified" | "verification_failed" | "unverified" | "missing" | "analysis";
 
 /** The raw mechanism class behind a provenance verdict. */
 export type DeskEvidenceClass =
@@ -40,6 +47,8 @@ export type DeskEvidenceClass =
   | "source_verified"
   | "probe_verified"
   | "paid_unverified"
+  | "node_asserted"
+  | "verification_failed"
   | "declared"
   | "missing"
   | "analysis";
@@ -71,6 +80,13 @@ export interface DeskEvidence {
   missingFields?: string[];
   /** True when the router's fallback ranking served the answer. */
   viaRouterFallback?: boolean;
+  /** The full committed response, retained verbatim alongside the signal and
+   *  receipt for verification_failed and node_asserted records — the payload
+   *  is what an investigation of a failed re-derivation reads. */
+  committedPayload?: Record<string, unknown> | null;
+  /** Why the record is not independently verified ("hash_mismatch",
+   *  "node_asserted", "no_confirmation"); set for the recorded classes. */
+  verificationReason?: "hash_mismatch" | "node_asserted" | "no_confirmation";
 }
 
 export type DeskSeverity = "critical" | "material" | "minor" | "info";
@@ -93,6 +109,7 @@ export type DeskDiscrepancyKind =
   | "name_variance"
   | "missing_fields"
   | "provider_drift"
+  | "provider_disagreement"
   | "field_conflict";
 
 export interface DeskDiscrepancy {
@@ -101,6 +118,11 @@ export interface DeskDiscrepancy {
   title: string;
   detail: string;
   evidenceIds: string[];
+  /** Set for provider_disagreement: true when the answers diverge beyond a
+   *  measurement difference (relative difference above the 0.5% tolerance the
+   *  rest of the desk uses) — a material contradiction that the assessment
+   *  must reflect. A harmless measurement difference stays false. */
+  material?: boolean;
 }
 
 export interface DeskReportSection {
@@ -158,7 +180,15 @@ export interface DeskReport {
   /** Confidence limitations, stated plainly. */
   limitations: string[];
   outstandingQuestions: string[];
-  counts: { verified: number; unverified: number; missing: number; analysis: number };
+  counts: {
+    verified: number;
+    verification_failed: number;
+    unverified: number;
+    /** Subset of unverified: paid answers retained on the node's word only. */
+    node_asserted: number;
+    missing: number;
+    analysis: number;
+  };
   confidence: DeskConfidence;
 }
 
@@ -237,7 +267,10 @@ export const DESK_VERDICT_LABEL: Record<DeskVerdict, string> = {
 };
 
 export function deskEvidenceCounts(inv: Pick<DeskInvestigation, "evidence">): DeskReport["counts"] {
-  const counts = { verified: 0, unverified: 0, missing: 0, analysis: 0 };
-  for (const e of inv.evidence) counts[e.provenance] += 1;
+  const counts = { verified: 0, verification_failed: 0, unverified: 0, node_asserted: 0, missing: 0, analysis: 0 };
+  for (const e of inv.evidence) {
+    counts[e.provenance] += 1;
+    if (e.provenance === "unverified" && e.class === "node_asserted") counts.node_asserted += 1;
+  }
   return counts;
 }

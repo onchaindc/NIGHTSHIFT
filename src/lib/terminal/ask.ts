@@ -582,7 +582,19 @@ export async function executeAsk(input: ExecuteInput): Promise<ExecuteOutcome> {
 
 export type VerifyOutcome =
   | { kind: "verified"; signalHash: string; record: unknown; note: string }
-  | { kind: "recorded"; signalHash: string; record: unknown; note: string }
+  | {
+      kind: "recorded";
+      signalHash: string;
+      record: unknown;
+      note: string;
+      /** Why the signal is recorded but NOT independently verified:
+       *  hash_mismatch — the recorded payload does NOT re-derive the signal
+       *    hash (a verification failure, whatever the node's flag asserts);
+       *  node_asserted — the node's flag is true but the payload cannot be
+       *    re-serialized here, so it is the network's word, not proof;
+       *  no_confirmation — neither the flag nor a re-derivation confirms it. */
+      reason?: "hash_mismatch" | "node_asserted" | "no_confirmation";
+    }
   | { kind: "unverified"; detail: string };
 
 function canonicalSignalPayload(payload: unknown): string | null {
@@ -634,10 +646,10 @@ export async function verifySignal(signalHash: string): Promise<VerifyOutcome> {
     if (derived.toLowerCase() === signalHash.toLowerCase()) {
       return { kind: "verified", signalHash, record, note: nodeVerified ? "Independent re-derivation matches: keccak256 over the recorded payload equals the signal hash, and the node's own verified flag is true." : "Independent re-derivation matches: the recorded payload is exactly the one this signal hash commits to." };
     }
-    return { kind: "recorded", signalHash, record, note: `The signal is recorded, but re-deriving the hash over the recorded payload gave ${derived}, which does not match. The node's own verified flag: ${nodeVerified ? "true" : "false"}.` };
+    return { kind: "recorded", signalHash, record, reason: "hash_mismatch", note: `The signal is recorded, but re-deriving the hash over the recorded payload gave ${derived}, which does not match. The node's own verified flag: ${nodeVerified ? "true" : "false"}.` };
   }
   if (nodeVerified) {
-    return { kind: "recorded", signalHash, record, note: "The node reports verification.verified = true, but the payload could not be re-serialized here for an independent re-derivation, so treat this as the network's word, not proof." };
+    return { kind: "recorded", signalHash, record, reason: "node_asserted", note: "The node reports verification.verified = true, but the payload could not be re-serialized here for an independent re-derivation, so treat this as the network's word, not proof." };
   }
-  return { kind: "recorded", signalHash, record, note: "The signal is recorded, but neither the node's verified flag nor an independent re-derivation confirms it. Treat as unconfirmed." };
+  return { kind: "recorded", signalHash, record, reason: "no_confirmation", note: "The signal is recorded, but neither the node's verified flag nor an independent re-derivation confirms it. Treat as unconfirmed." };
 }
