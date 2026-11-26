@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import type { TaskRecord } from "@/lib/engine/types";
+import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 import type { BitcoinMiningReport } from "@/lib/bitcoinmining/report";
@@ -174,7 +175,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   const load = useCallback(
     async (id: string) => {
       try {
-        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store" });
+        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(65_000) });
         if (!res.ok) return;
         const body = (await res.json()) as { task?: TaskRecord; redacted?: boolean };
         if (!body.task) return;
@@ -230,6 +231,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
       const res = await fetch("/api/mind/bitcoin-mining", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(70_000),
         body: JSON.stringify({
           blockHeight: blockHeight.trim() || undefined,
           zone,
@@ -330,6 +332,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
       const res = await fetch("/api/mind/investigations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(70_000),
         body: JSON.stringify({
           objective: MIND_HANDOFF_OBJECTIVE,
           mode: "intel",
@@ -357,6 +360,7 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   const state = task?.state ?? null;
   const awaiting = state === "awaiting_approval";
   const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
+  const watchdog = useRunWatchdog(task);
   const report = task?.result?.bitcoinMiningReport;
   const capabilityReport = task?.result?.capabilityReport;
   const eventTail = (task?.events ?? []).filter((e) =>
@@ -536,7 +540,18 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
                 <div className="flex items-center gap-2 text-[12px] text-ink-soft">
                   <Loader2 size={13} className="animate-spin text-teal" aria-hidden />
                   {state === "verifying" ? "Verifying every committed answer against its node signal…" : "Working through the approved plan…"}
+                  <span className="ml-auto shrink-0 text-[10.5px] text-ink-faint">server update {watchdog.secondsSinceUpdate}s ago</span>
                 </div>
+              )}
+              {running && watchdog.silent && (
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-risk">
+                  No server update for {Math.floor(watchdog.secondsSinceUpdate / 60)}m {watchdog.secondsSinceUpdate % 60}s — the run may have been interrupted. The server fails it cleanly on its next check; nothing after the last recorded step is invented.
+                </p>
+              )}
+              {running && watchdog.longRun && !watchdog.silent && (
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-amber">
+                  Unusually long run (the server caps each run at 4 minutes of execution budget) — it will end or fail shortly; watch the timeline below.
+                </p>
               )}
 
               {eventTail.length > 0 && (
@@ -851,6 +866,9 @@ function MiningReportView({
                     <td className="py-2.5 pr-3 text-ink">
                       {d.label}
                       {d.provider ? <span className="block text-[10.5px] text-ink-faint">{d.provider}</span> : null}
+                      {d.viaRouterFallback && (
+                        <span className="mt-0.5 inline-flex items-center rounded border border-amber/40 bg-amber-soft/50 px-1 py-px text-[9.5px] font-medium text-amber-deep">router fallback</span>
+                      )}
                     </td>
                     <td className="py-2.5 pr-3">
                       <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] ${REPORT_STATUS_TONE[d.status] ?? REPORT_STATUS_TONE.gap}`}>

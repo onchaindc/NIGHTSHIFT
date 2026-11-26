@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import type { IndexDeskReport } from "@/lib/indexdesk/report";
+import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import {
   DESK_STATE_META,
@@ -145,7 +146,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   // Operator session state drives the sign-in panel and approval wording.
   const load = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store" });
+      const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(65_000) });
       if (!res.ok) {
         if (res.status === 404) {
           setSnap(deskSnapshot({ task: null, redacted: true }));
@@ -272,6 +273,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       const res = await fetch("/api/mind/index-desk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(70_000),
         body: JSON.stringify({
           index: built.definition,
           mode,
@@ -347,6 +349,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const stateMeta = state ? (DESK_STATE_META[state] ?? DESK_STATE_META.created) : null;
   const awaiting = state === "awaiting_approval";
   const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
+  const watchdog = useRunWatchdog(snap);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -697,6 +700,11 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
                       Free probes run first; paid asks start only after approval.
                     </p>
                   )}
+                  <p className="mt-2 flex items-center justify-between text-[10.5px] text-ink-faint">
+                    <span>server update {watchdog.secondsSinceUpdate}s ago</span>
+                    {watchdog.silent && <span className="text-risk">run may have been interrupted; the next check fails it cleanly</span>}
+                    {!watchdog.silent && watchdog.longRun && <span className="text-amber">unusually long run</span>}
+                  </p>
                 </div>
               )}
 

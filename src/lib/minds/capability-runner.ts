@@ -332,6 +332,8 @@ export async function probeMindCoverage(
 /* ------------------------------------------------------------------ */
 
 export interface CommittedDimension {
+  /** True when the router's fallback ranking served this answer (no pinned provider). */
+  viaRouterFallback?: boolean;
   dimension: string;
   label: string;
   intent: string;
@@ -428,6 +430,10 @@ export async function executeApprovedDimension(input: ApprovedDimensionInput): P
       : outcome.minerName
         ? String(outcome.minerName)
         : (outcome.minerId ? String(outcome.minerId) : "router"),
+    // Fallback routing, made visible: a pinned ask keeps its registry provider;
+    // an unpinned (router-fallback) ask is flagged so every surface can show
+    // "via router fallback" next to whoever actually served the answer.
+    viaRouterFallback: !spec.minerId,
     signalHash: outcome.signalHash,
     receiptHash: outcome.receipt.receipt_hash,
     verifiedAt,
@@ -483,6 +489,9 @@ export interface CapabilityReport {
     verifiedAt?: string;
     values?: Record<string, unknown>;
     missingFields?: string[];
+    /** True when this answer was served by the router's fallback ranking
+     * rather than the Mind's pinned provider. */
+    viaRouterFallback?: boolean;
   }>;
   missing: Array<{ dimension: string; reason: string }>;
   spendUsdCents: number;

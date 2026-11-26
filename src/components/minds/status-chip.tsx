@@ -23,3 +23,33 @@ export function MindStatusChip({ status }: { status: MindStatus }) {
     </span>
   );
 }
+
+/** Report dimension statuses (run consoles): what became of each committed answer. */
+export const REPORT_STATUS_DOT: Record<string, string> = {
+  verified: "bg-teal",
+  recorded: "bg-amber",
+  unverified: "bg-risk",
+  routable_unverified: "bg-ink-faint/40",
+  gap: "bg-ink-faint/40",
+};
+
+export const REPORT_STATUS_WORD: Record<string, string> = {
+  verified: "Verified",
+  recorded: "Recorded",
+  unverified: "Unverified",
+  routable_unverified: "Routable, unverified",
+  gap: "Unsupported",
+};
+
+/** Probe statuses (catalogue and profile pages): what the unpaid matrix probe found. */
+export const PROBE_STATUS_DOT: Record<string, string> = {
+  verified: "bg-teal",
+  partial: "bg-amber",
+  gap: "bg-ink-faint/40",
+};
+
+export const PROBE_STATUS_WORD: Record<string, string> = {
+  verified: "Route verified",
+  partial: "Partial",
+  gap: "Unsupported",
+};

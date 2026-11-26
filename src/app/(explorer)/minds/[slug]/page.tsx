@@ -8,6 +8,7 @@ import {
   CAPABILITY_PROBED_AT,
   type CapabilityDimension,
 } from "@/lib/minds/capabilities";
+import { PROBE_STATUS_DOT, PROBE_STATUS_WORD } from "@/components/minds/status-chip";
 import { MindStatusChip } from "@/components/minds/status-chip";
 import CapabilityConsole, { type ConsoleDimensionView } from "@/components/minds/capability-console";
 
@@ -28,18 +29,6 @@ export async function generateMetadata({ params }: Params) {
     description: `${mind.summary} ${MIND_STATUS_LABEL[mind.status]}.`,
   };
 }
-
-const STATUS_DOT: Record<CapabilityDimension["status"], string> = {
-  verified: "bg-teal",
-  partial: "bg-amber",
-  gap: "bg-ink-faint/40",
-};
-
-const STATUS_WORD: Record<CapabilityDimension["status"], string> = {
-  verified: "Route verified",
-  partial: "Partial",
-  gap: "Unsupported",
-};
 
 function fmtUsd(cents: number | undefined): string {
   return `$${((cents ?? 1) / 100).toFixed(2)}`;
@@ -68,6 +57,7 @@ export default async function MindProfilePage({ params }: Params) {
     status: d.status,
     intent: d.intent,
     provider: d.provider,
+    viaRouterFallback: d.viaRouterFallback === true,
     priceUsdCents: d.priceUsdCents,
     params: Object.entries(d.params ?? {}).map(([name, spec]) => ({
       name,
@@ -179,11 +169,11 @@ export default async function MindProfilePage({ params }: Params) {
             <ul className="mt-3 border-t border-edge">
               {[...routable, ...gapDims].map((d) => (
                 <li key={d.id} className="grid gap-1.5 border-b border-edge py-3 sm:grid-cols-[10px_1fr_auto] sm:items-baseline sm:gap-3">
-                  <span aria-hidden className={`mt-1.5 size-1.5 rounded-full ${STATUS_DOT[d.status]}`} />
+                  <span aria-hidden className={`mt-1.5 size-1.5 rounded-full ${PROBE_STATUS_DOT[d.status]}`} />
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                       <span className="text-[13px] font-medium text-ink">{d.label}</span>
-                      <span className="text-[10.5px] text-ink-faint">{STATUS_WORD[d.status]}</span>
+                      <span className="text-[10.5px] text-ink-faint">{PROBE_STATUS_WORD[d.status]}</span>
                     </p>
                     {d.status === "gap" ? (
                       <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-soft">
@@ -193,6 +183,9 @@ export default async function MindProfilePage({ params }: Params) {
                     ) : (
                       <p className="mt-0.5 break-words text-[10.5px] text-ink-faint">
                         <span className="tabular">{d.intent}</span> · {d.provider}
+                        {d.viaRouterFallback && (
+                          <span className="ml-1.5 inline-flex items-center rounded border border-amber/40 bg-amber-soft/50 px-1 py-px text-[9.5px] font-medium text-amber-deep">router fallback</span>
+                        )}
                         {d.limitation ? <> — {d.limitation}</> : null}
                       </p>
                     )}

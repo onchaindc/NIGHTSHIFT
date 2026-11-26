@@ -49,6 +49,8 @@ export interface CapabilityParam {
 }
 
 export interface CapabilityDimension {
+  /** True when the router's fallback ranking served this answer (no pinned provider). */
+  viaRouterFallback?: boolean;
   id: string;
   label: string;
   /** The business question this dimension answers. */

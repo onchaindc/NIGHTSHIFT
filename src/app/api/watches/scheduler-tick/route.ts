@@ -32,6 +32,17 @@ async function tick(req: NextRequest) {
     return NextResponse.json({ ok: true, started: false, reason: "auto checks disabled (NIGHTSHIFT_WATCH_AUTOCHECK=0)" });
   }
   after(async () => {
+    // Stall reaper FIRST: any run left mid-flight by a dead execution window is
+    // failed cleanly before the scan, so no task sits "executing" forever even
+    // when nobody ever reads it (read paths reap too; this is the heartbeat
+    // for the nobody-watching case).
+    try {
+      const { reapStalledTasks } = await import("@/lib/engine/engine");
+      const reaped = await reapStalledTasks(Date.now());
+      if (reaped > 0) console.log(`stall reaper: failed ${reaped} interrupted run(s)`);
+    } catch (err) {
+      console.error("stall reaper failed:", err);
+    }
     try {
       await runAutoScanOnce();
     } catch (err) {

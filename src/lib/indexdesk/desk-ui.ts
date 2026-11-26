@@ -140,6 +140,9 @@ export interface DeskEvidence {
 
 export interface DeskTaskSnapshot {
   state: string | null;
+  /** Server timestamps for the client run watchdog (ms epoch); 0 when unknown. */
+  createdAt: number;
+  updatedAt: number;
   error: string | null;
   redacted: boolean;
   /** Actual spend from the task record (`task.spend.spentUsdCents`). */
@@ -165,6 +168,8 @@ const TERMINAL: Record<string, DeskTerminalState> = {
 
 interface RawDeskTask {
   state?: string;
+  createdAt?: number;
+  updatedAt?: number;
   error?: string | null;
   plan?: PlanStep[] | null;
   events?: Array<{ message?: unknown; type?: unknown }>;
@@ -218,6 +223,8 @@ export function deskSnapshot(body: unknown): DeskTaskSnapshot {
   const stopPolling = !task || redacted || terminal !== null;
 
   return {
+    createdAt: typeof task?.createdAt === "number" ? task.createdAt : 0,
+    updatedAt: typeof task?.updatedAt === "number" ? task.updatedAt : 0,
     state,
     error: !redacted && typeof task?.error === "string" ? task.error : null,
     redacted,

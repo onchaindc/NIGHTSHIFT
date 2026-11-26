@@ -15,6 +15,8 @@ import {
 
 import type { TaskRecord } from "@/lib/engine/types";
 import { vibrate } from "@/lib/haptics";
+import { useRunWatchdog } from "@/components/minds/run-watchdog";
+import { REPORT_STATUS_DOT } from "@/components/minds/status-chip";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 
@@ -89,14 +91,6 @@ const REPORT_STATUS_LABEL: Record<string, string> = {
   unverified: "Could not verify",
   routable_unverified: "Priced, not purchased",
   gap: "Unsupported",
-};
-
-const STATUS_DOT: Record<string, string> = {
-  verified: "bg-teal",
-  recorded: "bg-amber",
-  unverified: "bg-risk",
-  routable_unverified: "bg-ink-faint/40",
-  gap: "bg-ink-faint/40",
 };
 
 function sessionMode(body: unknown): Session {
@@ -216,7 +210,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   const load = useCallback(
     async (id: string) => {
       try {
-        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store" });
+        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(65_000) });
         if (!res.ok) return;
         const body = (await res.json()) as { task?: TaskRecord; redacted?: boolean };
         if (!body.task) return;
@@ -292,6 +286,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
       const res = await fetch(`/api/minds/${encodeURIComponent(slug)}/investigate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(70_000),
         body: JSON.stringify({
           mode,
           inputs: Object.fromEntries(
@@ -357,6 +352,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   const state = task?.state ?? null;
   const awaiting = state === "awaiting_approval";
   const running = state === "created" || state === "planning" || state === "executing" || state === "verifying";
+  const watchdog = useRunWatchdog(task);
   const report = task?.result?.capabilityReport as CapabilityReport | undefined;
   const eventTail = (task?.events ?? []).filter((e) => EVENT_TYPES.includes(e.type)).slice(-5);
   const answers = report ? report.counts.verified + report.counts.recorded + report.counts.unverified : 0;
@@ -515,7 +511,18 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                 <div className="flex items-center gap-2 text-[12px] text-ink-soft">
                   <Loader2 size={13} className="animate-spin text-teal" aria-hidden />
                   {state === "verifying" ? "Verifying every answer against its node signal…" : "Working through the plan…"}
+                  <span className="ml-auto shrink-0 text-[10.5px] text-ink-faint">server update {watchdog.secondsSinceUpdate}s ago</span>
                 </div>
+              )}
+              {running && watchdog.silent && (
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-risk">
+                  No server update for {Math.floor(watchdog.secondsSinceUpdate / 60)}m {watchdog.secondsSinceUpdate % 60}s — the run may have been interrupted. The server fails it cleanly on its next check; nothing after the last recorded step is invented.
+                </p>
+              )}
+              {running && watchdog.longRun && !watchdog.silent && (
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-amber">
+                  Unusually long run (the server caps each run at 4 minutes of execution budget) — it will end or fail shortly; watch the timeline below.
+                </p>
               )}
 
               {eventTail.length > 0 && (
@@ -583,7 +590,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                   <li key={d.dimension} className="border-b border-edge px-4 py-3.5 sm:px-5">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <span aria-hidden className={`inline-block size-1.5 rounded-full ${STATUS_DOT[d.status]}`} />
+                        <span aria-hidden className={`inline-block size-1.5 rounded-full ${REPORT_STATUS_DOT[d.status]}`} />
                         <span className="text-[13.5px] font-medium text-ink">{d.label}</span>
                         <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${REPORT_STATUS_TONE[d.status]}`}>
                           {REPORT_STATUS_LABEL[d.status]}
@@ -626,6 +633,9 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                     {" — "}
                     {d.intent ?? "no intent"}
                     {d.provider ? <> · {d.provider}</> : null}
+                    {d.viaRouterFallback && (
+                      <span className="ml-1.5 inline-flex items-center rounded border border-amber/40 bg-amber-soft/50 px-1 py-px text-[9.5px] font-medium text-amber-deep">router fallback</span>
+                    )}
                     {d.signalHash ? <> · signal {shortHash(d.signalHash)}</> : null}
                     {d.receiptHash ? <> · receipt {shortHash(d.receiptHash)}</> : null}
                     {d.verifiedAt ? <> · {new Date(d.verifiedAt).toLocaleString("en-US", { hour12: false })}</> : null}
