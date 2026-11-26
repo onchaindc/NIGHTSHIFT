@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Compass,
+  Handshake,
   Menu,
   Radar,
   ShieldCheck,
@@ -25,6 +26,7 @@ const NAV = [
   { href: "/console", label: "Overview", icon: Compass },
   { href: "/operations", label: "Operations", icon: Terminal },
   { href: "/watch", label: "Protocol Watch", icon: Radar },
+  { href: "/acp", label: "Intelligence Commerce", icon: Handshake },
   { href: "/approvals", label: "Approvals", icon: ShieldCheck },
   { href: "/history", label: "History", icon: HistoryIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
@@ -84,6 +86,7 @@ const CONTEXT: Record<string, string> = {
   "/console": "Overview",
   "/operations": "Operations",
   "/watch": "Protocol Watch",
+  "/acp": "Intelligence Commerce",
   "/approvals": "Approvals",
   "/history": "History",
   "/settings": "Settings",

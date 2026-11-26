@@ -120,7 +120,7 @@ export function planDeskCapabilities(inv: DeskInvestigation): DeskPlan {
 export async function createDeskRun(
   inv: DeskInvestigation,
   mode: "free" | "intel",
-  opts: { spendLimitUsdCents?: number; actor?: string; owner?: string | null } = {},
+  opts: { spendLimitUsdCents?: number; actor?: string; owner?: string | null; autoRun?: boolean } = {},
 ): Promise<{ task: TaskRecord; accepted: boolean }> {
   const plan = planDeskCapabilities(inv);
   if (plan.capabilities.length === 0) {
@@ -200,7 +200,7 @@ export async function createDeskRun(
   task.labels = [...(task.labels ?? []), `desk:${inv.id}`, `desk-type:${inv.type}`, `desk-mode:${mode}`];
   await saveTask(task);
 
-  if (task.state === "executing") {
+  if (task.state === "executing" && opts.autoRun !== false) {
     void runTaskQuietly(task.id);
   }
 
