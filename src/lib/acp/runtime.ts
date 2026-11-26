@@ -2,6 +2,11 @@
  * The ACP provider runtime: selects and starts the transport once per server
  * process, exposes the handler for entries, and offers one guarded entry
  * point for the boot hook and the API routes.
+ *
+ * Startup honesty: `runtimeStarted` is true only after a transport's
+ * `start(...)` resolved, `startupError` carries the exact failure otherwise,
+ * and `connected` reflects the live SSE stream (the SDK's onConnected
+ * callback). Configuration alone never reports a connection.
  */
 
 import { handleAcpEntry, tickAcpJobs } from "./lifecycle";
@@ -10,6 +15,8 @@ import type { AcpEntry, AcpProviderStatus, AcpSessionRef, AcpTransport } from ".
 
 let transport: AcpTransport | null = null;
 let startNote = "not started";
+let runtimeStarted = false;
+let startupError: string | null = null;
 let starting: Promise<void> | null = null;
 
 /** Start (once) and return the active transport, or null when disabled. */
@@ -21,15 +28,26 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
     if (!selected.transport) {
       startNote = selected.reason;
       transport = null;
+      runtimeStarted = false;
+      startupError = selected.reason.includes("failed to start") ? selected.reason : null;
       return;
     }
-    await selected.transport.start({
-      onEntry: async (ref, entry) => {
-        await handleAcpEntry(selected.transport!, ref, entry);
-      },
-    });
-    transport = selected.transport;
-    startNote = selected.reason;
+    try {
+      await selected.transport.start({
+        onEntry: async (ref, entry) => {
+          await handleAcpEntry(selected.transport!, ref, entry);
+        },
+      });
+      transport = selected.transport;
+      runtimeStarted = true;
+      startupError = null;
+      startNote = selected.reason;
+    } catch (err) {
+      transport = null;
+      runtimeStarted = false;
+      startupError = (err instanceof Error ? err.message : String(err)).slice(0, 400);
+      startNote = `transport startup failed: ${startupError}`;
+    }
   })();
   await starting;
   return transport;
@@ -57,13 +75,18 @@ export async function acpProviderStatus(): Promise<AcpProviderStatus> {
   const sdkInstalled = cfg.enabled ? await acpSdkInstalled() : false;
   const active = transport;
   const mode: AcpProviderStatus["mode"] = !cfg.enabled ? "disabled" : active ? active.mode : realAcpConfigured() ? "real" : "mock";
+  const diag = active?.diagnostics?.() ?? null;
   const note = active
-    ? startNote
+    ? diag?.lastError
+      ? `${startNote} — last entry-handler error: ${diag.lastError}`
+      : startNote
     : !cfg.enabled
       ? "ACP_ENABLED is not set — the ACP provider is off; offerings below are published configuration, not a live connection."
-      : realAcpConfigured()
-        ? "Live ACP transport configured; starts with the server boot (instrumentation hook)."
-        : "No ACP credentials configured — the mock transport serves simulated buyers only; nothing connects to the ACP network.";
+      : startupError
+        ? `Live ACP transport is configured but its startup FAILED: ${startupError}`
+        : realAcpConfigured()
+          ? "Live ACP transport configured; starts with the server boot (instrumentation hook)."
+          : "No ACP credentials configured — the mock transport serves simulated buyers only; nothing connects to the ACP network.";
   return {
     mode,
     enabled: cfg.enabled,
@@ -76,5 +99,8 @@ export async function acpProviderStatus(): Promise<AcpProviderStatus> {
     agentWalletAddress: mode === "real" ? cfg.walletAddress || null : null,
     chainId: cfg.chainId,
     note,
+    runtimeStarted: runtimeStarted && active !== null,
+    startupError: startupError ?? (diag?.lastError ? `last entry-handler error: ${diag.lastError}` : null),
+    connected: mode === "real" ? (diag?.connected ?? null) : null,
   };
 }

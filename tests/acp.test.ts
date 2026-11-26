@@ -11,11 +11,57 @@ import type { ApprovedOffer, ProbeOutcome, VerifyOutcome } from "@/lib/terminal/
 import { ACP_OFFERINGS, offeringById, validateRequirement } from "@/lib/acp/offerings";
 import { handleAcpEntry, tickAcpJobs } from "@/lib/acp/lifecycle";
 import { getAcpJob } from "@/lib/acp/store";
-import { MockAcpTransport } from "@/lib/acp/transport";
+import { acpConfig, MockAcpTransport, realAcpConfigured, selectAcpTransport } from "@/lib/acp/transport";
+import { acpProviderStatus } from "@/lib/acp/runtime";
 import type { DeskDeliverable } from "@/lib/acp/lifecycle";
 import type { AcpSessionRef } from "@/lib/acp/types";
 
 afterEach(() => resetDeskCapabilityDeps());
+
+describe("acp configuration honesty", () => {
+  it("treats real mode as configured only when the operator flips ACP_ENABLED AND all three credentials exist", () => {
+    const saved = { ...process.env };
+    try {
+      for (const key of ["ACP_ENABLED", "ACP_PROVIDER_WALLET_ADDRESS", "ACP_WALLET_ID", "ACP_SIGNER_PRIVATE_KEY"]) delete process.env[key];
+      expect(realAcpConfigured()).toBe(false);
+
+      process.env.ACP_ENABLED = "true";
+      process.env.ACP_PROVIDER_WALLET_ADDRESS = "0xabc";
+      process.env.ACP_WALLET_ID = "wallet-id";
+      // signer key missing → still not real
+      expect(realAcpConfigured()).toBe(false);
+
+      process.env.ACP_SIGNER_PRIVATE_KEY = "signer-key";
+      expect(realAcpConfigured()).toBe(true);
+      expect(acpConfig().enabled).toBe(true);
+    } finally {
+      process.env = saved;
+    }
+  });
+
+  it("selects the mock transport when enabled without credentials, and reports disabled status fields honestly", async () => {
+    const saved = { ...process.env };
+    try {
+      for (const key of ["ACP_ENABLED", "ACP_PROVIDER_WALLET_ADDRESS", "ACP_WALLET_ID", "ACP_SIGNER_PRIVATE_KEY"]) delete process.env[key];
+      const selected = await selectAcpTransport();
+      expect(selected.transport).toBeNull();
+      expect(selected.reason).toMatch(/ACP_ENABLED is not set/);
+
+      const status = await acpProviderStatus();
+      expect(status.mode).toBe("disabled");
+      expect(status.runtimeStarted).toBe(false);
+      expect(status.startupError).toBeNull();
+      expect(status.connected).toBeNull();
+
+      process.env.ACP_ENABLED = "true";
+      process.env.ACP_PROVIDER_WALLET_ADDRESS = "0xabc";
+      const mockSelected = await selectAcpTransport();
+      expect(mockSelected.transport?.mode).toBe("mock");
+    } finally {
+      process.env = saved;
+    }
+  });
+});
 
 /* ------------------------------------------------------------------ */
 /* Offerings — derived from the real desk workflows                    */

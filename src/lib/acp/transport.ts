@@ -9,15 +9,19 @@
  *     investigation, delivery) is the REAL one. Used by tests and by the
  *     operator-facing simulate action.
  *
- *   createRealAcpTransport — the live adapter for `@virtuals-protocol/acp-node-v2`.
- *     It is wired ONLY when the operator sets ACP_ENABLED=true plus the three
- *     credentials (agent wallet address, Privy wallet id, signer private key).
- *     The SDK is loaded through a non-static specifier so deployments without
- *     the package build and run fine; a real mode without the SDK installed
- *     is a hard, visible misconfiguration — never a faked connection.
+ *   createRealAcpTransport — the live adapter for `@virtuals-protocol/acp-node-v2`
+ *     (a real dependency). It is wired ONLY when the operator sets
+ *     ACP_ENABLED=true plus the three credentials (agent wallet address,
+ *     Privy wallet id, signer key from the agent page's Signers tab). The
+ *     import stays lazy so server bundles stay light; a real mode whose
+ *     startup fails is reported honestly in the status — never a faked
+ *     connection.
  */
 
-import type { AcpEntry, AcpSessionRef, AcpSystemEventType, AcpTransport } from "./types";
+import { base } from "viem/chains";
+import type * as AcpSdk from "@virtuals-protocol/acp-node-v2";
+
+import type { AcpEntry, AcpSessionRef, AcpTransport } from "./types";
 
 export interface MockCall {
   op: "setBudget" | "submit" | "sendMessage";
@@ -51,6 +55,10 @@ export class MockAcpTransport implements AcpTransport {
 
   async sendMessage(ref: AcpSessionRef, content: string): Promise<void> {
     this.calls.push({ op: "sendMessage", ref, content });
+  }
+
+  diagnostics(): { connected: boolean | null; lastError: string | null } {
+    return { connected: null, lastError: null };
   }
 
   /** Simulated buyer: an incoming job with a requirement message. */
@@ -135,52 +143,53 @@ export async function acpSdkInstalled(): Promise<boolean> {
 }
 
 /**
- * The live transport. `acp-node-v2`'s seller flow: `AcpAgent.create({provider})
- * → agent.on("entry", handler) → agent.start()`, provider acts are
- * `session.setBudget(AssetToken.usdc(...))` / `session.submit(deliverable)` /
- * `session.sendMessage(...)`. Only construct when `realAcpConfigured()` —
- * the caller surfaces a visible misconfiguration otherwise.
+ * The live transport, wired to the ACTUAL `acp-node-v2` v0.1.15 surface
+ * (verified against dist/*.d.ts, not the marketing quickstart):
+ *
+ *   AcpAgent.create({ evmProvider })           — NOT `{ provider }`
+ *   PrivyAlchemyEvmProviderAdapter.create({
+ *     chains: [base],                          — viem Chain objects
+ *     walletAddress, walletId,
+ *     signerPrivateKey,                        — the Privy AUTHORIZATION key
+ *     builderCode?,                            — from the agent page's Signers tab
+ *   })
+ *   agent.on("entry", (session, entry) => ...) — entries carry their own
+ *                                                onChainJobId + chainId
+ *   agent.start(onConnected?)                  — SSE to api.acp.virtuals.io;
+ *                                                onConnected fires when the
+ *                                                stream is live
+ *   session.setBudget(AssetToken.usdc(...))    — the priced acceptance act
+ *   session.submit(deliverable)                — result delivery
+ *
+ * Only construct when `realAcpConfigured()` — the caller surfaces a visible
+ * misconfiguration otherwise. The signer key signs Privy wallet-RPC server
+ * calls; the EVM key never leaves Privy.
  */
 export async function createRealAcpTransport(cfg: AcpConfig): Promise<AcpTransport> {
   const specifier = ["@virtuals-protocol", "acp-node-v2"].join("/");
-  const sdk = (await import(/* webpackIgnore: true */ specifier)) as Record<string, unknown>;
-  const { AcpAgent, PrivyAlchemyEvmProviderAdapter, base, AssetToken } = sdk as {
-    AcpAgent: { create: (opts: unknown) => Promise<RealAgent> };
-    PrivyAlchemyEvmProviderAdapter: { create: (opts: unknown) => Promise<unknown> };
-    base: { id: number };
-    AssetToken: { usdc: (amount: number, chainId: number) => unknown };
-  };
+  const sdk = (await import(specifier)) as typeof AcpSdk;
 
-  interface RealAgent {
-    start(onConnected?: () => void): Promise<void>;
-    stop(): Promise<void>;
-    on(event: "entry", handler: (session: RealSession, entry: Record<string, unknown>) => void): void;
-  }
-  interface RealSession {
-    jobId: string | number | bigint;
-    chainId: number;
-    setBudget(token: unknown): Promise<void>;
-    submit(deliverable: string, transferAmount?: unknown): Promise<void>;
-    sendMessage(content: string, contentType?: string): Promise<void>;
-  }
-
-  const provider = await PrivyAlchemyEvmProviderAdapter.create({
-    walletAddress: cfg.walletAddress,
+  const provider = await sdk.PrivyAlchemyEvmProviderAdapter.create({
+    // The SDK bundles its own viem (2.58.x) and types `chains` against it;
+    // the repo resolves a sibling viem (2.57.x). The chain object is plain
+    // data and identical at runtime — cast across the type copies.
+    chains: [base] as unknown as AcpSdk.PrivyAlchemyChainConfig["chains"],
+    walletAddress: cfg.walletAddress as `0x${string}`,
     walletId: cfg.walletId,
     signerPrivateKey: cfg.signerKey,
-    chains: [base],
     ...(cfg.builderCode ? { builderCode: cfg.builderCode } : {}),
   });
-  const agent = await AcpAgent.create({ provider });
+  const agent = await sdk.AcpAgent.create({ evmProvider: provider });
 
   // Live sessions, bound as entries arrive and looked up by session ref for
   // later provider actions (setBudget on funding, submit on delivery).
-  const sessions = new Map<string, RealSession>();
-  const refOf = (session: RealSession): AcpSessionRef => ({ chainId: Number(session.chainId), jobId: String(session.jobId) });
+  const sessions = new Map<string, AcpSdk.JobSession>();
   const keyOf = (ref: AcpSessionRef): string => `${ref.chainId}:${ref.jobId}`;
   let handlers: { onEntry: (ref: AcpSessionRef, entry: AcpEntry) => Promise<void> } | null = null;
+  let connected = false;
+  let lastError: string | null = null;
 
-  function requireSession(ref: AcpSessionRef): RealSession {
+  function requireSession(ref: AcpSessionRef): AcpSdk.JobSession {
     const session = sessions.get(keyOf(ref));
     if (!session) throw new Error(`no live ACP session bound for job ${keyOf(ref)}`);
     return session;
@@ -191,30 +200,38 @@ export async function createRealAcpTransport(cfg: AcpConfig): Promise<AcpTranspo
     async start(next) {
       handlers = next;
       agent.on("entry", (session, entry) => {
-        sessions.set(keyOf(refOf(session)), session);
-        const raw = entry as { kind?: unknown; event?: { type?: unknown }; contentType?: unknown; content?: unknown };
-        const mapped: AcpEntry = {
-          kind: raw.kind === "message" ? "message" : "system",
-          ...(raw.event?.type ? { event: { type: String(raw.event.type) as AcpSystemEventType } } : {}),
-          ...(raw.contentType ? { contentType: String(raw.contentType) } : {}),
-          ...(raw.content !== undefined && raw.content !== null ? { content: String(raw.content) } : {}),
-        };
-        void handlers?.onEntry(refOf(session), mapped);
+        const ref: AcpSessionRef = { chainId: Number(entry.chainId), jobId: String(entry.onChainJobId) };
+        sessions.set(keyOf(ref), session);
+        const mapped: AcpEntry =
+          entry.kind === "message"
+            ? { kind: "message", contentType: entry.contentType, content: entry.content }
+            : { kind: "system", event: { type: entry.event.type } };
+        handlers
+          ?.onEntry(ref, mapped)
+          .catch((err: unknown) => {
+            lastError = `${new Date().toISOString()} ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
+          });
       });
-      await agent.start();
+      await agent.start(() => {
+        connected = true;
+      });
     },
     async stop() {
+      connected = false;
       await agent.stop();
     },
     async setBudget(ref, amountUsdCents) {
       // Priced acceptance: the provider names the budget in USDC on Base.
-      await requireSession(ref).setBudget(AssetToken.usdc(amountUsdCents / 100, base.id));
+      await requireSession(ref).setBudget(sdk.AssetToken.usdc(amountUsdCents / 100, ref.chainId));
     },
     async submit(ref, deliverable) {
       await requireSession(ref).submit(deliverable);
     },
     async sendMessage(ref, content) {
       await requireSession(ref).sendMessage(content);
+    },
+    diagnostics() {
+      return { connected, lastError };
     },
   };
 }

@@ -83,6 +83,9 @@ export interface AcpTransport {
   submit(ref: AcpSessionRef, deliverable: string): Promise<void>;
   /** A plain message to the buyer (v2 `session.sendMessage`). */
   sendMessage(ref: AcpSessionRef, content: string): Promise<void>;
+  /** Live-transport diagnostics: SSE stream state and the last handler error.
+   *  The mock reports connected: null — there is no connection to be honest about. */
+  diagnostics?(): { connected: boolean | null; lastError: string | null };
 }
 
 export interface AcpServiceInput {
@@ -160,4 +163,12 @@ export interface AcpProviderStatus {
   agentWalletAddress: string | null;
   chainId: number;
   note: string;
+  /** True only after `transport.start(...)` resolved without throwing in THIS
+   *  server process — never inferred from configuration alone. */
+  runtimeStarted: boolean;
+  /** The exact failure of the last startup attempt, if any. */
+  startupError: string | null;
+  /** Live transport only: whether the SSE stream to api.acp.virtuals.io is up
+   *  (the SDK's onConnected callback). null for mock/disabled. */
+  connected: boolean | null;
 }
