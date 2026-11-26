@@ -2,93 +2,216 @@
 
 **Explore the network. Put its intelligence to work.**
 
-NIGHTSHIFT is an interactive interface to the Telegraph network. Explore its miners, discover available intelligence, inspect network activity, and query specialized services through a terminal powered by x402.
+NIGHTSHIFT is a commercial intelligence workspace built on the [Telegraph network](https://telegraph.network). It helps people discover specialist intelligence providers, investigate companies and assets, compare evidence, and turn network answers into decisions that can be reviewed and acted on.
 
-It brings Telegraph's infrastructure into one place, making it easier to understand what the network offers, access its capabilities, and see what each request returns.
+It is not another miner directory or a generic chat interface. NIGHTSHIFT connects network discovery, paid specialist queries, evidence verification, investigation workflows, and agent-facing service delivery in one product.
 
-## Stack
+Production: https://nightshift-telegraph.vercel.app  
+Repository: https://github.com/onchaindc/NIGHTSHIFT
 
-- Next.js 16 (app router), React 19, TypeScript
-- Tailwind CSS 4
-- x402 (`@x402/evm`, `@x402/fetch`) for USDC payments on Base Sepolia
-- Neon Postgres (pooled) with a file-store fallback
-- Vitest
+## What it does
 
-## Ask flow
+NIGHTSHIFT currently brings four investigation workflows together in the Deal Desk:
+
+| Workflow | Purpose |
+| --- | --- |
+| Counterparty Due Diligence | Build an evidence-backed view of a company or business counterparty. |
+| Listing Underwriting | Assemble and assess intelligence relevant to a digital-asset listing decision. |
+| Asset Intelligence | Investigate digital-asset, mining, and energy-related assets. |
+| Trade & Supplier Intelligence | Examine suppliers, trade records, documents, and logistics-related information. |
+
+The workspace also includes the network Explorer, Terminal, Minds integrations, activity records, developer information, and a Virtuals ACP provider surface.
+
+The product is designed around a simple distinction: discovering an answer is not the same as establishing that the answer is reliable. NIGHTSHIFT retains the source material and verification outcome so users can see what is known, what failed verification, what remains unconfirmed, and what is analysis.
+
+## Product surfaces
+
+- **Explorer** — discover miners, canonical intents, signals, and network activity.
+- **Terminal** — inspect a specialist service's live offer, approve the exact terms, execute an x402 request, and inspect its receipt and signal.
+- **Deal Desk** — open structured investigations, collect evidence, review discrepancies, and produce an assessment with explicit limitations and next actions.
+- **Minds** — expose investigation workflows to Minds through an API-connected tool pattern, with optional report delivery through the supported Builder API configuration.
+- **ACP** — publish the Deal Desk workflows as Virtuals Agent Commerce Protocol services and track incoming jobs and deliverables.
+- **Activity** — inspect task and investigation records according to the caller's access level.
+- **Developers** — inspect the integration surface and API guidance.
+
+## How an investigation works
+
+A Deal Desk file is a structured investigation, not a single prompt and response.
+
+1. **Open a file.** Choose a workflow and provide the subject details. User-supplied information is retained as declared input; it is not silently promoted to verified evidence.
+2. **Map the requirements.** The workflow identifies the capabilities it needs and records unsupported requirements as explicit gaps.
+3. **Run the free pre-flight.** NIGHTSHIFT checks the relevant Telegraph route and live offer without paying. This establishes availability and price, not the truth of the eventual answer.
+4. **Review and approve.** A paid run waits for human approval. The approved offer and spend ceiling are recorded before a payment is signed.
+5. **Execute specialist requests.** The engine makes the approved requests and records their answers, receipts, signal references, and costs.
+6. **Verify and reconcile.** Where a signal supports independent re-derivation, NIGHTSHIFT checks the committed payload. Provider disagreements and missing fields remain visible.
+7. **Produce the report.** Findings, discrepancies, evidence, confidence, limitations, and next actions are assembled into a reviewable investigation record.
+
+The same task engine, spend ledger, permissions, and approval rules are reused across the product rather than reimplemented for each interface.
+
+## Evidence and verification
+
+Evidence integrity is a core product rule.
+
+Every evidence item is assigned a provenance class:
+
+| Class | Meaning |
+| --- | --- |
+| `verified` | The payload was independently re-derived against its committed signal, or the value came from a supported direct source read. |
+| `verification_failed` | The retained payload did not pass independent signal re-derivation. It remains available for inspection but is not treated as a verified fact. |
+| `unverified` | The answer is based on a node assertion, lacks independent confirmation, or comes from a declared input. |
+| `missing` | A required value was not supplied or the network could not answer the requirement. |
+| `analysis` | NIGHTSHIFT's synthesis of recorded evidence. It is labelled as analysis and linked to the evidence it uses. |
+
+A successful HTTP response is not, by itself, proof of correctness. A node's own `verified` label is not substituted for independent verification. If a committed payload fails re-derivation, NIGHTSHIFT preserves the answer, signal, receipt, and failure reason, but classifies it as `verification_failed`.
+
+Reports distinguish verified facts from failed verification, node-asserted answers, missing information, and analysis. They also preserve provider disagreements rather than silently choosing one value. The final assessment is decision support, not a legal opinion, sanctions clearance, credit rating, or investment recommendation.
+
+## Terminal and x402 payment flow
+
+The Terminal uses a probe / approve / execute / verify sequence:
 
 ```
-Discover  →  free GET of miner/intent catalogs
-Probe     →  unpaid POST; node returns 402 + priced challenge
-Approve   →  user pins the exact offer (amount, payTo, network, asset)
-Execute   →  signed x402 payment; node returns answer + receipt + signal_hash
-Verify    →  optional GET /engine/v1/signal/{hash} + local re-derivation
+Discover  -> free network catalog reads
+Probe     -> unpaid request; inspect the live 402 challenge
+Approve   -> explicitly pin amount, recipient, network, and asset
+Execute   -> sign and send the x402 payment; receive answer and receipt
+Verify    -> resolve the signal and independently re-derive its payload
 ```
 
-Invariants enforced in `src/lib/terminal/ask.ts` and the execute route:
+Important safeguards:
 
-- No signature without an explicit approval that matches the live challenge.
-- Server refuses if the challenge has drifted from the approved offer.
-- A paid response that cannot be reconciled (missing or mismatched `signal_hash`) is not retried.
-- Uncertain payments are recorded as uncertain; they are never converted into a second charge.
+- A payment signature requires explicit approval of the live offer.
+- If the offer changes after approval, execution is refused.
+- Paid specialist requests are not automatically retried after an ambiguous or unreconciled payment.
+- Uncertain payment outcomes remain uncertain; they are not treated as permission to charge again.
+- Paid Deal Desk and Minds investigation steps stop at a human approval gate.
+- Spend ceilings and ledger entries are retained with the task.
 
-## Mind investigations
+The current configured x402 integration uses USDC on Base Sepolia for the documented test flow. Check the live challenge in the Terminal for the actual network and terms; do not assume a price or recipient from an old example.
 
-NIGHTSHIFT's autonomous investigation Mind runs on the same task engine as every
-other job (`jobType: "mind_investigation"`): plan → approval gate → execution →
-verification → report, with the spend ledger and permission allowlist shared.
+## Minds integration
 
+NIGHTSHIFT can expose an investigation endpoint to a Minds agent as an API-connected tool. The Mind submits an objective and selects either:
+
+- **Free mode:** unpaid pre-flight and a baseline report. It does not purchase specialist intelligence.
+- **Intel mode:** baseline, a paid specialist request, and a comparison report. The paid step waits for human approval.
+
+The investigation planner is deterministic. It extracts a company and, where stated, a jurisdiction. If it cannot identify a usable subject, it blocks instead of inventing one. The resulting report compares what was available before specialist intelligence with what the paid evidence added, while retaining unresolved gaps and disagreements.
+
+Builder API outbound delivery is optional and environment-gated. A configured key and a bound Mind alias are required. Without those settings, delivery is skipped and reported as such; the existence of an investigation report does not imply that a message was delivered.
+
+Official documentation: https://build.hellominds.ai/docs/get-started/client-library
+
+## Virtuals ACP provider
+
+NIGHTSHIFT includes a provider integration for [Virtuals ACP](https://app.virtuals.io/). The four Deal Desk workflows are represented as service offerings with workflow-specific input schemas.
+
+At a high level, the provider lifecycle is:
+
+1. Receive an ACP job and validate its requirements against the selected workflow.
+2. Set the service budget through the ACP v2 acceptance flow.
+3. On funding, create or resume one Deal Desk investigation for that on-chain job.
+4. Run the existing investigation engine, including its free pre-flight and human approval gate for any paid Telegraph work.
+5. Submit the evidence-backed report as the job deliverable.
+6. Mark the job complete only when the evaluator's on-chain completion event is received.
+
+ACP settlement is tracked separately from Telegraph x402 payments. The two payment systems are not conflated.
+
+The code includes a mock transport for controlled simulation and a real adapter based on `@virtuals-protocol/acp-node-v2`. Real mode is gated by `ACP_ENABLED=true` and the provider wallet / signer configuration. A configured code path is not the same as a verified live connection: check the ACP status surface and deployment diagnostics before treating the provider as operational. Do not fund or run a paid ACP job until the real connection, wallet permissions, and spend controls have been verified.
+
+## Architecture
+
+NIGHTSHIFT is a Next.js application with a shared server-side task and investigation engine.
+
+| Area | Responsibility |
+| --- | --- |
+| `src/app` | App Router pages and API routes. |
+| `src/lib/engine` | Task lifecycle, planning, execution, approvals, and spend accounting. |
+| `src/lib/desk` | Deal Desk investigation records, workflows, evidence, reports, and assessment. |
+| `src/lib/terminal` | x402 probe, approval, execution, and signal-verification flow. |
+| `src/lib/mind` | Mind objective parsing, deterministic plans, and report integration. |
+| `src/lib/acp` | ACP provider boundary, lifecycle handling, mock transport, and real SDK adapter. |
+| `src/lib/storage` | Shared persistence interface and storage implementations. |
+
+The storage layer uses Postgres in deployed environments and a file-backed implementation for local development. The Postgres adapter supports pooled connections for serverless deployments. Database migrations are tracked by the application.
+
+Access is identity-aware. Wallet-signed sessions provide user access to owned records, while operator access can inspect operational records. Anonymous views use restricted projections; private objectives, full reports, purchased intelligence, and payment details are not exposed as public activity data.
+
+## Local development
+
+### Requirements
+
+- Node.js 20 or newer
+- npm
+- A reachable Postgres database for database-backed local testing
+
+### Install and run
+
+```bash
+git clone https://github.com/onchaindc/NIGHTSHIFT.git
+cd NIGHTSHIFT
+npm install
+npm run dev
 ```
-Objective  →  deterministic plan (src/lib/mind/plan.ts)
-Baseline   →  FREE unpaid probe: validates the pinned specialist ask and
-              assembles the without-intelligence dossier (0 registry facts —
-              stated plainly, never guessed)
-Approval   →  human approves the exact plan before anything is signed
-Intel      →  PAID specialist ask through Counterparty Intelligence
-              (pinned intent CORPORATE_REGISTRY_LOOKUP_GENERAL at
-              zk-corp-atlas; one attempt, no retry, refuses offer drift)
-Evaluate   →  keccak signal verification + the hash-committed payload
-              classification (facts / missing fields / disagreements)
-Report     →  reasoned report with the with/without-Telegraph comparison,
-              every claim traced to recorded evidence
+
+Useful checks:
+
+```bash
+npm test
+npm run typecheck
+npm run build
 ```
 
-- Endpoint: `POST /api/mind/investigations` `{ objective, mode: "free"|"intel", spendLimitUsdCents? }` —
-  gated by the operator bearer token like every spending-capable API; the
-  caller polls `/api/tasks/:id` for live state and the report. Minds agents
-  call it as a Bazaar-style "Tool (API-connected app)".
-- Modes: `free` never plans a purchase; `intel` waits at `awaiting_approval`
-  until a human approves via `/api/tasks/:id/action`.
-- The comparison is meaningful by construction: the baseline pass and the paid
-  pass answer the same canonical field set, so the report states exactly which
-  fields intelligence added, what stayed unknown, which conflicts remain
-  unresolved, and the verified cost.
+For database setup and verification:
 
-### Minds (Animoca) integration — official Builder API
+```bash
+npm run db:migrate
+npm run db:verify
+```
 
-Verified 2026-11-24 from the official builder documentation and live host:
+The local file store is intended for development and tests, not multi-instance production persistence.
 
-- Base host `api.build.hellominds.ai`; auth uses `X-Api-Key` with a Builder API
-  key from `build.hellominds.ai/console` (OAuth access tokens use
-  `Authorization: Bearer`). `X-Access-Key` and `X-Builder-Api-Key` are not sent.
-- A stable alias must be bound to a Mind first, with
-  `POST /v1/messaging/conversation` or `minds chat create`.
-- Sending is `POST /v1/messaging/message` with `{ alias, messageText }`.
-  There is no guessed path and no mocked delivery.
+## Configuration
 
-Outbound report delivery is environment-gated: set `MINDS_BUILDER_API_KEY` and
-`MINDS_BUILDER_ALIAS` (already bound to a Mind). Without both, delivery is
-skipped and reported honestly. `MINDS_BUILDER_SEND_URL` is only an optional
-proxy/enterprise override. A live unauthenticated POST returns the API's
-structured auth-required error, which verifies the route and auth boundary;
-no message has been delivered from this workspace because no key is configured.
+Production integrations are enabled through environment configuration. Never commit secrets or paste private keys into source files, issues, or logs.
 
-Docs: https://build.hellominds.ai/docs/get-started/client-library
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Postgres connection string; use a pooled connection URL for serverless deployments where available. |
+| `NIGHTSHIFT_API_TOKEN` | Operator API authorization for privileged operations. |
+| `NIGHTSHIFT_USER_DAILY_SPEND_CENTS` | Optional per-user rolling daily spend cap for payer-funded Mind runs. |
+| `MINDS_BUILDER_API_KEY` | Optional Minds Builder API credential for outbound delivery. |
+| `MINDS_BUILDER_ALIAS` | Alias already bound to the intended Mind. |
+| `ACP_ENABLED` | Must be `true` before the real ACP transport can be selected. |
+| `ACP_PROVIDER_WALLET_ADDRESS` | EVM address for the ACP provider wallet. |
+| `ACP_WALLET_ID` | Privy wallet identifier used by the ACP provider adapter. |
+| `ACP_SIGNER_PRIVATE_KEY` | Privy authorization signer key required by the ACP SDK adapter. Keep it server-side and secret. |
+| `ACP_BUILDER_CODE` | Optional ACP builder code. |
+| `ACP_CHAIN_ID` | ACP EVM chain ID; defaults to Base mainnet (8453) in the current adapter. |
 
-## Storage
+Only configure the variables for integrations being deliberately enabled. In particular, do not enable ACP real mode merely to test the UI; use the mock/simulation path until the live provider configuration has been checked.
 
-Single interface in `src/lib/storage`. Two implementations:
+## Security and operating principles
 
-- Postgres (`src/lib/storage/postgres.ts`) — schema applied on first use; migrations tracked in `ns_migrations`. On serverless, prefers a pooled URL.
-- File (`src/lib/storage/file.ts`) — local development only.
+- Paid actions require explicit approval and a bounded spend.
+- User sessions are wallet-signed; privileged operator access remains server-side.
+- Public activity responses are restricted projections, not full investigation records.
+- Secrets are read from environment configuration and must never be committed.
+- Failed verification is retained and disclosed, not hidden or relabelled.
+- Missing capabilities and unsupported requirements are reported as gaps, not filled with guesses.
+- Mock ACP simulation is not evidence of a live Virtuals connection or settlement.
 
-If multiple database URLs are set, each is probed with `SELECT 1`; the first reachable candidate is used. Unreachable candidates are reported by hostname, not by full URL.
+## Current scope and limitations
+
+NIGHTSHIFT is an active product and its integrations have different readiness levels. The Explorer, Terminal, Deal Desk, evidence model, Minds workflow, and ACP provider implementation are part of the codebase. That does not mean every external integration has been exercised end-to-end in production.
+
+In particular:
+
+- A live ACP provider connection and controlled end-to-end job still need explicit deployment verification before ACP should be described as operational.
+- Minds outbound delivery depends on valid Builder API credentials and a bound alias.
+- Telegraph answers vary by miner, intent, jurisdiction, and live network availability. A successful request is not a universal reliability guarantee.
+- Reports are evidence-led decision support and do not replace independent legal, financial, compliance, or technical review.
+
+## License
+
+No open-source license is currently declared in this repository. All rights reserved unless and until a license is added.
