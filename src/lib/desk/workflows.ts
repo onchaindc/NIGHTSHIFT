@@ -1216,16 +1216,110 @@ const TRADE_WORKFLOW: DeskWorkflowDef = {
   },
 };
 
+/* ------------------------------------------------------------------ */
+/* Listing Underwriter — token admission assessment                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A listing-specific product workflow over the existing asset capability
+ * set. It deliberately reuses the same matrix references and payment /
+ * verification engine; no new Mind or intent is introduced.
+ */
+const LISTING_UNDERWRITER_WORKFLOW: DeskWorkflowDef = {
+  ...ASSET_WORKFLOW,
+  type: "listing_underwriter",
+  name: "Listing Underwriter",
+  kicker: "Deal Desk · Listing",
+  summary:
+    "Assess whether a token has enough verified issuer, supply, holder, liquidity and market-integrity evidence to enter a listing review.",
+  scope: "One token and its named issuer, using existing verified and probe-verified Telegraph routes.",
+  subjectNoun: "token",
+  fields: ASSET_WORKFLOW.fields.filter((field) =>
+    ["assetClass", "assetName", "chain", "tokenSymbol", "issuerEntity", "issuerJurisdiction", "issuerWebsite", "controllerName", "declaredSupply", "marketSubject", "spendLimitUsdCents"].includes(field.name),
+  ),
+  capabilities: ASSET_WORKFLOW.capabilities.filter((ref) =>
+    [
+      "index-reconstitution-desk:registry",
+      "index-reconstitution-desk:price",
+      "index-reconstitution-desk:supply",
+      "index-reconstitution-desk:holders",
+      "index-reconstitution-desk:liquidity",
+      "index-reconstitution-desk:filings",
+      "chainforensics:holder_concentration",
+      "chainforensics:wash_trading",
+      "ownershipgraph:b2b_enrichment",
+      "sanctionsdesk:name_screening",
+      "ownershipgraph:sanctions_check",
+      "caseledger:adverse_media",
+    ].includes(capabilityKey(ref)),
+  ),
+  gapRefs: ASSET_WORKFLOW.gapRefs.filter((ref) =>
+    [
+      "chainforensics:clustering_labels",
+      "chainforensics:fund_flow_tracing",
+      "ownershipgraph:beneficial_ownership",
+      "sanctionsdesk:related_parties",
+    ].includes(capabilityKey(ref)),
+  ),
+  sections: [
+    {
+      id: "issuer_identity",
+      title: "Issuer identity and disclosures",
+      description: "Registry identity, regulatory filings and firmographic context for the named issuer.",
+      capabilities: ["index-reconstitution-desk:registry", "index-reconstitution-desk:filings", "ownershipgraph:b2b_enrichment"],
+    },
+    {
+      id: "token_integrity",
+      title: "Token integrity",
+      description: "Network-verified total supply, holder count and holder concentration for the named token.",
+      capabilities: ["index-reconstitution-desk:supply", "index-reconstitution-desk:holders", "chainforensics:holder_concentration"],
+    },
+    {
+      id: "market_quality",
+      title: "Market quality",
+      description: "Point-in-time USD price, pool depth and provider wash-trading signals for the named market.",
+      capabilities: ["index-reconstitution-desk:price", "index-reconstitution-desk:liquidity", "chainforensics:wash_trading"],
+    },
+    {
+      id: "issuer_exposure",
+      title: "Issuer and control exposure",
+      description: "Issuer and named-controller screening plus adverse-media coverage. Screening does not prove ownership or control.",
+      capabilities: ["sanctionsdesk:name_screening", "ownershipgraph:sanctions_check", "caseledger:adverse_media"],
+    },
+  ],
+  honestyNotes: [
+    "Holder concentration and wash-trading routes are probe-verified; paid answer quality must be judged from the actual signal-verified result, not the route status.",
+    "Beneficial ownership, group structure and related-party exposure are unsupported. A named-controller sanctions screen does not establish control.",
+    "Adverse media is news search, not court-docket retrieval or a legal finding.",
+    "Total supply is not circulating float. Redemption rights, token-sale terms, lockups and legal enforceability require primary documents not supplied by these routes.",
+    "A listing assessment is evidence for a human review, not an exchange admission decision or investment recommendation.",
+  ],
+  samples: {
+    assetClass: "digital_asset",
+    assetName: "Circle / USDC listing review",
+    chain: "ethereum",
+    tokenSymbol: "USDC",
+    issuerEntity: "Circle Internet Group, Inc.",
+    issuerJurisdiction: "US",
+    issuerWebsite: "circle.com",
+    declaredSupply: "Issuer-stated total supply to be supplied from current disclosure",
+    marketSubject: "Uniswap USDC/ETH",
+    spendLimitUsdCents: "12",
+  },
+};
+
 export const DESK_WORKFLOWS: Record<DeskInvestigationType, DeskWorkflowDef> = {
   counterparty_due_diligence: COUNTERPARTY_WORKFLOW,
   asset_intelligence: ASSET_WORKFLOW,
   trade_supplier_intelligence: TRADE_WORKFLOW,
+  listing_underwriter: LISTING_UNDERWRITER_WORKFLOW,
 };
 
 export const DESK_TYPE_ORDER: DeskInvestigationType[] = [
   "counterparty_due_diligence",
   "asset_intelligence",
   "trade_supplier_intelligence",
+  "listing_underwriter",
 ];
 
 export function deskWorkflow(type: string): DeskWorkflowDef | undefined {
