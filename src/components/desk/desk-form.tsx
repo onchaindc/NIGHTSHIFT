@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Eraser, LoaderCircle, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eraser, LoaderCircle, Sparkles } from "lucide-react";
 
 import type { DeskWorkflowSummary } from "@/lib/desk/workflows";
 import { friendlyNetworkError } from "@/lib/api/client-errors";
+import { SampleFill } from "@/components/sample-fill";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 
 /**
@@ -113,6 +114,11 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
             spellCheck={false}
           />
         )}
+        {f === required[0] && (
+          <span className="mt-1 flex justify-end">
+            <SampleFill onFill={fillSamples} />
+          </span>
+        )}
         {f.help && <span className="mt-1 block text-[11px] leading-snug text-ink-faint">{f.help}</span>}
       </label>
     );
@@ -150,18 +156,11 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
         <span className="text-ink-faint">
           <span className="tabular font-semibold text-ink">{workflow.capabilityCount}</span> verified route(s) in this workflow in total
         </span>
-        <button
-          type="button"
-          onClick={fillSamples}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[11.5px] font-medium text-teal transition-colors hover:bg-teal/15"
-        >
-          <Check size={12} aria-hidden /> Fill sample values
-        </button>
         {Object.keys(subject).length > 0 && (
           <button
             type="button"
             onClick={clearForm}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-1.5 text-[11.5px] text-ink-soft transition-colors hover:text-ink"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-1.5 text-[11.5px] text-ink-soft transition-colors hover:text-ink"
           >
             <Eraser size={12} aria-hidden /> Clear
           </button>

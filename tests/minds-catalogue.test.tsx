@@ -176,7 +176,10 @@ describe("catalogue rendering", () => {
     const port = renderToStaticMarkup(await MindProfilePage({ params: Promise.resolve({ slug: "portsentinel" }) }));
     expect(port).toContain("Available");
     expect(port).toContain("Run an investigation");
-    expect(port).toContain("Fill with sample values");
+    // The sample fill is the little inline wand at the bottom of the inputs,
+    // not a filled button (the old "Fill with sample values" button is gone).
+    expect(port).toContain("Fill sample values");
+    expect(port).not.toContain("Fill with sample values");
     expect(port).toContain("Coverage detail");
     expect(port).toContain("LIVE_PORT_CONGESTION_GENERAL"); // intent codes live in the collapsed detail
     expect(port).not.toContain("in development");

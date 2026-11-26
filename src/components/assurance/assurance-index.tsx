@@ -8,6 +8,7 @@ import { ArrowRight, LoaderCircle, ScanSearch, ShieldCheck } from "lucide-react"
 import type { Investigation, InvestigationSummary } from "@/lib/assurance/types";
 import { USDC_MINT_MAINNET } from "@/lib/assurance/types";
 import { friendlyNetworkError } from "@/lib/api/client-errors";
+import { SampleFill } from "@/components/sample-fill";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 
 const DECISION_STYLE: Record<string, string> = {
@@ -180,7 +181,8 @@ const EMPTY_FORM = {
   ownershipRequired: true,
 };
 
-/** A realistic worked example for the "Fill sample values" button. The
+/** A realistic worked example for the inline sample wand under the Legal
+ * name field. The
  * wallets are this deployment's own deterministic demo fixtures (the same
  * derivation the assurance demo files use) — sample data, not real
  * counterparties. */
@@ -315,6 +317,9 @@ export function AssuranceIndex() {
               placeholder="Northstar Capital Holdings Ltd"
               required
             />
+            <span className="mt-1 flex justify-end">
+              <SampleFill onFill={() => setForm({ ...SAMPLE_FORM })} />
+            </span>
           </label>
           <label className="block">
             <span className="x-label mb-1 block">Jurisdiction</span>
@@ -412,16 +417,6 @@ export function AssuranceIndex() {
           </label>
 
           <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
-            <button
-              type="button"
-              onClick={() => {
-                setFormError(null);
-                setForm({ ...SAMPLE_FORM });
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[11.5px] font-medium text-teal transition-colors hover:bg-teal/15"
-            >
-              Fill sample values
-            </button>
             {JSON.stringify(form) !== JSON.stringify(EMPTY_FORM) && (
               <button
                 type="button"

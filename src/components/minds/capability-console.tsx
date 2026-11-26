@@ -9,7 +9,6 @@ import {
   Loader2,
   Radio,
   ShieldCheck,
-  Wand2,
 } from "lucide-react";
 
 import type { TaskRecord } from "@/lib/engine/types";
@@ -18,6 +17,7 @@ import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { openTaskStream } from "@/components/minds/task-stream";
 import { REPORT_STATUS_DOT } from "@/components/minds/status-chip";
 import RunFlow, { fmtUsd } from "@/components/minds/run-flow";
+import { SampleFill } from "@/components/sample-fill";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 
@@ -438,11 +438,8 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                   </div>
                 </div>
               ))}
-              <div className="flex flex-wrap items-center gap-3">
-                <button type="button" onClick={fillSamples} className="btn-secondary !min-h-8 !text-[11.5px]">
-                  <Wand2 size={12} aria-hidden /> Fill with sample values
-                </button>
-                <p className="text-[11px] text-ink-faint">Samples are safe probe values — replace them with the real subject.</p>
+              <div className="mt-1 flex justify-end">
+                <SampleFill onFill={fillSamples} label="Fill sample values — replace them with the real subject before running" />
               </div>
             </div>
           ) : (
