@@ -58,7 +58,7 @@ export function assuranceRunConfig(inv: Investigation, mode: "free" | "intel"): 
 export async function createAssuranceRun(
   inv: Investigation,
   mode: "free" | "intel",
-  opts: { spendLimitUsdCents?: number; actor?: string } = {},
+  opts: { spendLimitUsdCents?: number; actor?: string; owner?: string | null } = {},
 ): Promise<AssuranceRunResult> {
   const config = assuranceRunConfig(inv, mode);
   if (config.dimensions.length === 0) {
@@ -109,6 +109,9 @@ export async function createAssuranceRun(
     jobType: "capability_run",
     plan: steps,
     criteria,
+    // Ownership follows the file: the wallet that opened it owns its runs, so
+    // it can approve them — the exact bug class fixed for Minds (45ac5c1).
+    ...(opts.owner ? { owner: opts.owner.toLowerCase() } : {}),
     assumptions: [
       "beneficial ownership has no verified route and is never planned or inferred",
       "paid asks are one attempt each, pinned to their provider and refused if the live offer drifts from the approved one",

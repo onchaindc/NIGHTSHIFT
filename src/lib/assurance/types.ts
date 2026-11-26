@@ -165,6 +165,8 @@ export interface Investigation {
   updatedAt: string;
   status: InvestigationStatus;
   dataMode: DataMode;
+  /** Wallet address (lowercase) that opened the file; null for operator/agent and demonstration files. */
+  owner: string | null;
   transaction: InvestigationTransaction;
   counterparty: Counterparty;
   evidence: AssuranceEvidence[];

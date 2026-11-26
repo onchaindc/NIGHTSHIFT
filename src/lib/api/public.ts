@@ -1,9 +1,11 @@
 import type { TaskRecord } from "@/lib/engine/types";
+import type { Investigation } from "@/lib/assurance/types";
 import {
   callerIdentity,
   bearerTokenOf,
   operatorCookieFromHeader,
   requestAuthorizedFromParts,
+  type CallerIdentity,
 } from "@/lib/api/auth";
 
 /**
@@ -100,4 +102,37 @@ export function taskForCaller(req: Request, task: TaskRecord): { task: TaskRecor
     return { task, redacted: false };
   }
   return { task: publicTaskView(task), redacted: true };
+}
+
+// ---------------------------------------------------------------------------
+// Assurance files (Investigation records) follow the same identity model:
+//   operator   — every file in full
+//   wallet user— their OWN live files in full, demonstration files in full
+//   anonymous  — demonstration files only (fixtures carry no private data,
+//                and the workspace must stay reviewable without credentials)
+// ---------------------------------------------------------------------------
+
+function investigationVisible(identity: CallerIdentity, inv: Investigation): boolean {
+  if (inv.dataMode === "demonstration") return true;
+  if (identity.kind === "operator") return true;
+  if (identity.kind === "user") return inv.owner?.toLowerCase() === identity.address;
+  return false;
+}
+
+export function investigationsForCaller(
+  req: Request,
+  investigations: Investigation[],
+): { investigations: Investigation[]; scope: "operator" | "user" | "demonstration" } {
+  const identity = callerIdentity(req);
+  return {
+    investigations: investigations.filter((inv) => investigationVisible(identity, inv)),
+    scope: identity.kind === "operator" ? "operator" : identity.kind === "user" ? "user" : "demonstration",
+  };
+}
+
+/** Single-file variant; null when the caller must not see this file at all. */
+export function investigationForCaller(req: Request, inv: Investigation): { inv: Investigation; redacted: boolean } | null {
+  const identity = callerIdentity(req);
+  if (!investigationVisible(identity, inv)) return null;
+  return { inv, redacted: identity.kind === "anonymous" && inv.dataMode !== "demonstration" };
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
+import { callerIdentity } from "@/lib/api/auth";
+import { paidRunGate } from "@/lib/api/userSpend";
 import { EngineError } from "@/lib/engine/engine";
 import { createAssuranceRun, syncIntelligence } from "@/lib/assurance/run";
 import { audit, getInvestigation, saveInvestigation } from "@/lib/assurance/store";
@@ -14,14 +15,26 @@ export const maxDuration = 60;
  *   { action: "run", mode: "free" | "intel", spendLimitUsdCents? }
  *   { action: "sync" }
  *
- * A paid run is created as an ordinary engine task and stops at the existing
- * approval gate. Sync absorbs only completed, signal-verified dimensions.
+ * Runs belong to the wallet that owns the file. A paid run passes the same
+ * shared gate as every Mind (operator, or wallet user under the daily cap)
+ * and then stops at the existing approval gate. Sync absorbs only completed,
+ * signal-verified dimensions.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  if (!requestAuthorized(req)) return NextResponse.json({ error: "authorization required" }, { status: 401 });
+  const identity = callerIdentity(req);
   const { id } = await ctx.params;
   const inv = await getInvestigation(id);
   if (!inv) return NextResponse.json({ error: `investigation ${id} not found` }, { status: 404 });
+
+  const isOwner =
+    identity.kind === "operator" ||
+    (identity.kind === "user" && inv.owner?.toLowerCase() === identity.address);
+  if (!isOwner) {
+    return NextResponse.json(
+      { error: identity.kind === "anonymous" ? "sign in with your wallet to run this file's intelligence" : "this file belongs to another wallet" },
+      { status: identity.kind === "anonymous" ? 401 : 403 },
+    );
+  }
 
   let body: { action?: unknown; mode?: unknown; spendLimitUsdCents?: unknown };
   try {
@@ -30,10 +43,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
+  const actor = identity.kind === "user" ? identity.address : "operator";
+
   try {
     if (body.action === "sync") {
       const result = await syncIntelligence(inv);
-      audit(inv, "operator", "intelligence_synced", `${result.added} evidence record(s) absorbed.`);
+      audit(inv, actor, "intelligence_synced", `${result.added} evidence record(s) absorbed.`);
       await saveInvestigation(inv);
       return NextResponse.json({ investigation: inv, added: result.added, notes: result.notes });
     }
@@ -42,26 +57,48 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (body.mode !== undefined && body.mode !== "free" && body.mode !== "intel") {
       return NextResponse.json({ error: 'mode must be "free" or "intel"' }, { status: 400 });
     }
+
+    if (inv.dataMode === "demonstration") {
+      return NextResponse.json(
+        { error: "demonstration files cannot spend; open a live file to run intelligence" },
+        { status: 400 },
+      );
+    }
+
+    // Paid runs draw on the shared payer wallet, so they pass the same
+    // per-user daily cap as every Mind; free runs cost nothing and skip it.
+    let owner: string | null = null;
+    if (mode === "intel") {
+      const ceilingCents =
+        typeof body.spendLimitUsdCents === "number" && body.spendLimitUsdCents > 0
+          ? Math.round(body.spendLimitUsdCents)
+          : inv.spendLimitUsdCents;
+      const gate = await paidRunGate(req, "settlement assurance intelligence", ceilingCents);
+      if (gate.kind === "deny") return NextResponse.json({ error: gate.error }, { status: gate.status });
+      owner = gate.userAddress ?? inv.owner;
+    } else {
+      owner = inv.owner;
+    }
+
     const spendLimitUsdCents =
       typeof body.spendLimitUsdCents === "number" && body.spendLimitUsdCents > 0
         ? Math.round(body.spendLimitUsdCents)
         : inv.spendLimitUsdCents;
 
-    const { task } = await createAssuranceRun(inv, mode, { spendLimitUsdCents, actor: "operator" });
+    const { task } = await createAssuranceRun(inv, mode, { spendLimitUsdCents, actor, owner });
     return NextResponse.json(
       {
         task,
         poll: `/api/tasks/${task.id}`,
         note:
           task.state === "awaiting_approval"
-            ? "awaiting_approval: approve the exact plan at POST /api/tasks/:id/action {action:'approve'} before any ask is signed"
+            ? "awaiting_approval: approve the exact plan below (or on Approvals) before any ask is signed"
             : "free run accepted: probes only, nothing is signed",
       },
       { status: 202 },
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (err instanceof EngineError) return NextResponse.json({ error: message }, { status: 400 });
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: message }, { status: err instanceof EngineError ? 400 : 400 });
   }
 }

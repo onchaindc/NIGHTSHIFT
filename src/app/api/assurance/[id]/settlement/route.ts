@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
+import { callerIdentity } from "@/lib/api/auth";
 import { getInvestigation, saveInvestigation } from "@/lib/assurance/store";
 import { prepareSettlement, SettlementError, verifySettlementSignature } from "@/lib/assurance/settlement";
 
@@ -18,10 +18,21 @@ export const maxDuration = 60;
  * institutional signer.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  if (!requestAuthorized(req)) return NextResponse.json({ error: "authorization required" }, { status: 401 });
+  const identity = callerIdentity(req);
   const { id } = await ctx.params;
   const inv = await getInvestigation(id);
   if (!inv) return NextResponse.json({ error: `investigation ${id} not found` }, { status: 404 });
+
+  const isOwner =
+    identity.kind === "operator" ||
+    (identity.kind === "user" && inv.owner?.toLowerCase() === identity.address);
+  if (!isOwner) {
+    return NextResponse.json(
+      { error: identity.kind === "anonymous" ? "sign in with your wallet to act on this file" : "this file belongs to another wallet" },
+      { status: identity.kind === "anonymous" ? 401 : 403 },
+    );
+  }
+  const actor = identity.kind === "user" ? identity.address : "operator";
 
   let body: { action?: unknown; signature?: unknown };
   try {
@@ -32,14 +43,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   try {
     if (body.action === "prepare") {
-      const settlement = await prepareSettlement(inv, "operator");
+      const settlement = await prepareSettlement(inv, actor);
       return NextResponse.json({ settlement, note: "Unsigned, not broadcast. An authorized signer must sign and submit it." });
     }
     if (body.action === "verify") {
       if (typeof body.signature !== "string" || !body.signature.trim()) {
         return NextResponse.json({ error: "signature is required" }, { status: 400 });
       }
-      const settlement = await verifySettlementSignature(inv, body.signature, "operator");
+      const settlement = await verifySettlementSignature(inv, body.signature, actor);
       await saveInvestigation(inv);
       return NextResponse.json({
         settlement,

@@ -2,21 +2,25 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BrainCircuit, Compass, Radar, ReceiptText, ShieldCheck, Wallet, type LucideIcon } from "lucide-react";
+import { BrainCircuit, Compass, Radar, Wallet, type LucideIcon } from "lucide-react";
 
 /**
- * The phone's map. The areas live within thumb reach at the bottom while the
- * header stays pinned to the top for wayfinding and the global Ask action.
+ * The phone's map: four destinations with room to breathe. The intelligence
+ * network and its applications share one tab; the header stays pinned to the
+ * top for wayfinding and the global Ask action.
  */
 type Item = { href: string; label: string; icon: LucideIcon; activeFor?: string[] };
 
 const ITEMS: Item[] = [
-  { href: "/miners", label: "Explorer", icon: Compass, activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
   { href: "/minds", label: "Minds", icon: BrainCircuit },
+  {
+    href: "/intelligence",
+    label: "Intel",
+    icon: Compass,
+    activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/assurance", "/activity"],
+  },
   { href: "/signals", label: "Signals", icon: Radar },
-  { href: "/assurance", label: "Assurance", icon: ShieldCheck },
   { href: "/funds", label: "Wallet", icon: Wallet },
-  { href: "/activity", label: "Activity", icon: ReceiptText },
 ];
 
 export function MobileTabBar() {

@@ -8,26 +8,35 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { NavLinks } from "@/components/explorer/nav-links";
 import { Wordmark } from "@/components/explorer/brand";
 
-/** The product's areas, in the order a newcomer needs them. */
+/**
+ * Four destinations, in the order a newcomer needs them. The intelligence
+ * network (miners, intents, evaluators, validators) and the applications built
+ * on it (assurance, the activity ledger) live under one roof: one bar, one
+ * scrollable sub-tab row — the rest of the product stays reachable in one tap.
+ */
 const AREAS = [
-  { href: "/miners", label: "Explorer", activeFor: ["/miners", "/intents", "/evaluators", "/validators"] },
   { href: "/minds", label: "Minds" },
+  {
+    href: "/intelligence",
+    label: "Intelligence",
+    activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/assurance", "/activity"],
+  },
   { href: "/signals", label: "Signals" },
-  { href: "/assurance", label: "Assurance" },
   { href: "/funds", label: "Wallet" },
-  { href: "/activity", label: "Activity" },
 ];
 
-/** What the Explorer contains, in the network's own words. Every tab is a
-    page of its own, so no tab ever drops you on the header-less front page. */
-const EXPLORER_TABS = [
+/** What the Intelligence section contains, in the network's own words. Every
+    tab is a page of its own, so no tab ever drops you on a header-less page. */
+const INTELLIGENCE_TABS = [
   { href: "/miners", label: "Miners" },
   { href: "/intents", label: "Intents" },
   { href: "/evaluators", label: "Evaluators" },
   { href: "/validators", label: "Validators" },
+  { href: "/assurance", label: "Assurance" },
+  { href: "/activity", label: "Activity" },
 ];
 
-const EXPLORER_PATHS = ["/miners", "/intents", "/evaluators", "/validators"];
+const INTELLIGENCE_PATHS = ["/miners", "/intents", "/evaluators", "/validators", "/assurance", "/activity"];
 
 export function ExplorerHeader() {
   const pathname = usePathname();
@@ -35,7 +44,7 @@ export function ExplorerHeader() {
   // The front page is a front page: it opens with a headline, not a menu.
   if (pathname === "/") return null;
 
-  const inExplorer = EXPLORER_PATHS.some((p) => pathname.startsWith(p));
+  const inIntelligence = INTELLIGENCE_PATHS.some((p) => pathname.startsWith(p));
 
   return (
     /* Keep the wayfinding and the Ask action available on every screen. The
@@ -51,12 +60,6 @@ export function ExplorerHeader() {
         </nav>
 
         <div className="flex items-center gap-2 justify-self-end">
-          <Link
-            href="/developers"
-            className="hidden rounded-lg px-2.5 py-1.5 text-[12px] text-ink-faint transition-colors hover:text-ink sm:inline-flex"
-          >
-            Developers
-          </Link>
           <ThemeToggle />
           <Link
             href="/terminal"
@@ -74,14 +77,14 @@ export function ExplorerHeader() {
         </div>
       </div>
 
-      {/* Explorer sub-tabs: the section's own contents, one quiet scrollable row. */}
-      {inExplorer && (
+      {/* Intelligence sub-tabs: the section's own contents, one quiet scrollable row. */}
+      {inIntelligence && (
         <div className="border-t border-edge/70 bg-panel/50">
           <nav
-            aria-label="Explorer"
+            aria-label="Intelligence"
             className="mx-auto flex max-w-6xl gap-6 overflow-x-auto px-4 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden"
           >
-            <NavLinks items={EXPLORER_TABS} variant="tab" />
+            <NavLinks items={INTELLIGENCE_TABS} variant="tab" />
           </nav>
         </div>
       )}

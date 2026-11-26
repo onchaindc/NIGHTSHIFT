@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
-import { readAuthorized } from "@/lib/api/public";
+import { callerIdentity } from "@/lib/api/auth";
+import { investigationsForCaller } from "@/lib/api/public";
 import { parseCreateBody } from "@/lib/assurance/create";
 import { listInvestigations, saveInvestigation, summarize } from "@/lib/assurance/store";
 
@@ -9,21 +9,24 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/assurance — investigation summaries.
+ * GET /api/assurance — investigation summaries, identity-aware.
  *
- * Live files are operator-only. The canned demonstration scenario is a
- * synthetic sample and stays readable so the workflow can be reviewed
- * without credentials; nothing from a live file crosses this gate.
+ * The operator sees every file. A signed-in wallet sees its OWN live files in
+ * full plus the demonstration fixture; anonymous callers see the demonstration
+ * fixture only, so the workflow stays reviewable without credentials and
+ * nothing from a live file crosses that gate.
  */
 export async function GET(req: NextRequest) {
-  const authorized = readAuthorized(req);
   try {
     const all = await listInvestigations();
-    const investigations = authorized ? all : all.filter((inv) => inv.dataMode === "demonstration");
+    const { investigations } = investigationsForCaller(req, all);
+    const identity = callerIdentity(req);
     return NextResponse.json({
       investigations: investigations.map(summarize),
-      scope: authorized ? "operator" : "demonstration",
-      ...(authorized ? {} : { note: "Demonstration files only. Live files require the operator token." }),
+      scope: identity.kind === "operator" ? "operator" : identity.kind === "user" ? "user" : "demonstration",
+      ...(identity.kind === "anonymous"
+        ? { note: "Sign in with your wallet to open live files; the demonstration file is open to everyone." }
+        : {}),
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -31,18 +34,29 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** POST /api/assurance — open a live investigation file. */
+/**
+ * POST /api/assurance — open a live investigation file.
+ * The deployment operator, or any signed-in wallet: the file is owned by the
+ * wallet that opened it, so that wallet can run, approve and read it later.
+ */
 export async function POST(req: NextRequest) {
-  if (!requestAuthorized(req)) {
-    return NextResponse.json({ error: "authorization required" }, { status: 401 });
+  const identity = callerIdentity(req);
+  if (identity.kind === "anonymous") {
+    return NextResponse.json(
+      { error: "sign in with your wallet to open a live investigation file" },
+      { status: 401 },
+    );
   }
+  const owner = identity.kind === "user" ? identity.address : null;
+  const actor = owner ?? "operator";
+
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
-  const parsed = parseCreateBody(body);
+  const parsed = parseCreateBody(body, actor, owner);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   try {
     await saveInvestigation(parsed.investigation);

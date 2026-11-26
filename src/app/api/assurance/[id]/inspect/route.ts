@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
+import { callerIdentity } from "@/lib/api/auth";
 import { inspectInvestigation } from "@/lib/assurance/inspect";
 import { audit, getInvestigation, saveInvestigation } from "@/lib/assurance/store";
 
@@ -10,13 +10,25 @@ export const maxDuration = 60;
 
 /**
  * POST /api/assurance/:id/inspect — free, real Solana reads.
+ * The file's owner (wallet or operator) only: an inspection mutates the file's
+ * evidence ledger, so a read-only demonstration visitor cannot trigger it.
  * Replaces prior Solana evidence; an RPC failure is a failure, not a gap.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  if (!requestAuthorized(req)) return NextResponse.json({ error: "authorization required" }, { status: 401 });
+  const identity = callerIdentity(req);
   const { id } = await ctx.params;
   const inv = await getInvestigation(id);
   if (!inv) return NextResponse.json({ error: `investigation ${id} not found` }, { status: 404 });
+
+  const isOwner =
+    identity.kind === "operator" ||
+    (identity.kind === "user" && inv.owner?.toLowerCase() === identity.address);
+  if (!isOwner) {
+    return NextResponse.json(
+      { error: identity.kind === "anonymous" ? "sign in with your wallet to inspect this file" : "this file belongs to another wallet" },
+      { status: identity.kind === "anonymous" ? 401 : 403 },
+    );
+  }
 
   try {
     const result = await inspectInvestigation(inv);
@@ -30,7 +42,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     for (const note of result.notes) inv.limitations.push(note);
     audit(
       inv,
-      "operator",
+      identity.kind === "user" ? `wallet ${identity.address.slice(0, 10)}…` : "operator",
       "solana_inspected",
       `${result.evidence.length} live Solana read(s) recorded for payer, recipient and mint; no payment involved.`,
     );

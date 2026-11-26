@@ -25,7 +25,7 @@ function str(v: unknown, max = 400): string {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
 }
 
-export function parseCreateBody(body: CreateInvestigationBody, createdBy = "operator"): { ok: true; investigation: Investigation } | { ok: false; error: string } {
+export function parseCreateBody(body: CreateInvestigationBody, createdBy = "operator", owner: string | null = null): { ok: true; investigation: Investigation } | { ok: false; error: string } {
   const payerWallet = str(body.payerWallet, 64);
   const recipientWallet = str(body.recipientWallet, 64);
   const amountUsdc = Number(body.amountUsdc);
@@ -80,6 +80,7 @@ export function parseCreateBody(body: CreateInvestigationBody, createdBy = "oper
     updatedAt: new Date().toISOString(),
     status: "draft",
     dataMode: "live",
+    owner: owner ? owner.toLowerCase() : null,
     transaction,
     counterparty: {
       legalName: counterpartyName,

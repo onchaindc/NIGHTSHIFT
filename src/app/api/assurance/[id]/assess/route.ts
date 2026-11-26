@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
+import { callerIdentity } from "@/lib/api/auth";
 import { assessInvestigation } from "@/lib/assurance/assess";
 import { syncIntelligence } from "@/lib/assurance/run";
 import { audit, getInvestigation, saveInvestigation } from "@/lib/assurance/store";
@@ -18,10 +18,21 @@ export const maxDuration = 60;
  * changes the decision.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  if (!requestAuthorized(req)) return NextResponse.json({ error: "authorization required" }, { status: 401 });
+  const identity = callerIdentity(req);
   const { id } = await ctx.params;
   const inv = await getInvestigation(id);
   if (!inv) return NextResponse.json({ error: `investigation ${id} not found` }, { status: 404 });
+
+  const isOwner =
+    identity.kind === "operator" ||
+    (identity.kind === "user" && inv.owner?.toLowerCase() === identity.address);
+  if (!isOwner) {
+    return NextResponse.json(
+      { error: identity.kind === "anonymous" ? "sign in with your wallet to assess this file" : "this file belongs to another wallet" },
+      { status: identity.kind === "anonymous" ? 401 : 403 },
+    );
+  }
+  const actor = identity.kind === "user" ? identity.address : "operator";
 
   try {
     const synced = await syncIntelligence(inv);
@@ -32,11 +43,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     inv.status = "assessed";
     audit(
       inv,
-      "operator",
+      actor,
       "assessment_recorded",
       `${assessment.decision.outcome}: ${assessment.findings.length} finding(s), ${assessment.decision.criteria.filter((c) => c.status === "missing").length} missing check(s).`,
     );
-    audit(inv, "operator", "intelligence_synced", `${synced.added} evidence record(s) absorbed before assessment.`);
+    audit(inv, actor, "intelligence_synced", `${synced.added} evidence record(s) absorbed before assessment.`);
 
     let delivery: { attempted: boolean; ok?: boolean; detail: string } = {
       attempted: false,

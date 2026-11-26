@@ -49,6 +49,7 @@ export function createDemoInvestigation(createdBy = "operator"): Investigation {
     updatedAt: now,
     status: "collecting",
     dataMode: "demonstration",
+    owner: null,
     transaction: {
       payerWallet: demoAddress("payer"),
       recipientWallet: demoAddress("recipient"),

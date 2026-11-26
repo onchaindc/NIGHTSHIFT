@@ -13,6 +13,7 @@ import type {
   Investigation,
 } from "@/lib/assurance/types";
 import { SEVERITY_ORDER } from "@/lib/assurance/types";
+import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 
 interface RunView extends IntelligenceRun {
   taskState: string;
@@ -22,6 +23,7 @@ interface RunView extends IntelligenceRun {
 }
 
 interface Payload {
+  readOnly: boolean;
   investigation: Investigation;
   runs: RunView[];
   spend: { spentUsdCents: number; ceilingUsdCents: number };
@@ -108,6 +110,7 @@ function StatusDot({ done, active }: { done: boolean; active?: boolean }) {
 
 export function AssuranceWorkspace({ investigationId }: { investigationId: string }) {
   const [payload, setPayload] = useState<Payload | null>(null);
+  const [session, setSession] = useState<SessionState>({ mode: "loading" });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -134,6 +137,11 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
     const id = setInterval(refresh, 6000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // A fresh identity changes what the server will let this browser do.
+  useEffect(() => {
+    if (session.mode !== "loading") void refresh();
+  }, [session.mode, session.address, refresh]);
 
   const act = useCallback(
     async (key: string, run: () => Promise<Response>) => {
@@ -244,6 +252,42 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
         <p className="mt-5 rounded-md border border-edge bg-panel-3 px-3.5 py-2.5 text-[12px] text-ink-soft">{notice}</p>
       )}
 
+      {/* Decision banner: the one thing a reviewer needs first, up top. */}
+      {decision && (
+        <div className={`mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3.5 ${DECISION_STYLE[decision.outcome].panel}`}>
+          <div className="flex min-w-0 items-center gap-3">
+            {decision.outcome === "ESCALATE" ? (
+              <ShieldAlert size={18} aria-hidden className="shrink-0 text-risk" />
+            ) : decision.outcome === "HOLD" ? (
+              <CircleAlert size={18} aria-hidden className="shrink-0 text-amber" />
+            ) : (
+              <Check size={18} aria-hidden className="shrink-0 text-teal" />
+            )}
+            <div className="min-w-0">
+              <p className="text-[14px] font-semibold tracking-tight text-ink">{DECISION_STYLE[decision.outcome].label}</p>
+              <p className="mt-0.5 truncate text-[11.5px] text-ink-soft">{decision.rationale}</p>
+            </div>
+          </div>
+          <a
+            href="#decision"
+            className="shrink-0 text-[11.5px] font-medium text-ink-soft transition-colors hover:text-ink"
+          >
+            Criteria & evidence ↓
+          </a>
+        </div>
+      )}
+
+      {payload.readOnly && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-edge bg-panel-3 px-4 py-3.5">
+          <p className="text-[12px] leading-relaxed text-ink-soft">
+            {inv.dataMode === "demonstration"
+              ? "Demonstration file — open to everyone, read-only. Sign in with your wallet to open and run live files."
+              : "This file belongs to another wallet, or you are browsing anonymously. Actions are available to its owner."}
+          </p>
+          <WalletSignIn onSession={setSession} compact />
+        </div>
+      )}
+
       <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1fr)_268px] lg:gap-12">
         <div className="min-w-0">
           {/* 01 — transaction */}
@@ -290,7 +334,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
               <button
                 type="button"
                 onClick={() => void act("inspect", () => fetch(`/api/assurance/${inv.id}/inspect`, { method: "POST" }))}
-                disabled={busy !== null}
+                disabled={busy !== null || payload.readOnly || inv.dataMode === "demonstration"}
                 className="btn-signal !min-h-9 !text-[12px]"
               >
                 {busy === "inspect" ? "Reading Solana…" : hasEvidence ? "Re-run Solana inspection (free)" : "Run Solana inspection (free)"}
@@ -306,7 +350,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
                     }),
                   )
                 }
-                disabled={busy !== null}
+                disabled={busy !== null || payload.readOnly || inv.dataMode === "demonstration"}
                 className="btn-quiet !min-h-9 !text-[12px]"
               >
                 {busy === "free" ? "Probing…" : "Free pre-flight"}
@@ -322,9 +366,9 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
                     }),
                   )
                 }
-                disabled={busy !== null || inv.dataMode === "demonstration"}
+                disabled={busy !== null || payload.readOnly || inv.dataMode === "demonstration"}
                 className="btn-quiet !min-h-9 !text-[12px]"
-                title={inv.dataMode === "demonstration" ? "Demonstration files cannot spend" : undefined}
+                title={inv.dataMode === "demonstration" ? "Demonstration files cannot spend" : payload.readOnly ? "Sign in as the file's owner to run intelligence" : undefined}
               >
                 {busy === "intel" ? "Creating plan…" : "Request paid intelligence"}
               </button>
@@ -340,7 +384,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
                       }),
                     )
                   }
-                  disabled={busy !== null}
+                  disabled={busy !== null || payload.readOnly}
                   className="btn-quiet !min-h-9 !text-[12px]"
                 >
                   Sync evidence
@@ -489,7 +533,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
               <button
                 type="button"
                 onClick={() => void act("assess", () => fetch(`/api/assurance/${inv.id}/assess`, { method: "POST" }))}
-                disabled={busy !== null}
+                disabled={busy !== null || payload.readOnly || inv.dataMode === "demonstration"}
                 className="btn-quiet !min-h-8 !px-3 !text-[11.5px]"
               >
                 {busy === "assess" ? "Assessing…" : "Record assessment"}
@@ -528,7 +572,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
           </Section>
 
           {/* 05 — decision */}
-          <Section n="05" title="Authorization decision">
+          <Section n="05" title="Authorization decision" meta={<span id="decision" className="scroll-mt-24" aria-hidden />}>
             {!decision ? (
               <p className="text-[12.5px] text-ink-soft">
                 No decision is recorded. The assessment produces CLEARED, HOLD or ESCALATE from the evidence above.
@@ -660,7 +704,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
                       className="tabular w-full rounded-md border border-edge bg-panel-2 px-3 py-2 text-[12px] text-ink placeholder:text-ink-faint focus:border-amber/50 focus:outline-none"
                     />
                   </label>
-                  <button type="submit" disabled={busy !== null || signature.trim().length < 64} className="btn-quiet !min-h-9 !text-[12px]">
+                  <button type="submit" disabled={busy !== null || payload.readOnly || signature.trim().length < 64} className="btn-quiet !min-h-9 !text-[12px]">
                     {busy === "verify" ? "Checking chain…" : "Verify on chain"}
                   </button>
                 </form>
@@ -674,7 +718,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
                 <button
                   type="button"
                   onClick={() => void act("prepare", () => fetch(`/api/assurance/${inv.id}/settlement`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare" }) }))}
-                  disabled={busy !== null}
+                  disabled={busy !== null || payload.readOnly}
                   className="btn-primary mt-3 !min-h-9 !text-[12px]"
                 >
                   {busy === "prepare" ? "Reading live chain state…" : "Prepare settlement bundle"}

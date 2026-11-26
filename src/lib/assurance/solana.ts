@@ -158,6 +158,8 @@ export interface WalletInspection {
   signatures: Array<{ signature: string; slot: number; blockTime: number | null; err: unknown }>;
   oldestSignatureBlockTime: number | null;
   newestSignatureBlockTime: number | null;
+  /** Present when history could not be read (rate limit) — absence of history is NOT reported as no activity. */
+  historyUnavailable?: string;
   rpcUrl: string;
   slot: number | null;
   readAt: string;

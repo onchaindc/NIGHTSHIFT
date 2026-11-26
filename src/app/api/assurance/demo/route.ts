@@ -1,17 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { requestAuthorized } from "@/lib/api/auth";
 import { createDemoInvestigation } from "@/lib/assurance/demo";
-import { saveInvestigation } from "@/lib/assurance/store";
+import { listInvestigations, saveInvestigation } from "@/lib/assurance/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** POST /api/assurance/demo — seed the labelled demonstration scenario. */
-export async function POST(req: NextRequest) {
-  if (!requestAuthorized(req)) return NextResponse.json({ error: "authorization required" }, { status: 401 });
+/**
+ * POST /api/assurance/demo — seed the labelled demonstration scenario.
+ *
+ * Open to every caller and IDEMPOTENT: the fixture is synthetic, carries no
+ * private data, can never be CLEARED or settled, and is deliberately readable
+ * without credentials so the whole workflow can be reviewed. Seeding reuses
+ * the existing fixture when one is on record, so this endpoint can never be
+ * used to grow the store anonymously.
+ */
+export async function POST(_req: NextRequest) {
   try {
-    const inv = createDemoInvestigation("operator");
+    const all = await listInvestigations();
+    const existing = all.find((inv) => inv.dataMode === "demonstration");
+    if (existing) return NextResponse.json({ investigation: existing, note: "Existing demonstration file returned." });
+    const inv = createDemoInvestigation("demonstration");
     await saveInvestigation(inv);
     return NextResponse.json({ investigation: inv }, { status: 201 });
   } catch (err) {
