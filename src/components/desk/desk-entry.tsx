@@ -28,6 +28,7 @@ const TYPE_ACCENT: Record<string, string> = {
   counterparty_due_diligence: "bg-teal/10 text-teal border-teal/30",
   asset_intelligence: "bg-amber/10 text-amber border-amber/30",
   trade_supplier_intelligence: "bg-[--accent]/10 text-[--accent] border-[--accent]/30",
+  listing_underwriter: "bg-teal/10 text-teal border-teal/30",
 };
 
 function TypeCard({ workflow }: { workflow: DeskWorkflowSummary }) {
