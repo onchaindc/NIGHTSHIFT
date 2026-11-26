@@ -61,6 +61,7 @@ const REFERENCE_PREFIX: Record<DeskInvestigationType, string> = {
   counterparty_due_diligence: "NS-CP",
   asset_intelligence: "NS-AS",
   trade_supplier_intelligence: "NS-TR",
+  listing_underwriter: "NS-LU",
 };
 
 export function newDeskReference(type: DeskInvestigationType): string {
