@@ -4,7 +4,7 @@
 
 NIGHTSHIFT is a commercial intelligence workspace built on the [Telegraph network](https://telegraph.network). It helps people discover specialist intelligence providers, investigate companies and assets, compare evidence, and turn network answers into decisions that can be reviewed and acted on.
 
-It is not another miner directory or a generic chat interface. NIGHTSHIFT connects network discovery, paid specialist queries, evidence verification, investigation workflows, and agent-facing service delivery in one product.
+NIGHTSHIFT brings Telegraph network discovery, specialist intelligence, evidence verification, and commercial investigation workflows into one integrated workspace.
 
 Production: https://nightshift-telegraph.vercel.app  
 Repository: https://github.com/onchaindc/NIGHTSHIFT
