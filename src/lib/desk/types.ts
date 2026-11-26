@@ -28,7 +28,8 @@ import type { AuditEntry } from "@/lib/assurance/types";
 export type DeskInvestigationType =
   | "counterparty_due_diligence"
   | "asset_intelligence"
-  | "trade_supplier_intelligence";
+  | "trade_supplier_intelligence"
+  | "listing_underwriter";
 
 /** The four provenance classes every claim must declare. */
 export type ProvenanceClass = "verified" | "unverified" | "missing" | "analysis";
@@ -225,6 +226,7 @@ export const DESK_TYPE_LABEL: Record<DeskInvestigationType, string> = {
   counterparty_due_diligence: "Counterparty Due Diligence",
   asset_intelligence: "Asset Intelligence",
   trade_supplier_intelligence: "Trade & Supplier Intelligence",
+  listing_underwriter: "Listing Underwriter",
 };
 
 export const DESK_VERDICT_LABEL: Record<DeskVerdict, string> = {
