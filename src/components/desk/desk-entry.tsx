@@ -7,6 +7,7 @@ import { ArrowRight, CircleAlert, LoaderCircle, ShieldCheck } from "lucide-react
 import type { DeskInvestigationSummary } from "@/lib/desk/types";
 import { DESK_TYPE_LABEL } from "@/lib/desk/types";
 import type { DeskWorkflowSummary } from "@/lib/desk/workflows";
+import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 
 const CONFIDENCE_TONE: Record<string, string> = {
@@ -77,7 +78,7 @@ export function DeskEntry({ workflows }: { workflows: DeskWorkflowSummary[] }) {
       setRows(body.investigations ?? []);
       setListError(null);
     } catch (err) {
-      setListError(`Could not reach the server. ${err instanceof Error ? err.message : String(err)}`);
+      setListError(friendlyNetworkError(err));
     }
   }, []);
 

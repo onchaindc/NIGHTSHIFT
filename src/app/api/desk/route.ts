@@ -86,10 +86,26 @@ export async function POST(req: NextRequest) {
   }
   const parsed = parseCreateDeskBody(body, actor, owner);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  // One retry for the Neon cold-start window (the same pattern the GET list
+  // uses): the store's first write after the database wakes can fail while a
+  // second attempt a moment later succeeds. Without it, opening a file on a
+  // cold deployment surfaces a raw driver error.
   try {
     await saveDeskInvestigation(parsed.investigation);
-    return NextResponse.json({ investigation: parsed.investigation }, { status: 201 });
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  } catch (first) {
+    await new Promise((r) => setTimeout(r, 900));
+    try {
+      await saveDeskInvestigation(parsed.investigation);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|fetch failed|unreachable|503|connect/i.test(`${first} ${detail}`)) {
+        return NextResponse.json(
+          { error: "Storage was briefly unavailable (the database sleeps between requests). One moment, then retry." },
+          { status: 503 },
+        );
+      }
+      return NextResponse.json({ error: detail.slice(0, 200) }, { status: 500 });
+    }
   }
+  return NextResponse.json({ investigation: parsed.investigation }, { status: 201 });
 }

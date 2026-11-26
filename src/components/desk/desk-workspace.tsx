@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, CircleAlert, LoaderCircle } from "lucide-react";
 import type { TaskRecord } from "@/lib/engine/types";
 import type { DeskEvidence, DeskInvestigation } from "@/lib/desk/types";
 import { DESK_TYPE_LABEL } from "@/lib/desk/types";
+import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { vibrate } from "@/lib/haptics";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
@@ -124,7 +125,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
       setInv(body.investigation ?? null);
       setLoadError(null);
     } catch (err) {
-      setLoadError(`Could not reach the server. ${err instanceof Error ? err.message : String(err)}`);
+      setLoadError(friendlyNetworkError(err));
     }
   }, [investigationId]);
 
@@ -153,7 +154,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
         setNotice(body.note ?? (body.notes?.length ? body.notes.join(" ") : null));
         await refresh();
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : String(err));
+        setActionError(friendlyNetworkError(err));
       } finally {
         setBusy(null);
       }
@@ -183,7 +184,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
         if (to === "completed" && syncedForRef.current !== body.task.id) {
           syncedForRef.current = body.task.id;
           void act("sync", () =>
-            fetch(`/api/desk/${investigationId}`, {
+            fetch(`/api/desk/${investigationId}/run`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ action: "report", mode: body.task?.labels?.some((l) => l === "desk-mode:intel") ? "intel" : "free" }),
@@ -317,7 +318,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
             title={isOwner ? undefined : "Only the file's owner or the operator can run it"}
             onClick={() =>
               void act("run-free", () =>
-                fetch(`/api/desk/${inv.id}`, {
+                fetch(`/api/desk/${inv.id}/run`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ action: "run", mode: "free" }),
@@ -335,7 +336,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
             title={isOwner ? "Stops at the approval gate; nothing is signed until you approve" : "Only the file's owner or the operator can run it"}
             onClick={() =>
               void act("run-intel", () =>
-                fetch(`/api/desk/${inv.id}`, {
+                fetch(`/api/desk/${inv.id}/run`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ action: "run", mode: "intel" }),
@@ -352,7 +353,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
             disabled={busy !== null || !isOwner || inv.runs.length === 0}
             onClick={() =>
               void act("sync", () =>
-                fetch(`/api/desk/${inv.id}`, {
+                fetch(`/api/desk/${inv.id}/run`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ action: "report", mode: inv.runs.some((r) => r.mode === "intel") ? "intel" : "free" }),
@@ -405,7 +406,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
               resuming={busy === "resume"}
               onRunAgain={() =>
                 void act("run-again", () =>
-                  fetch(`/api/desk/${inv.id}`, {
+                  fetch(`/api/desk/${inv.id}/run`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ action: "run", mode: "free" }),

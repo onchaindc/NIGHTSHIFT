@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * POST /api/desk/:id
+ * POST /api/desk/:id/run
  *   { action: "run", mode: "free" | "intel", spendLimitUsdCents? }
  *   { action: "sync" }
  *   { action: "report", mode? }

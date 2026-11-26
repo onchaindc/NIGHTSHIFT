@@ -7,6 +7,7 @@ import { ArrowRight, LoaderCircle, ScanSearch, ShieldCheck } from "lucide-react"
 
 import type { Investigation, InvestigationSummary } from "@/lib/assurance/types";
 import { USDC_MINT_MAINNET } from "@/lib/assurance/types";
+import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 
 const DECISION_STYLE: Record<string, string> = {
@@ -68,7 +69,7 @@ function ScanCard() {
       }
       setResult(body);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyNetworkError(err));
     } finally {
       setBusy(false);
     }
@@ -179,6 +180,22 @@ const EMPTY_FORM = {
   ownershipRequired: true,
 };
 
+/** A realistic worked example for the "Fill sample values" button. The
+ * wallets are this deployment's own deterministic demo fixtures (the same
+ * derivation the assurance demo files use) — sample data, not real
+ * counterparties. */
+const SAMPLE_FORM = {
+  counterpartyName: "Northstar Capital Holdings Ltd",
+  jurisdiction: "GB",
+  registrationNumber: "UK-09876543",
+  amountUsdc: "2400000",
+  payerWallet: "GsTtTi66ktp3Db9ehm5eF3bpaTEbAXVkdwzyZsbnXXyT",
+  recipientWallet: "GfdQGZhQ2gqoDZDsV8JNmDvWRWMVKLwoqmQcrQN485ss",
+  memo: "MSA-2026-0417 · drawdown 3",
+  spendLimit: "0.15",
+  ownershipRequired: true,
+};
+
 export function AssuranceIndex() {
   const router = useRouter();
   const [rows, setRows] = useState<InvestigationSummary[] | null>(null);
@@ -209,7 +226,7 @@ export function AssuranceIndex() {
       setRows((body.investigations ?? []).filter((r) => r.dataMode !== "demonstration"));
     } catch (err) {
       setRows([]);
-      setListError(`Could not reach the server. ${err instanceof Error ? err.message : String(err)}`);
+      setListError(friendlyNetworkError(err));
     }
   }, []);
 
@@ -250,7 +267,7 @@ export function AssuranceIndex() {
       }
       router.push(`/desk/${body.investigation.id}`);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : String(err));
+      setFormError(friendlyNetworkError(err));
     } finally {
       setBusy(false);
     }
@@ -393,6 +410,31 @@ export function AssuranceIndex() {
             />
             <span className="text-[12px] leading-snug text-ink-soft">Ownership behind the counterparty is material</span>
           </label>
+
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+            <button
+              type="button"
+              onClick={() => {
+                setFormError(null);
+                setForm({ ...SAMPLE_FORM });
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[11.5px] font-medium text-teal transition-colors hover:bg-teal/15"
+            >
+              Fill sample values
+            </button>
+            {JSON.stringify(form) !== JSON.stringify(EMPTY_FORM) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFormError(null);
+                  setForm({ ...EMPTY_FORM });
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-1.5 text-[11.5px] text-ink-soft transition-colors hover:text-ink"
+              >
+                Clear
+              </button>
+            )}
+          </div>
 
           {formError && (
             <p role="alert" className="rounded-lg border border-risk/40 bg-risk/5 px-3.5 py-2.5 text-[12.5px] text-risk sm:col-span-2">

@@ -66,6 +66,11 @@ export interface DeskWorkflowDef {
   sections: DeskWorkflowSection[];
   /** Shown on the guided form before anything is planned. */
   honestyNotes: string[];
+  /** One realistic worked example, field name → answer. Powers the guided
+   * form's "Fill sample values" button so a reviewer can test the whole flow
+   * without inventing data. Samples are examples, not verified facts — the
+   * file records them as declared inputs exactly like any typed answer. */
+  samples: Record<string, string>;
 }
 
 const PERIOD = "last 12 months";
@@ -254,6 +259,14 @@ const COUNTERPARTY_WORKFLOW: DeskWorkflowDef = {
     "Court dockets and judgments are unsupported; adverse coverage is news search, not a case ledger.",
     "The name screen is probabilistic and is not a legal determination.",
   ],
+  samples: {
+    legalName: "Maersk A/S",
+    jurisdiction: "DK",
+    role: "supplier",
+    website: "maersk.com",
+    claim: "The company completed its 2025 audit without qualifications.",
+    spendLimitUsdCents: "10",
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -618,6 +631,17 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
     "Production volumes, licence tenure, outages and facility telemetry have no verified route and stay named gaps.",
     "Pool concentration and fleet uptime are not inferred from network hashrate.",
   ],
+  samples: {
+    assetClass: "digital_asset",
+    assetName: "Treasury wallet A",
+    chain: "base",
+    walletAddress: "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+    txHash: "0x45bc185bc34ed246f341a09812bb3c95b2a4d0e78699b585820fca9c323d9aed",
+    blockNumber: "23000000",
+    tokenSymbol: "USDC",
+    marketSubject: "Uniswap USDC/ETH",
+    spendLimitUsdCents: "10",
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -935,6 +959,22 @@ const TRADE_WORKFLOW: DeskWorkflowDef = {
     "Terminal berth schedules are unsupported; port congestion is a port-level snapshot.",
     "Vessel screening is name-based only — no IMO/MMSI match or ownership link.",
   ],
+  samples: {
+    supplierName: "Siemens AG",
+    jurisdiction: "DE",
+    website: "siemens.com",
+    poNumber: "PO-2026-0042",
+    invoiceRef: "INV-2026-1042",
+    ledgerRef: "INV-2026-1042 12000 USD",
+    orderId: "ORD-88416",
+    carrier: "Maersk Line",
+    route: "Rotterdam-Singapore",
+    originPort: "Rotterdam",
+    destinationPort: "Singapore",
+    weightKg: "18400",
+    vesselName: "Emma Maersk",
+    spendLimitUsdCents: "10",
+  },
 };
 
 export const DESK_WORKFLOWS: Record<DeskInvestigationType, DeskWorkflowDef> = {
@@ -997,6 +1037,7 @@ export interface DeskWorkflowSummary {
   unsupported: Array<{ label: string; requirement: string; reason: string; resolution: string }>;
   sections: Array<{ id: string; title: string; description: string }>;
   honestyNotes: string[];
+  samples: Record<string, string>;
 }
 
 /**
@@ -1026,5 +1067,6 @@ export function describeDeskWorkflow(type: DeskInvestigationType): DeskWorkflowS
     }),
     sections: w.sections.map((s) => ({ id: s.id, title: s.title, description: s.description })),
     honestyNotes: w.honestyNotes,
+    samples: w.samples,
   };
 }

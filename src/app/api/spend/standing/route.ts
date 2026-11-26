@@ -16,20 +16,10 @@ import { callerIdentity } from "@/lib/api/auth";
 import { userDailySpendCapCents } from "@/lib/api/userSpend";
 import { listTasks } from "@/lib/engine/store";
 import type { TaskRecord } from "@/lib/engine/types";
+import { spendLabelForTask } from "@/lib/minds/spend-label";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function mindOfTask(task: TaskRecord): string {
-  for (const step of task.plan ?? []) {
-    if (/^(capability|mind|index|counterparty)_/.test(step.kind) && typeof step.target === "string" && step.target) {
-      return step.target;
-    }
-  }
-  if (task.jobType === "protocol_watch") return "protocol-watch";
-  if (task.jobType === "terminal_request") return "terminal";
-  return "other";
-}
 
 function spendBreakdown(tasks: TaskRecord[], ownerLower: string | null): { spentCents: number; perMind: Array<{ mind: string; spentCents: number }> } {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -40,7 +30,7 @@ function spendBreakdown(tasks: TaskRecord[], ownerLower: string | null): { spent
     for (const entry of task.spend?.entries ?? []) {
       if (entry.ts >= cutoff && entry.source === "telegraph") {
         spent += entry.amountUsdCents;
-        const mind = mindOfTask(task);
+        const mind = spendLabelForTask(task);
         perMind.set(mind, (perMind.get(mind) ?? 0) + entry.amountUsdCents);
       }
     }

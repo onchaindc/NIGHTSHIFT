@@ -2,17 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { ArrowLeft, ArrowRight, CircleAlert, LoaderCircle } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ArrowLeft, ArrowRight, Check, Eraser, LoaderCircle, Sparkles } from "lucide-react";
 
 import type { DeskWorkflowSummary } from "@/lib/desk/workflows";
+import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 
 /**
  * The guided investigation form for one specialised workflow. Fields come
  * from the workflow definition (server-rendered props, no client matrix);
  * optional fields that unlock capabilities carry an explicit unlock note so
- * the caller knows what a filled field will buy.
+ * the caller knows what a filled field will buy, and the plan meter up top
+ * counts the optional routes the answers so far have unlocked.
  */
 export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
   const router = useRouter();
@@ -25,12 +27,29 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
   const required = workflow.fields.filter((f) => f.required);
   const optional = workflow.fields.filter((f) => !f.required);
 
+  /** Optional routes (capability names) unlocked by the answers filled so far. */
+  const unlockedRoutes = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of workflow.fields) {
+      if (!f.required && (subject[f.name] ?? "").trim().length > 0) {
+        for (const u of f.unlocks ?? []) set.add(u);
+      }
+    }
+    return [...set];
+  }, [subject, workflow.fields]);
+  const requiredFilled = required.every((f) => (subject[f.name] ?? "").trim().length > 0);
+
   const field =
     "w-full min-h-10 rounded-lg border border-edge bg-panel-2 px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:border-teal focus:outline-none";
 
   async function submit() {
-    setBusy(true);
     setError(null);
+    const missing = required.filter((f) => !(subject[f.name] ?? "").trim());
+    if (missing.length > 0) {
+      setError(`Fill in ${missing.map((f) => f.label).join(" and ")} to open the file.`);
+      return;
+    }
+    setBusy(true);
     try {
       const res = await fetch("/api/desk", {
         method: "POST",
@@ -44,10 +63,20 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
       }
       router.push(`/desk/i/${body.investigation.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyNetworkError(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  function fillSamples() {
+    setError(null);
+    setSubject({ ...workflow.samples });
+  }
+
+  function clearForm() {
+    setError(null);
+    setSubject({});
   }
 
   function renderField(f: (typeof workflow.fields)[number]) {
@@ -55,16 +84,16 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
     const set = (v: string) => setSubject((s) => ({ ...s, [f.name]: v }));
     return (
       <label key={f.name} className="block">
-        <span className="x-label mb-1 block">
-          {f.label}
+        <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="x-label">{f.label}</span>
           {f.unlocks?.length ? (
-            <span className="ml-2 rounded border border-teal/30 bg-teal/5 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-teal">
+            <span className="inline-flex max-w-full items-center rounded-full border border-teal/30 bg-teal/5 px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-teal">
               unlocks {f.unlocks.join(", ")}
             </span>
           ) : null}
         </span>
         {f.kind === "select" ? (
-          <select className={field} value={value} onChange={(e) => set(e.target.value)}>
+          <select className={`${field} mt-1`} value={value} onChange={(e) => set(e.target.value)}>
             <option value="">Select…</option>
             {f.options?.map((o) => (
               <option key={o.value} value={o.value}>
@@ -73,10 +102,10 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
             ))}
           </select>
         ) : f.kind === "textarea" ? (
-          <textarea className={`${field} min-h-20`} value={value} onChange={(e) => set(e.target.value)} placeholder={f.placeholder} />
+          <textarea className={`${field} mt-1 min-h-20`} value={value} onChange={(e) => set(e.target.value)} placeholder={f.placeholder} />
         ) : (
           <input
-            className={`${field}${f.kind === "number" ? " tabular" : ""}`}
+            className={`${field} mt-1${f.kind === "number" ? " tabular" : ""}`}
             value={value}
             onChange={(e) => set(f.kind === "number" ? e.target.value.replace(/[^0-9]/g, "") : e.target.value)}
             placeholder={f.placeholder}
@@ -105,7 +134,41 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
         <WalletSignIn onSession={setSession} compact />
       </header>
 
-      <section aria-label="Guided form" className="mt-8 overflow-hidden rounded-3xl border border-edge bg-panel">
+      {/* The plan meter: what the answers so far have unlocked. Counted from
+          the workflow's own unlock notes — no invented routes, no fake plan. */}
+      <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-edge bg-panel px-4 py-3 text-[12px]">
+        <span className="flex items-center gap-1.5 font-medium text-ink">
+          <Sparkles size={13} aria-hidden className="text-teal" />
+          The file
+        </span>
+        <span className="text-ink-soft">
+          <span className={`tabular font-semibold ${requiredFilled ? "text-teal" : "text-ink"}`}>{requiredFilled ? "Ready" : "Waiting on required answers"}</span>
+        </span>
+        <span className="text-ink-faint">
+          <span className="tabular font-semibold text-ink">{unlockedRoutes.length}</span> optional route(s) unlocked by what you filled
+        </span>
+        <span className="text-ink-faint">
+          <span className="tabular font-semibold text-ink">{workflow.capabilityCount}</span> verified route(s) in this workflow in total
+        </span>
+        <button
+          type="button"
+          onClick={fillSamples}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[11.5px] font-medium text-teal transition-colors hover:bg-teal/15"
+        >
+          <Check size={12} aria-hidden /> Fill sample values
+        </button>
+        {Object.keys(subject).length > 0 && (
+          <button
+            type="button"
+            onClick={clearForm}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-1.5 text-[11.5px] text-ink-soft transition-colors hover:text-ink"
+          >
+            <Eraser size={12} aria-hidden /> Clear
+          </button>
+        )}
+      </div>
+
+      <section aria-label="Guided form" className="mt-4 overflow-hidden rounded-3xl border border-edge bg-panel">
         <form
           className="grid gap-4 px-5 py-6 sm:grid-cols-2 sm:px-7"
           onSubmit={(e) => {
@@ -113,10 +176,10 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
             void submit();
           }}
         >
-          <p className="x-label sm:col-span-2">Required</p>
+          <p className="x-label sm:col-span-2">Required — the subject of the file</p>
           {required.map(renderField)}
 
-          <p className="x-label mt-2 sm:col-span-2">Optional — the routes they unlock</p>
+          <p className="x-label mt-2 sm:col-span-2">Optional — every route each answer unlocks</p>
           {optional.map(renderField)}
 
           {error && (
@@ -149,18 +212,38 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
         </form>
       </section>
 
+      {/* The report shape, up front: the sections this file's report carries,
+          exactly as the workflow defines them — a preview of what you get,
+          not a promise of findings. */}
+      <section aria-label="Report sections preview" className="mt-4">
+        <p className="x-label">The report this file produces — {workflow.sections.length} fixed sections</p>
+        <ol className="mt-3 grid gap-2 sm:grid-cols-2">
+          {workflow.sections.map((s, i) => (
+            <li key={s.id} className="flex gap-3 rounded-xl border border-edge bg-panel px-3.5 py-3">
+              <span
+                aria-hidden
+                className="tabular grid h-6 w-6 shrink-0 place-items-center rounded-full border border-teal/30 bg-teal/5 text-[11px] font-semibold text-teal"
+              >
+                {i + 1}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[12.5px] font-medium text-ink">{s.title}</span>
+                <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-faint">{s.description}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      </section>
+
       <details className="group mt-4 rounded-2xl border border-edge bg-panel/60 px-5 py-4">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12.5px] font-medium text-ink-soft transition-colors hover:text-ink">
-          What this workflow cannot do — named before you open the file
+          Scope and limits — what this workflow verifies, and what stays named
           <span aria-hidden className="transition-transform group-open:rotate-180">▾</span>
         </summary>
         <ul className="mt-3 space-y-2">
           {workflow.unsupported.map((g) => (
             <li key={g.label} className="rounded-xl border border-edge bg-panel-2 px-3.5 py-3">
-              <p className="flex items-start gap-1.5 text-[12.5px] font-medium text-ink">
-                <CircleAlert size={13} aria-hidden className="mt-0.5 shrink-0 text-amber" />
-                {g.label} — unsupported
-              </p>
+              <p className="text-[12.5px] font-medium text-ink">{g.label}</p>
               <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">{g.reason}</p>
               <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">Resolution: {g.resolution}</p>
             </li>
