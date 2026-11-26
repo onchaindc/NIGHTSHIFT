@@ -43,11 +43,12 @@ afterEach(() => resetDeskCapabilityDeps());
 /* ------------------------------------------------------------------ */
 
 describe("desk workflow registry", () => {
-  it("defines exactly the three specialised workflows", () => {
+  it("defines the specialised workflows, including Listing Underwriter", () => {
     expect(DESK_TYPE_ORDER).toEqual([
       "counterparty_due_diligence",
       "asset_intelligence",
       "trade_supplier_intelligence",
+      "listing_underwriter",
     ]);
     for (const type of DESK_TYPE_ORDER) {
       const w = DESK_WORKFLOWS[type];
@@ -143,11 +144,18 @@ describe("desk create/parse", () => {
     expect(deskSubjectLine(inv)).toContain("Acme Holdings Limited");
   });
 
-  it("opens asset and trade files with type-specific references", () => {
+  it("opens asset, trade and listing files with type-specific references", () => {
     const asset = parseCreateDeskBody({ type: "asset_intelligence", subject: { assetClass: "mining", assetName: "Site 4" } });
     expect(asset.ok).toBe(true);
     const trade = parseCreateDeskBody({ type: "trade_supplier_intelligence", subject: { supplierName: "Siemens AG", jurisdiction: "DE" } });
     expect(trade.ok).toBe(true);
+    const listing = parseCreateDeskBody({ type: "listing_underwriter", subject: { assetClass: "digital_asset", assetName: "USDC", tokenSymbol: "USDC", chain: "ethereum", issuerEntity: "Circle Internet Group, Inc.", issuerJurisdiction: "US", marketSubject: "Uniswap USDC/ETH" } });
+    expect(listing.ok).toBe(true);
+    if (listing.ok) {
+      expect(listing.investigation.reference.startsWith("NS-LU")).toBe(true);
+      expect(listing.investigation.type).toBe("listing_underwriter");
+      expect(listing.investigation.unsupported.some((g) => g.capabilityKey === "ownershipgraph:beneficial_ownership")).toBe(true);
+    }
     if (trade.ok) {
       expect(trade.investigation.reference.startsWith("NS-TR")).toBe(true);
       expect(trade.investigation.unsupported.some((g) => g.capabilityKey === "tradeverify:documents")).toBe(true);
@@ -220,6 +228,42 @@ describe("desk planning", () => {
     expect(plan.unsupported.map((g) => g.capabilityKey)).toContain("ownershipgraph:beneficial_ownership");
     expect(plan.unsupported.map((g) => g.capabilityKey)).toContain("sanctionsdesk:related_parties");
     expect(plan.unsupported.map((g) => g.capabilityKey)).toContain("caseledger:docket_retrieval");
+  });
+
+
+  it("plans Listing Underwriter across existing issuer, token and market specialists", () => {
+    const inv = deskInv("listing_underwriter", {
+      assetClass: "digital_asset",
+      assetName: "USDC",
+      tokenSymbol: "USDC",
+      chain: "ethereum",
+      issuerEntity: "Circle Internet Group, Inc.",
+      issuerJurisdiction: "US",
+      issuerWebsite: "circle.com",
+      controllerName: "Named Controller",
+      declaredSupply: "1000000000",
+      marketSubject: "Uniswap USDC/ETH",
+    });
+    const plan = planDeskCapabilities(inv);
+    const keys = plan.capabilities.map((c) => c.key);
+    for (const key of [
+      "index-reconstitution-desk:registry",
+      "index-reconstitution-desk:filings",
+      "index-reconstitution-desk:supply",
+      "index-reconstitution-desk:holders",
+      "index-reconstitution-desk:liquidity",
+      "index-reconstitution-desk:price",
+      "chainforensics:holder_concentration",
+      "chainforensics:wash_trading",
+      "ownershipgraph:b2b_enrichment",
+      "sanctionsdesk:name_screening",
+      "ownershipgraph:sanctions_check",
+      "caseledger:adverse_media",
+    ]) expect(keys).toContain(key);
+    expect(keys.every((key) => !key.startsWith("bitcoin-mining-intelligence:"))).toBe(true);
+    expect(plan.capabilities.find((c) => c.key === "ownershipgraph:b2b_enrichment")?.params).toEqual({ company: "Circle Internet Group, Inc." });
+    expect(plan.unsupported.map((g) => g.capabilityKey)).toContain("ownershipgraph:beneficial_ownership");
+    expect(plan.unsupported.map((g) => g.capabilityKey)).toContain("sanctionsdesk:related_parties");
   });
 
   it("asset class decides the capability set — no route outside the class is planned", () => {
