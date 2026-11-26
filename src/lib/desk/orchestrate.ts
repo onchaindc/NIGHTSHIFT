@@ -808,7 +808,7 @@ function buildDiscrepancies(inv: DeskInvestigation): DeskDiscrepancy[] {
   }
 
   // Stated supply vs the network-verified total supply (asset workflow).
-  if (inv.type === "asset_intelligence") {
+  if (inv.type === "asset_intelligence" || inv.type === "listing_underwriter") {
     const declaredSupply = inv.evidence.find((e) => e.id === "declared:declaredSupply");
     const verifiedSupply = inv.evidence.find((e) => e.provenance === "verified" && /:supply/.test(e.capability) && e.facts.total_supply !== undefined);
     if (declaredSupply && verifiedSupply) {
