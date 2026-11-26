@@ -407,6 +407,24 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
       help: "ISO 3166 alpha-2; the issuer registry schema requires it.",
     },
     {
+      name: "issuerWebsite",
+      label: "Issuer website or domain (optional)",
+      kind: "text",
+      required: false,
+      placeholder: "e.g. issuer.example",
+      unlocks: ["Issuer firmographic enrichment"],
+      help: "Disambiguates the issuer and unlocks company enrichment.",
+    },
+    {
+      name: "controllerName",
+      label: "Named director or controller (optional)",
+      kind: "text",
+      required: false,
+      placeholder: "A person or entity you want screened",
+      unlocks: ["Controller sanctions screening"],
+      help: "Screens the name you supply. It does not establish that the person controls the issuer.",
+    },
+    {
       name: "declaredSupply",
       label: "Stated total supply (optional)",
       kind: "text",
@@ -593,6 +611,45 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
         return issuer ? { entity: issuer, period: PERIOD } : null;
       },
     },
+    // Existing issuer specialists extend IRD's token record. These routes
+    // are probe-verified, so paid answers remain explicitly unproven until
+    // their committed payloads are tested in a real investigation.
+    {
+      mind: "ownershipgraph",
+      dimension: "b2b_enrichment",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const company = req(s.issuerWebsite) ?? req(s.issuerEntity);
+        return company ? { company } : null;
+      },
+    },
+    {
+      mind: "sanctionsdesk",
+      dimension: "name_screening",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const name = req(s.issuerEntity);
+        return name ? { name } : null;
+      },
+    },
+    {
+      mind: "ownershipgraph",
+      dimension: "sanctions_check",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const name = req(s.controllerName);
+        return name ? { name } : null;
+      },
+    },
+    {
+      mind: "caseledger",
+      dimension: "adverse_media",
+      when: (s) => s.assetClass === "digital_asset",
+      params: (s) => {
+        const issuer = req(s.issuerEntity);
+        return issuer ? { query: `${issuer} lawsuit OR enforcement OR insolvency OR investigation` } : null;
+      },
+    },
     // Mining
     {
       mind: "bitcoin-mining-intelligence",
@@ -699,6 +756,9 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
   gapRefs: [
     { mind: "chainforensics", dimension: "clustering_labels" },
     { mind: "chainforensics", dimension: "fund_flow_tracing" },
+    { mind: "ownershipgraph", dimension: "beneficial_ownership" },
+    { mind: "sanctionsdesk", dimension: "related_parties" },
+    { mind: "caseledger", dimension: "docket_retrieval" },
     { mind: "minewatch", dimension: "production" },
     { mind: "minewatch", dimension: "licences" },
     { mind: "bitcoin-mining-intelligence", dimension: "pool_concentration" },
@@ -730,6 +790,17 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
         "index-reconstitution-desk:price",
         "index-reconstitution-desk:holders",
         "index-reconstitution-desk:liquidity",
+      ],
+    },
+    {
+      id: "issuer_integrity",
+      title: "Issuer integrity",
+      description: "Firmographic context, issuer sanctions screening, optional named-controller screening and adverse coverage. These specialist routes are probe-verified until paid answers are independently validated.",
+      capabilities: [
+        "ownershipgraph:b2b_enrichment",
+        "sanctionsdesk:name_screening",
+        "ownershipgraph:sanctions_check",
+        "caseledger:adverse_media",
       ],
     },
     {
@@ -769,6 +840,8 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
   ],
   honestyNotes: [
     "Wallet clustering, attribution and multi-hop fund-flow tracing are unsupported; a risk score is a provider judgment, not an identity.",
+    "Beneficial ownership, group traversal and court dockets are unsupported. Screening a named issuer or controller does not establish ownership or control.",
+    "Issuer enrichment, sanctions screening and adverse-media routes are probe-verified; paid answer quality and match accuracy have not yet been established in this workflow.",
     "Production volumes, licence tenure, outages and facility telemetry have no verified route and stay named gaps.",
     "Pool concentration and fleet uptime are not inferred from network hashrate.",
     "Circulating float, redemption terms and token sale documents are not askable on the network; circulating float stays a declared input, and issuer disclosures are covered only by the registry record and filings of the legal entity you name.",
@@ -781,6 +854,9 @@ const ASSET_WORKFLOW: DeskWorkflowDef = {
     txHash: "0x45bc185bc34ed246f341a09812bb3c95b2a4d0e78699b585820fca9c323d9aed",
     blockNumber: "23000000",
     tokenSymbol: "USDC",
+    issuerEntity: "Circle Internet Group, Inc.",
+    issuerJurisdiction: "US",
+    issuerWebsite: "circle.com",
     marketSubject: "Uniswap USDC/ETH",
     spendLimitUsdCents: "10",
   },
