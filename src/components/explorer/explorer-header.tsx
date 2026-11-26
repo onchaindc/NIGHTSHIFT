@@ -9,34 +9,21 @@ import { NavLinks } from "@/components/explorer/nav-links";
 import { Wordmark } from "@/components/explorer/brand";
 
 /**
- * Four destinations, in the order a newcomer needs them. The intelligence
- * network (miners, intents, evaluators, validators) and the applications built
- * on it (assurance, the activity ledger) live under one roof: one bar, one
- * scrollable sub-tab row — the rest of the product stays reachable in one tap.
+ * Four destinations, named the way a customer names them: Minds (ask),
+ * Network (who answers), Deal Desk (verify before you settle), Wallet.
+ * No sub-tabs: every destination is one tap from anywhere, and the old
+ * jargon strip (miners/intents/evaluators/validators/...) is gone.
  */
 const AREAS = [
   { href: "/minds", label: "Minds" },
   {
-    href: "/intelligence",
-    label: "Intelligence",
-    activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/assurance", "/activity"],
+    href: "/miners",
+    label: "Network",
+    activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/signals", "/developers", "/activity", "/intelligence"],
   },
-  { href: "/signals", label: "Signals" },
+  { href: "/desk", label: "Deal Desk", activeFor: ["/desk", "/assurance"] },
   { href: "/funds", label: "Wallet" },
 ];
-
-/** What the Intelligence section contains, in the network's own words. Every
-    tab is a page of its own, so no tab ever drops you on a header-less page. */
-const INTELLIGENCE_TABS = [
-  { href: "/miners", label: "Miners" },
-  { href: "/intents", label: "Intents" },
-  { href: "/evaluators", label: "Evaluators" },
-  { href: "/validators", label: "Validators" },
-  { href: "/assurance", label: "Assurance" },
-  { href: "/activity", label: "Activity" },
-];
-
-const INTELLIGENCE_PATHS = ["/miners", "/intents", "/evaluators", "/validators", "/assurance", "/activity"];
 
 export function ExplorerHeader() {
   const pathname = usePathname();
@@ -44,12 +31,10 @@ export function ExplorerHeader() {
   // The front page is a front page: it opens with a headline, not a menu.
   if (pathname === "/") return null;
 
-  const inIntelligence = INTELLIGENCE_PATHS.some((p) => pathname.startsWith(p));
-
   return (
-    /* Keep the wayfinding and the Ask action available on every screen. The
-       mobile tab bar owns the bottom edge; the header owns the top. */
-    <header className="sticky top-0 z-40 border-b border-edge bg-night/90 backdrop-blur-md">
+    /* Opaque on purpose: translucent headers let scrolling text bleed through
+       on mobile, which read as broken rendering. */
+    <header className="sticky top-0 z-40 border-b border-edge bg-night">
       <div className="mx-auto grid h-14 max-w-6xl grid-cols-[1fr_auto] items-center gap-4 px-4 sm:grid-cols-[1fr_auto_1fr] sm:px-6">
         <div className="justify-self-start">
           <Wordmark />
@@ -76,18 +61,6 @@ export function ExplorerHeader() {
           </Link>
         </div>
       </div>
-
-      {/* Intelligence sub-tabs: the section's own contents, one quiet scrollable row. */}
-      {inIntelligence && (
-        <div className="border-t border-edge/70 bg-panel/50">
-          <nav
-            aria-label="Intelligence"
-            className="mx-auto flex max-w-6xl gap-6 overflow-x-auto px-4 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden"
-          >
-            <NavLinks items={INTELLIGENCE_TABS} variant="tab" />
-          </nav>
-        </div>
-      )}
     </header>
   );
 }

@@ -54,12 +54,12 @@ export default async function OverviewPage() {
       accent: false,
     },
     {
-      href: "/assurance",
+      href: "/desk",
       icon: ShieldCheck,
       eyebrow: "Verify",
-      title: "Settlement assurance",
-      body: "Check a high-value Solana transfer before funds move: registry identity, sanctions, filings, documents — one CLEARED / HOLD / ESCALATE decision, every finding cited.",
-      cta: "Verify a transfer",
+      title: "Deal Desk",
+      body: "Institutional transaction intelligence: open a file on a high-value payment and check the counterparty, their standing and the rails before funds move — one decision, every finding cited.",
+      cta: "Open the Deal Desk",
       accent: true,
     },
   ];
@@ -95,7 +95,7 @@ export default async function OverviewPage() {
               Ask a Mind
               <ArrowRight size={14} aria-hidden />
             </Link>
-            <Link href="/intelligence" className="btn-quiet !min-h-11 !px-5">
+            <Link href="/miners" className="btn-quiet !min-h-11 !px-5">
               Explore the network
             </Link>
           </div>
@@ -108,7 +108,7 @@ export default async function OverviewPage() {
                   href={p.href}
                   className="group block rounded-2xl border border-edge bg-panel/70 px-4 py-3.5 backdrop-blur transition-colors hover:border-edge-strong"
                 >
-                  <p className="tabular text-[24px] font-semibold leading-none tracking-tight text-ink">
+                  <p className="tabular whitespace-nowrap text-[clamp(1.3rem,6vw,1.5rem)] font-semibold leading-none tracking-tight text-ink">
                     {p.value === null ? "—" : typeof p.value === "number" ? p.value.toLocaleString() : p.value}
                   </p>
                   <p className="mt-1.5 text-[12px] text-ink-soft">{p.label}</p>

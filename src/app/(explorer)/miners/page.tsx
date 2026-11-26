@@ -4,7 +4,7 @@ import { Search } from "lucide-react";
 import { fetchIntents, fetchMiners, type NetworkMiner } from "@/lib/explorer/network";
 import { ParticipantCard } from "@/components/explorer/participant-card";
 
-export const metadata = { title: "Miners" };
+export const metadata = { title: "Network" };
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 60;
@@ -50,7 +50,7 @@ export default async function MinersPage({
   if (fetched.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-eyebrow">Miners</p>
+        <p className="x-eyebrow">The network</p>
         <h1 className="x-display-1 mt-4 text-ink">Miner catalog unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The public node at devnode.telegraphprotocol.com could not be reached, so no miners are listed rather than a
@@ -66,7 +66,7 @@ export default async function MinersPage({
   if (intents.status !== "ok") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-24 sm:px-6">
-        <p className="x-eyebrow">Miners</p>
+        <p className="x-eyebrow">The network</p>
         <h1 className="x-display-1 mt-4 text-ink">Intents registry unavailable</h1>
         <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">
           The intent list could not be fetched, so miners cannot be grouped by intent right now. Retry shortly.
@@ -138,22 +138,19 @@ export default async function MinersPage({
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="x-eyebrow">{fetched.payload.length.toLocaleString()} miners registered</p>
+        <div className="min-w-0">
+          <p className="x-eyebrow">The network — live</p>
           <h1 className="x-display-1 mt-3 text-ink">
-            {total.toLocaleString()} {total === 1 ? "miner" : "miners"} on the network
+            {total.toLocaleString()} specialist{total === 1 ? "" : "s"} answering
           </h1>
-          <p className="mt-3 max-w-[64ch] text-[14px] leading-relaxed text-ink-soft">
-            Every entry is a registry record: an independent service with declared endpoints, schemas, supported
-            intents and price.{" "}
+          <p className="mt-3 max-w-[60ch] text-[14px] leading-relaxed text-pretty text-ink-soft">
+            Independent services with published endpoints and prices; the network routes each question to the best
+            available one automatically.{" "}
             {sortKey === "new"
-              ? "Ordered by registration time, newest first."
+              ? "Newest registrations first."
               : sortKey === "recent"
-                ? "Ordered by the network's most recent evaluator score."
-                : "Ordered by reported requests served, where a miner reports it."}
-          </p>
-          <p className="mt-2 max-w-[64ch] text-[12.5px] leading-relaxed text-ink-faint">
-            When asking a question, automatic routing is the recommended path. Pinning a specific miner is advanced and can fail if the service advertises an intent but cannot accept the request form.
+                ? "Most recently scored first."
+                : "Ordered by reported volume."}
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <span className="x-label mr-1">Order</span>
@@ -171,14 +168,6 @@ export default async function MinersPage({
                 {option.label}
               </Link>
             ))}
-            <p className="mt-1 w-full text-[11px] leading-relaxed text-ink-faint">
-              Newest is registration time; Recently scored is the network&apos;s last evaluator update. For the latest
-              delivered answers, open{" "}
-              <Link href="/signals" className="text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal">
-                Signals
-              </Link>
-              .
-            </p>
           </div>
         </div>
         <form action="/miners" method="GET" className="flex items-center gap-2">
@@ -303,6 +292,34 @@ export default async function MinersPage({
           </nav>
         )}
       </div>
+
+      {/* How it works — one quiet strip instead of four cards of jargon */}
+      <section aria-label="How the network works" className="mt-14 rounded-2xl border border-edge bg-panel/60 px-5 py-5">
+        <p className="x-label">How a question travels</p>
+        <ol className="mt-3 grid gap-x-6 gap-y-2 text-[12.5px] leading-relaxed text-ink-soft sm:grid-cols-2 lg:grid-cols-4">
+          <li>
+            <span className="font-semibold text-ink">1 · Ask.</span> You pick a question; the network routes it.{" "}
+            <Link href="/terminal" className="text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal">
+              Try the Terminal
+            </Link>
+          </li>
+          <li>
+            <span className="font-semibold text-ink">2 · Answer.</span> Specialists respond; prices are public per ask.
+          </li>
+          <li>
+            <span className="font-semibold text-ink">3 · Score.</span> Evaluators grade every round.{" "}
+            <Link href="/evaluators" className="text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal">
+              How scoring works
+            </Link>
+          </li>
+          <li>
+            <span className="font-semibold text-ink">4 · Confirm.</span> Validators finalize settlement.{" "}
+            <Link href="/signals" className="text-teal underline decoration-teal/30 underline-offset-2 hover:decoration-teal">
+              Latest answers
+            </Link>
+          </li>
+        </ol>
+      </section>
     </div>
   );
 }

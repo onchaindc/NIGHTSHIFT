@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy, useWallets, useConnectWallet, useCreateWallet, useSendTransaction } from "@privy-io/react-auth";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins, RefreshCw } from "lucide-react";
 
 const SEPOLIA_RPCS = [
@@ -60,6 +60,8 @@ function WalletCard({
   ethBalance,
   circleUsdc,
   telegraphUsdc,
+  syncing,
+  lastSynced,
   onDeposit,
   onWithdraw,
   onMint,
@@ -71,6 +73,8 @@ function WalletCard({
   ethBalance: string | null;
   circleUsdc: string | null;
   telegraphUsdc: string | null;
+  syncing?: boolean;
+  lastSynced?: number | null;
   onDeposit?: () => void;
   onWithdraw?: () => void;
   onMint?: () => void;
@@ -84,6 +88,15 @@ function WalletCard({
       setTimeout(() => setCopied(false), 1400);
     });
   };
+  const syncedAgo = lastSynced ? Math.max(0, Math.round((Date.now() - lastSynced) / 1000)) : null;
+  const syncedLabel =
+    syncedAgo === null
+      ? "syncing…"
+      : syncedAgo < 5
+        ? "just now"
+        : syncedAgo < 90
+          ? `${syncedAgo}s ago`
+          : `${Math.round(syncedAgo / 60)}m ago`;
   return (
     <div className="relative overflow-hidden rounded-2xl border border-edge bg-panel p-6 shadow-sm">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal/40 to-transparent" />
@@ -98,10 +111,10 @@ function WalletCard({
               type="button"
               onClick={onRefresh}
               aria-label="Refresh balances"
-              title="Refresh balances"
+              title={`Balances auto-sync every 15s · updated ${syncedLabel}`}
               className="grid h-8 w-8 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
             >
-              <RefreshCw size={13} strokeWidth={1.8} />
+              <RefreshCw size={13} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
             </button>
           )}
           <div className="grid h-9 w-9 place-items-center rounded-full bg-teal/10 text-teal">
@@ -131,7 +144,7 @@ function WalletCard({
         </div>
       </div>
       <p className="mt-2 text-[11px] text-ink-faint">
-        Sepolia · asks are paid in Telegraph USDC
+        Sepolia · auto-syncs every 15s · updated {syncedLabel}
         {onMint ? " · the test mint is free, no gas needed" : ""}
       </p>
 
@@ -290,63 +303,56 @@ export default function FundsPage() {
   const [balances, setBalances] = useState<Record<string, Balances>>({});
   const [showDeposit, setShowDeposit] = useState<string | null>(null);
   const [showWithdraw, setShowWithdraw] = useState<string | null>(null);
-  const [payer, setPayer] = useState<{ address: string; rails: Array<{ chain: string; name: string; role: string; balance: { whole: string } | null }> } | null>(null);
-  const [payerError, setPayerError] = useState<string | null>(null);
-
-  const refreshPayer = async () => {
-    try {
-      const res = await fetch("/api/wallet/balance", { cache: "no-store" });
-      const data = (await res.json()) as { error?: string; payer?: string; rails?: Array<{ chain: string; name: string; role: string; balance: { whole: string } | null }> };
-      if (!res.ok) {
-        setPayer(null);
-        setPayerError(data.error ?? "The payer balance could not be read right now.");
-        return;
-      }
-      setPayerError(null);
-      if (data.payer && data.rails) setPayer({ address: data.payer, rails: data.rails });
-    } catch {
-      setPayerError("The payer balance could not be read right now.");
-    }
-  };
-
-  useEffect(() => {
-    void refreshPayer();
-  }, []);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<number | null>(null);
 
   const embedded = wallets.find((w) => w.walletClientType === "privy");
   const external = wallets.find((w) => w.walletClientType !== "privy");
 
-  const refreshBalances = async () => {
-    const addrs = [embedded?.address, external?.address].filter(Boolean) as string[];
-    for (const addr of addrs) {
-      const [eth, circle, telegraph] = await Promise.all([
-        fetchEthBalance(addr),
-        fetchTokenBalance(addr, CIRCLE_USDC),
-        fetchTokenBalance(addr, TELEGRAPH_USDC),
-      ]);
-      setBalances((prev) => ({ ...prev, [addr]: { eth, circle, telegraph } }));
-    }
-  };
-
-  useEffect(() => {
+  // One sync function for every trigger (mount, wallet change, poll, focus,
+  // mint/withdraw callbacks). A failed read stays "…" until the next cycle —
+  // never shown as zero, which is what made funded wallets look empty.
+  const refreshBalances = useCallback(async () => {
     const addrs = [embedded?.address, external?.address].filter(Boolean) as string[];
     if (addrs.length === 0) return;
-    let cancelled = false;
-    (async () => {
+    setSyncing(true);
+    try {
       for (const addr of addrs) {
-        if (cancelled) return;
         const [eth, circle, telegraph] = await Promise.all([
           fetchEthBalance(addr),
           fetchTokenBalance(addr, CIRCLE_USDC),
           fetchTokenBalance(addr, TELEGRAPH_USDC),
         ]);
-        if (!cancelled) setBalances((prev) => ({ ...prev, [addr]: { eth, circle, telegraph } }));
+        setBalances((prev) => ({ ...prev, [addr]: { eth, circle, telegraph } }));
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      setLastSynced(Date.now());
+    } finally {
+      setSyncing(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedded?.address, external?.address]);
+
+  useEffect(() => {
+    void refreshBalances();
+    // Live sync: poll while the page is open, and refresh the moment the tab
+    // regains focus (mobile users return to a stale card otherwise).
+    const poll = setInterval(() => void refreshBalances(), 15_000);
+    const onFocus = () => void refreshBalances();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [refreshBalances]);
+
+  // Keeps "updated Ns ago" honest between polls.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 10_000);
+    return () => clearInterval(t);
+  }, []);
 
   const handleMint = async () => {
     if (!embedded) return;
@@ -457,11 +463,13 @@ export default function FundsPage() {
               ethBalance={balances[embedded.address]?.eth ?? null}
               circleUsdc={balances[embedded.address]?.circle ?? null}
               telegraphUsdc={balances[embedded.address]?.telegraph ?? null}
+              syncing={syncing}
+              lastSynced={lastSynced}
               onDeposit={() => setShowDeposit(embedded.address)}
               onWithdraw={() => setShowWithdraw(embedded.address)}
               onMint={handleMint}
               minting={minting}
-              onRefresh={refreshBalances}
+              onRefresh={() => void refreshBalances()}
             />
           )}
           {external && (
@@ -471,60 +479,13 @@ export default function FundsPage() {
               ethBalance={balances[external.address]?.eth ?? null}
               circleUsdc={balances[external.address]?.circle ?? null}
               telegraphUsdc={balances[external.address]?.telegraph ?? null}
-              onRefresh={refreshBalances}
+              syncing={syncing}
+              lastSynced={lastSynced}
+              onRefresh={() => void refreshBalances()}
             />
           )}
         </div>
       )}
-
-      {/* What autonomous Minds spend from: the deployment payer wallet. These
-          spends debit THIS wallet, not yours — without this card they were
-          invisible, which made "I paid but my balance never changed" a bug
-          report about visibility, not about settlement. */}
-      <div className="mt-3 rounded-2xl border border-edge bg-panel p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-panel-2 text-ink-soft">
-              <Coins size={14} strokeWidth={1.8} />
-            </span>
-            <p className="text-[13.5px] font-medium text-ink">Paid-research wallet (Minds)</p>
-          </div>
-          <button
-            type="button"
-            onClick={refreshPayer}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-edge px-2.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-ink-faint hover:text-ink"
-          >
-            <RefreshCw size={12} strokeWidth={1.8} /> Refresh
-          </button>
-        </div>
-        {payerError ? (
-          <p className="mt-3 text-[12.5px] leading-relaxed text-amber">{payerError}</p>
-        ) : !payer ? (
-          <p className="mt-3 text-[12.5px] text-ink-soft">Reading the payer balances…</p>
-        ) : (
-          <div className="mt-3 space-y-2">
-            <p className="font-mono text-[11.5px] text-ink-soft">
-              payer {payer.address.slice(0, 10)}…{payer.address.slice(-8)}
-            </p>
-            {payer.rails.map((rail) => (
-              <div key={`${rail.chain}-${rail.name}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-xl border border-edge bg-panel-2 px-3.5 py-2.5">
-                <div className="min-w-0">
-                  <p className="text-[12.5px] font-medium text-ink">
-                    {rail.name} <span className="text-ink-soft">· {rail.chain}</span>
-                  </p>
-                  <p className="mt-0.5 text-[11.5px] leading-snug text-ink-soft">{rail.role}</p>
-                </div>
-                <p className="tabular shrink-0 text-[13.5px] text-ink">
-                  {rail.balance ? `${rail.balance.whole} USDC` : "unavailable"}
-                </p>
-              </div>
-            ))}
-            <p className="text-[11.5px] leading-relaxed text-ink-soft">
-              Every Mind spend is also itemized per task on its own page (spend ledger, settlement hash).
-            </p>
-          </div>
-        )}
-      </div>
 
       <div className={`mt-8 grid gap-4 ${hasEmbedded ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
         <button

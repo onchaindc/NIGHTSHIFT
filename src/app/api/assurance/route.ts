@@ -17,15 +17,29 @@ export const dynamic = "force-dynamic";
  * nothing from a live file crosses that gate.
  */
 export async function GET(req: NextRequest) {
+  // Serverless Postgres sleeps between requests; the first read after an idle
+  // spell can fail while the connection wakes. One short retry turns that
+  // transient state into a successful response instead of a scary banner.
+  let all;
   try {
-    const all = await listInvestigations();
+    all = await listInvestigations();
+  } catch {
+    await new Promise((r) => setTimeout(r, 900));
+    try {
+      all = await listInvestigations();
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: "storage unavailable", detail: detail.slice(0, 200) }, { status: 503 });
+    }
+  }
+  try {
     const { investigations } = investigationsForCaller(req, all);
     const identity = callerIdentity(req);
     return NextResponse.json({
       investigations: investigations.map(summarize),
       scope: identity.kind === "operator" ? "operator" : identity.kind === "user" ? "user" : "demonstration",
       ...(identity.kind === "anonymous"
-        ? { note: "Sign in with your wallet to open live files; the demonstration file is open to everyone." }
+        ? { note: "Sign in with your wallet to open live files." }
         : {}),
     });
   } catch (err) {

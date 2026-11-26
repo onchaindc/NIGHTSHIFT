@@ -2,24 +2,24 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BrainCircuit, Compass, Radar, Wallet, type LucideIcon } from "lucide-react";
+import { BrainCircuit, Compass, ShieldCheck, Wallet, type LucideIcon } from "lucide-react";
 
 /**
- * The phone's map: four destinations with room to breathe. The intelligence
- * network and its applications share one tab; the header stays pinned to the
- * top for wayfinding and the global Ask action.
+ * The phone's map: four destinations with room to breathe, named the way a
+ * customer names them. The header stays pinned to the top for wayfinding and
+ * the global Ask action.
  */
 type Item = { href: string; label: string; icon: LucideIcon; activeFor?: string[] };
 
 const ITEMS: Item[] = [
   { href: "/minds", label: "Minds", icon: BrainCircuit },
   {
-    href: "/intelligence",
-    label: "Intel",
+    href: "/miners",
+    label: "Network",
     icon: Compass,
-    activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/assurance", "/activity"],
+    activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/signals", "/developers", "/activity", "/intelligence"],
   },
-  { href: "/signals", label: "Signals", icon: Radar },
+  { href: "/desk", label: "Deal Desk", icon: ShieldCheck, activeFor: ["/desk", "/assurance"] },
   { href: "/funds", label: "Wallet", icon: Wallet },
 ];
 
