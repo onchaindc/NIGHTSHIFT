@@ -422,11 +422,36 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
         )}
       </section>
 
-      {/* Report */}
+      {/* Report — the answer, not the activity. The banner names which one
+          you are reading before anything else, because both live on this
+          page: this card is what was found; the trail below is how it ran. */}
       {inv.report && (
         <section aria-label="Report" className="mt-10" ref={reportRef}>
-          <h2 className="x-label">Report</h2>
+          <h2 className="x-label">Report — what the investigation found</h2>
           <div className="mt-3 overflow-hidden rounded-2xl border border-edge bg-panel p-5">
+            {(() => {
+              const paidRan = inv.runs.some((r) => r.mode === "intel");
+              const banner =
+                inv.report.findings.length > 0
+                  ? {
+                      cls: "border-teal/40 bg-teal/5 text-teal",
+                      text: "This is the report — the answer to what you asked. Findings below cite their evidence; the activity trail further down shows how each answer was priced, bought and checked.",
+                    }
+                  : paidRan
+                    ? {
+                        cls: "border-amber/40 bg-amber/5 text-amber-deep",
+                        text: "This is the report after a paid run — but nothing verified, so there are no findings. The answers returned sit in the activity trail below, labelled unverified and never presented as data.",
+                      }
+                    : {
+                        cls: "border-edge bg-panel-2 text-ink-soft",
+                        text: "This is the free pre-flight — no answer has been purchased yet, so there are no findings to read. What you have: every route checked and priced, what the network cannot answer, and the questions a paid run would settle. The long list below is the activity trail — the process, not the answer.",
+                      };
+              return (
+                <p className={`mb-4 rounded-xl border px-3.5 py-2.5 text-[12.5px] leading-relaxed ${banner.cls}`}>
+                  {banner.text}
+                </p>
+              );
+            })()}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-[14px] font-semibold text-ink">{inv.report.headline}</p>
               <span className={`rounded-full border px-2.5 py-0.5 text-[10.5px] font-semibold tracking-wide ${inv.report.confidence === "signal_verified" ? "border-teal/40 bg-teal/10 text-teal" : inv.report.confidence === "partially_verified" ? "border-amber/40 bg-amber/10 text-amber" : "border-edge bg-panel-3 text-ink-faint"}`}>
@@ -468,7 +493,7 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
               </ul>
             )}
 
-            <h3 className="x-label mt-5">Sections</h3>
+            <h3 className="x-label mt-5">What the report covers, section by section</h3>
             <ul className="mt-2 grid gap-2 sm:grid-cols-2">
               {inv.report.sections.map((s) => (
                 <li key={s.id} className="rounded-xl border border-edge bg-panel-2 px-3.5 py-3">
@@ -500,10 +525,13 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
         </section>
       )}
 
-      {/* Evidence ledger */}
-      <section aria-label="Evidence ledger" className="mt-10">
+      {/* Activity trail — how the investigation ran: probes, purchases,
+          declared inputs and named gaps, grouped by provenance. Kept visually
+          and verbally separate from the report above so the process can never
+          be mistaken for the answer. */}
+      <section aria-label="Activity trail" className="mt-10">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="x-label">Evidence ledger</h2>
+          <h2 className="x-label">How this was investigated — the activity trail</h2>
           <p className="text-[11px] text-ink-faint">
             <span className="tabular">{counts.verified.length}</span> verified · <span className="tabular">{counts.unverified.length}</span> unverified ·{" "}
             <span className="tabular">{counts.missing.length}</span> missing · <span className="tabular">{counts.analysis.length}</span> analysis ·{" "}
