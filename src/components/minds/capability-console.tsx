@@ -16,6 +16,7 @@ import { vibrate } from "@/lib/haptics";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { openTaskStream } from "@/components/minds/task-stream";
 import { REPORT_STATUS_DOT } from "@/components/minds/status-chip";
+import { ConfirmPaidRun } from "@/components/confirm-paid-run";
 import RunFlow, { fmtUsd } from "@/components/minds/run-flow";
 import { SampleFill } from "@/components/sample-fill";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
@@ -136,6 +137,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
   );
   const [mode, setMode] = useState<"free" | "intel">("free");
   const [starting, setStarting] = useState(false);
+  const [paidConfirmOpen, setPaidConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -482,7 +484,7 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
           <div className="flex flex-wrap items-center gap-3 border-t border-edge pt-3.5">
             <button
               type="button"
-              onClick={() => void start()}
+              onClick={() => (mode === "intel" ? setPaidConfirmOpen(true) : void start())}
               disabled={starting || routable.length === 0 || (mode === "intel" && !signedIn)}
               className="btn-primary !min-h-10"
             >
@@ -498,6 +500,20 @@ export default function CapabilityConsole({ slug, name, mindStatus, ceilingUsdCe
                 Sign in with your wallet — paid runs need a session
               </button>
             )}
+
+          <ConfirmPaidRun
+            open={paidConfirmOpen}
+            title="Start a paid run?"
+            body="The console plans every routable dimension against the live network, then stops at the approval gate — you see the exact priced plan before anything is signed."
+            cost={`Paid from the deployment's payer wallet, hard ceiling ${fmtUsd(ceilingUsdCents / 100)} · ${routable.length} route${routable.length === 1 ? "" : "s"} priced live before you approve anything.`}
+            confirmLabel="Start the paid run"
+            busy={starting}
+            onConfirm={() => {
+              setPaidConfirmOpen(false);
+              void start();
+            }}
+            onCancel={() => setPaidConfirmOpen(false)}
+          />
           </div>
           {error && (
             <p className="flex items-start gap-2 text-[12px] leading-relaxed text-risk">

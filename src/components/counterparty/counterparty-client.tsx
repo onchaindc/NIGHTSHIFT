@@ -32,6 +32,7 @@ import {
 import { useWallets, useSignMessage, useSignTypedData } from "@privy-io/react-auth";
 
 import type { CounterpartyClassification } from "@/lib/counterparty/intel";
+import { ReportDisclosure } from "@/components/report/collapsible";
 
 export interface CounterpartyGuarantees {
   intent: string;
@@ -772,11 +773,18 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
                 </div>
               )}
 
-              {/* supporting evidence */}
+              {/* supporting evidence — secondary: one tap away, counted */}
               {classification && (classification.meta.register || classification.meta.license || classification.meta.sources.length > 0 || classification.meta.confidence !== undefined) && (
-                <div>
-                  <p className="x-label">Supporting evidence</p>
-                  <div className="mt-2 space-y-1.5 text-[12.5px] text-ink-soft">
+                <ReportDisclosure
+                  title="Supporting evidence"
+                  count={
+                    (classification.meta.confidence !== undefined ? 1 : 0) +
+                    (classification.meta.register ? 1 : 0) +
+                    (classification.meta.license ? 1 : 0) +
+                    classification.meta.sources.length
+                  }
+                >
+                  <div className="space-y-1.5 text-[12.5px] text-ink-soft">
                     {classification.meta.confidence !== undefined && (
                       <p>Provider confidence: <span className="tabular text-ink">{Math.round(classification.meta.confidence * 100)}%</span></p>
                     )}
@@ -802,13 +810,12 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
                       </ul>
                     )}
                   </div>
-                </div>
+                </ReportDisclosure>
               )}
 
-              {/* receipt + signal */}
-              <div>
-                <p className="x-label">Receipt &amp; signal</p>
-                <dl className="mt-2 grid gap-x-6 gap-y-1 text-[12px] sm:grid-cols-[150px_1fr]">
+              {/* receipt + signal — the payment's paper trail, one tap away */}
+              <ReportDisclosure title="Receipt &amp; signal">
+                <dl className="grid gap-x-6 gap-y-1 text-[12px] sm:grid-cols-[150px_1fr]">
                   <dt className="text-ink-faint">Receipt hash</dt>
                   <dd className="break-all tabular text-ink">{answer.receipt?.receipt_hash ? shortHash(answer.receipt.receipt_hash) : "—"}</dd>
                   <dt className="text-ink-faint">Settlement</dt>
@@ -826,7 +833,7 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
                     )}
                   </dd>
                 </dl>
-              </div>
+              </ReportDisclosure>
             </div>
           </section>
         )}
