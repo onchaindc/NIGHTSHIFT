@@ -91,6 +91,9 @@ export interface AcpTransport {
   /** Live-transport diagnostics: SSE stream state and the last handler error.
    *  The mock reports connected: null — there is no connection to be honest about. */
   diagnostics?(): { connected: boolean | null; lastError: string | null };
+  /** Ask the ACP server (authenticated) whether THIS wallet is a registered,
+   *  visible agent, and what offerings are published. Real transport only. */
+  verifyRegistration?(): Promise<{ found: boolean; detail: string }>;
 }
 
 export interface AcpServiceInput {
@@ -184,4 +187,7 @@ export interface AcpProviderStatus {
   startedAt: string | null;
   /** When the SSE stream state was last observed (ISO). */
   streamObservedAt: string | null;
+  /** The authenticated registration check: is this wallet a visible agent on
+   *  the ACP server, and what offerings are published under it? */
+  registration: { found: boolean | null; detail: string | null; checkedAt: string | null };
 }

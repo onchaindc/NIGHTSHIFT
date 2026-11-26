@@ -243,6 +243,21 @@ export async function createRealAcpTransport(cfg: AcpConfig): Promise<AcpTranspo
     diagnostics() {
       return { connected, lastError };
     },
+    async verifyRegistration() {
+      // The ACP server answers agent lookups only for authenticated callers,
+      // so this check runs through the LIVE transport's own client — it is
+      // exactly what the network sees for this wallet.
+      const detail = await agent.getAgentByWalletAddress(cfg.walletAddress);
+      if (!detail) {
+        return { found: false, detail: `no agent registered at ${cfg.walletAddress} is visible on the ACP server` };
+      }
+      const offerings = detail.offerings ?? [];
+      const names = offerings.slice(0, 6).map((o) => o.name).filter(Boolean);
+      return {
+        found: true,
+        detail: `registered agent "${detail.name}" (${detail.role ?? "agent"}${detail.isHidden ? ", hidden" : ", visible"}) — ${offerings.length} published offering(s)${names.length ? `: ${names.join(", ")}` : ""} — last active ${detail.lastActiveAt ?? "?"}`,
+      };
+    },
   };
 }
 

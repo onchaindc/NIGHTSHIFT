@@ -4,6 +4,10 @@
     {
       "path": "/api/watches/scheduler-tick",
       "schedule": "17 7 * * *"
+    },
+    {
+      "path": "/api/acp/tick",
+      "schedule": "3 7 * * *"
     }
   ]
 }

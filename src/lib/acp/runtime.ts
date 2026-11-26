@@ -34,6 +34,7 @@ export interface AcpRuntimeState {
   streamObservedAt: string | null;
   updatedAt: string;
   note: string | null;
+  registration: { found: boolean | null; detail: string | null; checkedAt: string | null };
 }
 
 let transport: AcpTransport | null = null;
@@ -41,9 +42,24 @@ let startNote = "not started";
 let startupError: string | null = null;
 let starting: Promise<void> | null = null;
 
-async function writeRuntimeState(state: AcpRuntimeState): Promise<void> {
+/** Merge-write the persisted runtime state: partial patches keep what they
+ *  don't mention (startedAt, registration), so stream events and ticks never
+ *  erase the startup record. */
+async function writeRuntimeState(patch: Partial<Omit<AcpRuntimeState, "attemptState" | "updatedAt">> & { attemptState: AcpRuntimeState["attemptState"] }): Promise<void> {
   try {
-    await persistence().writeNamed(STATE_DOC, state);
+    const prev = await persistence().readNamed<AcpRuntimeState>(STATE_DOC);
+    const next: AcpRuntimeState = {
+      attemptState: patch.attemptState,
+      startupError: patch.startupError ?? prev?.startupError ?? null,
+      connected: patch.connected ?? prev?.connected ?? null,
+      mode: patch.mode ?? prev?.mode ?? null,
+      startedAt: patch.startedAt ?? prev?.startedAt ?? null,
+      streamObservedAt: patch.streamObservedAt ?? prev?.streamObservedAt ?? null,
+      updatedAt: new Date().toISOString(),
+      note: patch.note !== undefined ? patch.note : (prev?.note ?? null),
+      registration: patch.registration ?? prev?.registration ?? { found: null, detail: null, checkedAt: null },
+    };
+    await persistence().writeNamed(STATE_DOC, next);
   } catch (err) {
     console.error("failed to persist the ACP runtime state:", err instanceof Error ? err.message : err);
   }
@@ -76,7 +92,6 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
         mode: null,
         startedAt: null,
         streamObservedAt: null,
-        updatedAt: new Date().toISOString(),
         note: selected.reason,
       });
       return;
@@ -93,10 +108,7 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
               attemptState: "started",
               startupError: null,
               connected,
-              mode: selected.transport!.mode,
-              startedAt: new Date().toISOString(),
               streamObservedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
               note: `live SSE stream ${connected ? "connected" : "closed"}`,
             });
           },
@@ -111,6 +123,16 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
       transport = selected.transport;
       startupError = null;
       startNote = selected.reason;
+      // Registration check through the LIVE authenticated client: what does
+      // the ACP server actually see for this wallet?
+      let registration: AcpRuntimeState["registration"] = { found: null, detail: null, checkedAt: null };
+      try {
+        const check = await selected.transport.verifyRegistration?.();
+        registration = { found: check?.found ?? null, detail: check?.detail ?? null, checkedAt: new Date().toISOString() };
+        if (check && !check.found) console.error("ACP registration check failed:", check.detail);
+      } catch (err) {
+        registration = { found: null, detail: `registration check failed: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`, checkedAt: new Date().toISOString() };
+      }
       await writeRuntimeState({
         attemptState: "started",
         startupError: null,
@@ -118,8 +140,8 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
         mode: selected.transport.mode,
         startedAt: new Date().toISOString(),
         streamObservedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
         note: selected.reason,
+        registration,
       });
     } catch (err) {
       transport = null;
@@ -132,7 +154,6 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
         mode: realAcpConfigured() ? "real" : "mock",
         startedAt: null,
         streamObservedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
         note: startNote,
       });
     } finally {
@@ -167,10 +188,7 @@ export async function runAcpTick(): Promise<{ advanced: number; submitted: strin
       attemptState: "started",
       startupError: null,
       connected: diag.connected,
-      mode: active.mode,
-      startedAt: null,
       streamObservedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
       note: diag.lastError ? `last entry-handler error: ${diag.lastError}` : null,
     });
   }
@@ -184,7 +202,9 @@ export async function acpProviderStatus(): Promise<AcpProviderStatus> {
   const cfg = acpConfig();
   const sdkInstalled = cfg.enabled ? await acpSdkInstalled() : false;
   const active = transport;
-  const stored = active ? null : await readRuntimeState();
+  // Read the persisted record even when a transport runs in THIS process:
+  // the boot bundle wrote the authoritative startup + registration facts.
+  const stored = await readRuntimeState();
   const mode: AcpProviderStatus["mode"] = !cfg.enabled ? "disabled" : active ? active.mode : realAcpConfigured() ? "real" : "mock";
   const diag = active?.diagnostics?.() ?? null;
   const started = active !== null || stored?.attemptState === "started";
@@ -224,5 +244,6 @@ export async function acpProviderStatus(): Promise<AcpProviderStatus> {
     attemptState: active ? "started" : (stored?.attemptState ?? "idle"),
     startedAt: stored?.startedAt ?? null,
     streamObservedAt,
+    registration: stored?.registration ?? { found: null, detail: null, checkedAt: null },
   };
 }
