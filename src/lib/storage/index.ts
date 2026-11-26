@@ -65,6 +65,16 @@ export interface Persistence {
 
   // named state documents (scheduler tick state)
   readNamed<T>(name: string): Promise<T | null>;
+  /**
+   * Reads many named documents in as few round trips as the backend allows.
+   * The default fans out over readNamed; the Postgres backend issues ONE
+   * query. A list endpoint that reads one document per id must use this: a
+   * two-connection pool serializes the fan-out, so a large index turns the
+   * endpoint into a queue of 8-second queue-timeouts instead of a page.
+   * Results are returned in the SAME ORDER as the requested names, with null
+   * for documents that do not exist.
+   */
+  readManyNamed<T>(names: string[]): Promise<Array<T | null>>;
   writeNamed<T>(name: string, value: T): Promise<void>;
   deleteNamed(name: string): Promise<void>;
 
@@ -306,6 +316,9 @@ class FilePersistence implements Persistence {
   async readNamed<T>(name: string): Promise<T | null> {
     return readJsonFile<T | null>(this.namedFile(name), null);
   }
+  async readManyNamed<T>(names: string[]): Promise<Array<T | null>> {
+    return Promise.all(names.map((name) => this.readNamed<T>(name)));
+  }
   async writeNamed<T>(name: string, value: T): Promise<void> {
     await atomicWrite(this.namedFile(name), JSON.stringify(value, null, 2));
   }
@@ -541,6 +554,20 @@ class PostgresPersistence implements Persistence {
     const data = rows[0].data;
     // The column is jsonb; if a driver version hands it back as text, decode it.
     return typeof data === "string" ? (JSON.parse(data) as T) : (data as T);
+  }
+  async readManyNamed<T>(names: string[]): Promise<Array<T | null>> {
+    if (names.length === 0) return [];
+    await this.ready();
+    const client = dbSql();
+    // One round trip for the whole list: `= any(...)` keeps the pool at one
+    // query instead of one query per document.
+    const rows = await client<Array<{ name: string; data: unknown }>>`select name, data from ns_kv where name = any(${names})`;
+    const byName = new Map(rows.map((r) => [r.name, r.data]));
+    return names.map((name) => {
+      const data = byName.get(name);
+      if (data === undefined) return null;
+      return typeof data === "string" ? (JSON.parse(data) as T) : (data as T);
+    });
   }
   async writeNamed<T>(name: string, value: T): Promise<void> {
     await this.ready();

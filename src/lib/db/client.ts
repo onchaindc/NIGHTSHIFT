@@ -109,12 +109,48 @@ function hostOf(url: string): string {
   }
 }
 
-/** Lazy shared client; never opens a connection until a query runs. */
+/** Hard client-side cap for one shared-client query. */
+const QUERY_TIMEOUT_MS = 15_000;
+
+/**
+ * Client-side timeout for one query. statement_timeout is enforced by the
+ * SERVER, so it protects nothing against the failure where the server never
+ * receives the query at all: a suspended Neon compute behind its pooled
+ * endpoint accepts TCP, accepts auth, takes the query — and answers nothing.
+ * The request then hangs until the platform kills it and the browser shows a
+ * dropped connection. Bounding the promise client-side turns that class of
+ * outage into a fast, honest error the routes already know how to render.
+ */
+export function boundedQuery<T>(work: Promise<T>, ms = QUERY_TIMEOUT_MS, label = "database query timeout"): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error(label) as Error & { code?: string };
+      err.code = "QUERY_TIMEOUT";
+      reject(err);
+    }, ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err as Error);
+      },
+    );
+  });
+}
+
+/**
+ * Lazy shared client; never opens a connection until a query runs. Every
+ * query issued through it carries the client-side bound above — callers get
+ * that guarantee for free and must not bypass this factory.
+ */
 function sql(): postgres.Sql {
   if (g.__nightshiftSql) return g.__nightshiftSql;
   const url = activeUrl();
   if (!url) throw new Error("no database configured: NIGHTSHIFT_DATABASE_URL / DATABASE_URL is missing");
-  g.__nightshiftSql = postgres(url, {
+  const real = postgres(url, {
     max: poolMax(), // small per runtime, pooled upstream
     // A pooled endpoint can accept a connection and then never answer (a
     // cancelled serverless invocation can leave a transaction behind). Without
@@ -127,6 +163,24 @@ function sql(): postgres.Sql {
     connect_timeout: 10,
     onnotice: () => {}, // CREATE TABLE IF NOT EXISTS notices are noise
   });
+  // Bounded facade over the real client: the tagged-template call and unsafe()
+  // carry the client-side timeout; everything else passes through untouched.
+  const tagged = real as unknown as (query: TemplateStringsArray, ...args: unknown[]) => Promise<unknown>;
+  const unsafeFn = real.unsafe as unknown as (query: string, ...args: unknown[]) => Promise<unknown>;
+  const bound = ((query: TemplateStringsArray, ...args: unknown[]) => boundedQuery(tagged(query, ...args))) as postgres.Sql;
+  bound.unsafe = ((query: string, ...args: unknown[]) => boundedQuery(unsafeFn(query, ...args))) as typeof real.unsafe;
+  bound.end = (...args: Parameters<typeof real.end>) => real.end(...args);
+  const proxy = new Proxy(bound, {
+    get(target, prop, receiver) {
+      if (prop in target) return Reflect.get(target, prop, receiver);
+      const value = Reflect.get(real, prop, real);
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(real) : value;
+    },
+    apply(target, _thisArg, args) {
+      return (target as unknown as (...a: unknown[]) => Promise<unknown>)(...args) as never;
+    },
+  }) as postgres.Sql;
+  g.__nightshiftSql = proxy;
   return g.__nightshiftSql;
 }
 

@@ -25,7 +25,9 @@ async function readIndex(): Promise<string[]> {
 
 export async function listInvestigations(): Promise<Investigation[]> {
   const ids = await readIndex();
-  const records = await Promise.all(ids.map((id) => persistence().readNamed<Investigation>(docName(id))));
+  // One bulk read — the per-id fan-out through the shared pool is the same
+  // hang class the desk list had (see readManyNamed).
+  const records = await persistence().readManyNamed<Investigation>(ids.map((id) => docName(id)));
   return records.filter((r): r is Investigation => Boolean(r && r.id)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

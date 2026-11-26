@@ -176,6 +176,19 @@ describe("file backend: named documents and leases", () => {
     expect(await backend.readNamed("p-state")).toBeNull();
   });
 
+  it("readManyNamed returns results in request order with nulls for missing docs", async () => {
+    const backend = persistence();
+    await backend.deleteNamed("p-bulk-a");
+    await backend.deleteNamed("p-bulk-b");
+    await backend.writeNamed("p-bulk-a", { n: 1 });
+    await backend.writeNamed("p-bulk-b", { n: 2 });
+    const results = await backend.readManyNamed<{ n: number }>(["p-bulk-a", "p-bulk-missing", "p-bulk-b", "p-bulk-a"]);
+    expect(results).toEqual([{ n: 1 }, null, { n: 2 }, { n: 1 }]);
+    expect(await backend.readManyNamed<{ n: number }>(["p-bulk-x-1", "p-bulk-x-2"])).toEqual([null, null]);
+    await backend.deleteNamed("p-bulk-a");
+    await backend.deleteNamed("p-bulk-b");
+  });
+
   it("leases are exclusive until released, then re-acquirable", async () => {
     const backend = persistence();
     const release = await backend.acquireLease("p-lock", 10_000);
@@ -293,6 +306,18 @@ describe.skipIf(!dbUrl)("postgres backend: durability and atomicity", () => {
     expect(await backend.readNamed<{ pid: number; ticks: number }>(name)).toEqual({ pid: 1, ticks: 3 });
     await backend.deleteNamed(name);
     expect(await backend.readNamed(name)).toBeNull();
+  });
+
+  it("readManyNamed fetches many documents in one query, in request order, with nulls", async () => {
+    const backend = persistence();
+    const a = ids.lock.replace("p-pg-lock", "p-pg-bulk-a");
+    const b = ids.lock.replace("p-pg-lock", "p-pg-bulk-b");
+    await backend.writeNamed(a, { n: 1 });
+    await backend.writeNamed(b, { n: 2 });
+    const results = await backend.readManyNamed<{ n: number }>([a, "p-pg-bulk-missing", b]);
+    expect(results).toEqual([{ n: 1 }, null, { n: 2 }]);
+    await backend.deleteNamed(a);
+    await backend.deleteNamed(b);
   });
 
   it("leases are mutually exclusive and released when done", async () => {

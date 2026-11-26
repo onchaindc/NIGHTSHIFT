@@ -28,7 +28,10 @@ async function readIndex(): Promise<string[]> {
 
 export async function listDeskInvestigations(): Promise<DeskInvestigation[]> {
   const ids = await readIndex();
-  const records = await Promise.all(ids.map((id) => persistence().readNamed<DeskInvestigation>(docName(id))));
+  // One bulk read for the whole list — a per-id fan-out through the shared
+  // two-connection pool is what made the desk entry point hang when the
+  // index grew and when the database was slow to answer.
+  const records = await persistence().readManyNamed<DeskInvestigation>(ids.map((id) => docName(id)));
   return records
     .filter((r): r is DeskInvestigation => Boolean(r && r.id && r.kind === "desk"))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
