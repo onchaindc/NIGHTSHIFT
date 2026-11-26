@@ -23,6 +23,8 @@ export function deskSubjectLine(inv: DeskInvestigation): string {
       return `${inv.subject.assetName ?? "Unnamed asset"} · ${inv.subject.assetClass ?? "?"}`;
     case "trade_supplier_intelligence":
       return `${inv.subject.supplierName ?? "Unnamed supplier"} · ${inv.subject.jurisdiction ?? "?"}`;
+    case "listing_underwriter":
+      return `${inv.subject.tokenSymbol ?? inv.subject.assetName ?? "Unnamed token"} · ${inv.subject.issuerEntity ?? "Issuer not supplied"}`;
   }
 }
 
