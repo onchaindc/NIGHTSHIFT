@@ -42,22 +42,26 @@ let startNote = "not started";
 let startupError: string | null = null;
 let starting: Promise<void> | null = null;
 
-/** Merge-write the persisted runtime state: partial patches keep what they
- *  don't mention (startedAt, registration), so stream events and ticks never
- *  erase the startup record. */
+/** Merge-write the persisted runtime state: presence-based merging — a field
+ *  present in the patch (even explicitly null, e.g. a successful boot CLEARING
+ *  startupError) wins; absent fields keep the previous record. Nullish
+ *  coalescing would resurrect stale errors forever, which a live probe
+ *  actually demonstrated on production. */
 async function writeRuntimeState(patch: Partial<Omit<AcpRuntimeState, "attemptState" | "updatedAt">> & { attemptState: AcpRuntimeState["attemptState"] }): Promise<void> {
   try {
     const prev = await persistence().readNamed<AcpRuntimeState>(STATE_DOC);
+    const merged = <K extends keyof Omit<AcpRuntimeState, "attemptState" | "updatedAt">>(key: K): AcpRuntimeState[K] =>
+      (key in patch ? (patch as AcpRuntimeState)[key] : (prev ? prev[key] : null)) as AcpRuntimeState[K];
     const next: AcpRuntimeState = {
       attemptState: patch.attemptState,
-      startupError: patch.startupError ?? prev?.startupError ?? null,
-      connected: patch.connected ?? prev?.connected ?? null,
-      mode: patch.mode ?? prev?.mode ?? null,
-      startedAt: patch.startedAt ?? prev?.startedAt ?? null,
-      streamObservedAt: patch.streamObservedAt ?? prev?.streamObservedAt ?? null,
+      startupError: merged("startupError"),
+      connected: merged("connected"),
+      mode: merged("mode"),
+      startedAt: merged("startedAt"),
+      streamObservedAt: merged("streamObservedAt"),
       updatedAt: new Date().toISOString(),
-      note: patch.note !== undefined ? patch.note : (prev?.note ?? null),
-      registration: patch.registration ?? prev?.registration ?? { found: null, detail: null, checkedAt: null },
+      note: merged("note"),
+      registration: merged("registration") ?? { found: null, detail: null, checkedAt: null },
     };
     await persistence().writeNamed(STATE_DOC, next);
   } catch (err) {
@@ -144,13 +148,32 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
         registration,
       });
     } catch (err) {
+      // A start() that merely EXCEEDED the window but whose SSE stream is up
+      // (the SDK finished connecting late) is a slow success, not a failure —
+      // record it as started; a genuinely broken connect reports failed.
+      const diag = startingDiagnostics?.() ?? null;
+      if (diag?.connected === true) {
+        transport = selected.transport;
+        startupError = null;
+        startNote = `started slowly (start() exceeded ${Math.round(START_TIMEOUT_MS / 1000)}s) but the SSE stream is connected`;
+        await writeRuntimeState({
+          attemptState: "started",
+          startupError: null,
+          connected: true,
+          mode: selected.transport.mode,
+          startedAt: new Date().toISOString(),
+          streamObservedAt: new Date().toISOString(),
+          note: startNote,
+        });
+        return;
+      }
       transport = null;
       startupError = (err instanceof Error ? err.message : String(err)).slice(0, 400);
       startNote = `transport startup failed: ${startupError}`;
       await writeRuntimeState({
         attemptState: "failed",
         startupError,
-        connected: startingDiagnostics?.().connected ?? null,
+        connected: diag?.connected ?? null,
         mode: realAcpConfigured() ? "real" : "mock",
         startedAt: null,
         streamObservedAt: new Date().toISOString(),
