@@ -1,5 +1,7 @@
 "use client";
 
+import { createPortal } from "react-dom";
+
 import { usePrivy, useWallets, useConnectWallet, useCreateWallet, useSendTransaction } from "@privy-io/react-auth";
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins, RefreshCw } from "lucide-react";
@@ -275,6 +277,7 @@ function WithdrawModal({
   };
 
   return (
+createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-night/60 p-4 backdrop-blur-sm" onClick={onClose}>
       {/* Dialogs fit the viewport and scroll internally — never off-screen. */}
       <div
@@ -326,7 +329,8 @@ function WithdrawModal({
         </button>
       </div>
     </div>
-  );
+  , document.body)
+);
 }
 
 interface PayerRail {
@@ -685,7 +689,8 @@ export default function FundsPage() {
         <p className="mt-4 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-[12.5px] text-teal">{notice}</p>
       )}
 
-      {showDeposit && (
+      {showDeposit &&
+        createPortal(
         <div className="fixed inset-0 z-50 grid place-items-center bg-night/60 p-4 backdrop-blur-sm" onClick={() => setShowDeposit(null)}>
           <div
             className="x-modal-panel w-full max-w-sm rounded-2xl border border-edge bg-panel p-5 shadow-xl"
@@ -713,7 +718,8 @@ export default function FundsPage() {
             </button>
           </div>
         </div>
-      )}
+        , document.body)
+      }
 
       {showWithdraw && (
         <WithdrawModal
@@ -725,5 +731,6 @@ export default function FundsPage() {
         />
       )}
     </div>
-  );
+  
+);
 }

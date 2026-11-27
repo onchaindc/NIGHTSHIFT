@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { LoaderCircle, ShieldAlert } from "lucide-react";
 
 /**
@@ -41,6 +42,7 @@ export function ConfirmPaidRun({ open, title, body, cost, confirmLabel, busy, on
   if (!open) return null;
 
   return (
+createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
       <button
         type="button"
@@ -68,5 +70,6 @@ export function ConfirmPaidRun({ open, title, body, cost, confirmLabel, busy, on
         </div>
       </div>
     </div>
-  );
+  , document.body)
+);
 }

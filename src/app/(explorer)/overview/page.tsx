@@ -239,6 +239,18 @@ export default async function OverviewPage() {
   // via the bound, and expose the numbers in an HTML comment. Removed once the
   // production discrepancy is identified.
   const __diag: Record<string, string> = {};
+  const __prev = (globalThis as { __ovDiag?: Record<string, string> }).__ovDiag;
+  // Raw connectivity probe through the shared client: settles fast ⇒ the
+  // database answers on this instance; hangs ⇒ the instance's client is
+  // wedged (resolve/migrate/chain), independent of the store code.
+  try {
+    const { dbSql } = await import("@/lib/db/client");
+    const s0 = Date.now();
+    await dbSql()`select 1`;
+    __diag.dbPing = `settle:${Date.now() - s0}ms`;
+  } catch (err) {
+    __diag.dbPing = `reject:${err instanceof Error ? err.message.slice(0, 60) : "?"}`;
+  }
   const __timed = async <T,>(label: string, work: () => Promise<T>): Promise<T | null> => {
     const s = Date.now();
     try {
@@ -263,6 +275,7 @@ export default async function OverviewPage() {
   ]);
   __diag.totalReads = `${Date.now() - __t0}ms`;
   __diag.persistence = persistenceMode();
+  (globalThis as { __ovDiag?: Record<string, string> }).__ovDiag = __diag;
 
   // Caller projections preserve the failed/empty distinction: a failed read
   // stays null through the projection, an empty one becomes an empty array.
@@ -324,8 +337,9 @@ export default async function OverviewPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-7 sm:px-6 sm:py-9">
-      {/* overview-latency diagnostic — temporary */}
-      {/* DIAG[{JSON.stringify(__diag)}] */}
+      {/* overview-latency diagnostic — temporary, removed after root cause */}
+      <div hidden data-ov-diag="cur" data-v={JSON.stringify(__diag)} />
+      <div hidden data-ov-diag="prev" data-v={JSON.stringify(__prev ?? null)} />
       {/* Compact operational header: state line instead of a headline. */}
       <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h1 className="x-label !text-[11px]">OVERVIEW</h1>

@@ -11,7 +11,6 @@ import { DESK_TYPE_LABEL, DESK_VERDICT_LABEL } from "@/lib/desk/types";
 import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { vibrate } from "@/lib/haptics";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
-import { ConfirmPaidRun } from "@/components/confirm-paid-run";
 import { ReportDisclosure } from "@/components/report/collapsible";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { openTaskStream } from "@/components/minds/task-stream";
@@ -131,7 +130,6 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [redacted, setRedacted] = useState(false);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
-  const [paidConfirmOpen, setPaidConfirmOpen] = useState(false);
   const [walkthrough, setWalkthrough] = useState<DeskWalkthrough | null>(null);
   const [walkthroughState, setWalkthroughState] = useState<"idle" | "loading" | "error">("idle");
   const prevTaskState = useRef<TaskRecord["state"] | null>(null);
@@ -399,8 +397,16 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
             type="button"
             className="btn-quiet !min-h-10"
             disabled={busy !== null || !isOwner}
-            title={isOwner ? "Asks for confirmation, then stops at the approval gate; nothing is signed until you approve" : "Only the file's owner or the operator can run it"}
-            onClick={() => setPaidConfirmOpen(true)}
+            title={isOwner ? "Stops at the approval gate; nothing is signed until you approve" : "Only the file's owner or the operator can run it"}
+            onClick={() =>
+              void act("run-intel", () =>
+                fetch(`/api/desk/${inv.id}/run`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "run", mode: "intel" }),
+                }),
+              )
+            }
           >
             {busy === "run-intel" ? <LoaderCircle size={14} aria-hidden className="motion-safe:animate-spin" /> : null}
             Run paid investigation
@@ -848,27 +854,6 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
         every unsupported requirement is named. The desk never signs or broadcasts a payment.
       </p>
 
-      {/* The paid run asks before it starts — a stray tap while scrolling must
-          never launch one. Confirm carries the ceiling; Cancel does nothing. */}
-      <ConfirmPaidRun
-        open={paidConfirmOpen}
-        title="Start a paid investigation?"
-        body="The desk plans every capability against the live network, then stops at the approval gate — you see the exact priced plan before anything is signed."
-        cost={`This run is paid from the deployment's payer wallet, hard-capped at the file's ceiling of ${money(inv.spendLimitUsdCents)}.`}
-        confirmLabel="Start the paid run"
-        busy={busy === "run-intel"}
-        onConfirm={() => {
-          setPaidConfirmOpen(false);
-          void act("run-intel", () =>
-            fetch(`/api/desk/${inv.id}/run`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "run", mode: "intel" }),
-            }),
-          );
-        }}
-        onCancel={() => setPaidConfirmOpen(false)}
-      />
     </div>
   );
 }
