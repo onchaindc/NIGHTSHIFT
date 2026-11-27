@@ -19,7 +19,7 @@ export type NavItem = {
 };
 
 export const PRIMARY_NAV: NavItem[] = [
-  { href: "/", label: "Overview" },
+  { href: "/overview", label: "Overview" },
   { href: "/minds", label: "Minds" },
   { href: "/work", label: "Work", activeFor: ["/work", "/desk", "/assurance"] },
   { href: "/buyer", label: "Buyer Desk" },
@@ -34,7 +34,8 @@ export const SECONDARY_NAV: NavItem[] = [
   },
 ];
 
-/** Active-tab matching shared by every nav consumer. "/" matches exactly. */
+/** Active-tab matching shared by every nav consumer. The landing page "/" is
+ *  reachable through the wordmark; Overview is its own destination. */
 export function navItemActive(item: NavItem, pathname: string): boolean {
   return (item.activeFor ?? [item.href]).some((href) => (href === "/" ? pathname === "/" : pathname.startsWith(href)));
 }

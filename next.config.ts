@@ -6,7 +6,8 @@ const nextConfig: NextConfig = {
     return [
       // The pre-pivot console is retired but its URLs still circulate. Send each
       // one to the closest page of the current product instead of a second app.
-      { source: "/overview", destination: "/miners", permanent: false },
+      // (/overview is a real destination again — the Overview page — so its old
+      // redirect to the miner catalog is gone.)
       { source: "/console", destination: "/miners", permanent: false },
       { source: "/operations", destination: "/miners", permanent: false },
       { source: "/approvals", destination: "/miners", permanent: false },

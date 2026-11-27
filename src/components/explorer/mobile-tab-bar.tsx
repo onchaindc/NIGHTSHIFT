@@ -13,7 +13,7 @@ import { PRIMARY_NAV, navItemActive, type NavItem } from "@/lib/explorer/nav";
  * wayfinding and the global Ask action.
  */
 const ICONS: Record<string, LucideIcon> = {
-  "/": LayoutGrid,
+  "/overview": LayoutGrid,
   "/minds": BrainCircuit,
   "/work": Compass,
   "/buyer": Handshake,

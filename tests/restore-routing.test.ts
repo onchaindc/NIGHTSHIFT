@@ -172,7 +172,9 @@ describe("navigation: five primary destinations, Network secondary, one shared c
   it("the shared nav contract lists exactly the five primary destinations", async () => {
     const { PRIMARY_NAV, SECONDARY_NAV } = await import("@/lib/explorer/nav");
     expect(PRIMARY_NAV.map((i: { label: string }) => i.label)).toEqual(["Overview", "Minds", "Work", "Buyer Desk", "Wallet"]);
-    expect(PRIMARY_NAV.map((i: { href: string }) => i.href)).toEqual(["/", "/minds", "/work", "/buyer", "/funds"]);
+    expect(PRIMARY_NAV.map((i: { href: string }) => i.href)).toEqual(["/overview", "/minds", "/work", "/buyer", "/funds"]);
+    // Overview is its own destination, not the landing page.
+    expect(PRIMARY_NAV[0].href).not.toBe("/");
     // Work exposes both clearly distinct workspaces.
     const work = PRIMARY_NAV.find((i: { label: string }) => i.label === "Work");
     expect(work?.activeFor).toEqual(expect.arrayContaining(["/work", "/desk", "/assurance"]));
@@ -206,6 +208,23 @@ describe("navigation: five primary destinations, Network secondary, one shared c
     // Navigation architecture only — no workspace is reimplemented here.
     expect(work).not.toContain("AssuranceIndex");
     expect(work).not.toContain("DeskEntry");
+  });
+
+  it("Overview is its own page, not the landing page", () => {
+    // The page exists and points at every primary surface plus the network
+    // (links are driven from data arrays, so pin the route strings).
+    const overview = src("src/app/(explorer)/overview/page.tsx");
+    for (const href of ["/minds", "/work", "/buyer", "/funds", "/miners", "/signals", "/activity", "/developers"]) {
+      expect(overview).toContain(`href: "${href}"`);
+    }
+    // The terminal entry is an inline link inside the prose.
+    expect(overview).toContain('href="/terminal"');
+    // Registry-driven Minds, no fabricated live data.
+    expect(overview).toContain("mindsByStatus");
+    // The stale pre-pivot redirect no longer shadows the page.
+    const config = src("next.config.ts");
+    expect(config).not.toContain('source: "/overview"');
+    expect(src("src/app/sitemap.ts")).toContain('path: "/overview"');
   });
 });
 
