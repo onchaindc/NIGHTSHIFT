@@ -1,9 +1,10 @@
 /**
  * Overview resilience — regression tests for the recurring
- * "This view hit an unexpected error" failure.
+ * "This view hit an unexpected error" failure AND the production data-
+ * availability failure (persistent partial-store banner + empty sections).
  *
- * The failure had TWO proven digests, both reproduced against a production
- * build with real-shaped legacy records before the fix:
+ * The rendering failure had TWO proven digests, both reproduced against a
+ * production build with real-shaped legacy records before the fix:
  *
  *   1. `TypeError: a.evidence is not iterable` — summarizeDesk →
  *      deskEvidenceCounts on a desk record written before its evidence
@@ -12,17 +13,15 @@
  *      — summarize on an assurance record saved before the transaction and
  *      counterparty steps had filled in.
  *
- * One such record killed the ENTIRE Overview server render for every
- * signed-in caller (HTTP 200 with a truncated stream in the browser, then
- * the route error boundary) and stayed broken until the record was removed
- * by hand. These tests pin the permanent fix:
+ * The data-availability failure was the 8s read deadline expiring inside the
+ * cold-start database window (probe + migrate run ahead of the first query),
+ * which rendered the partial-store banner and empty sections against a
+ * HEALTHY database. Its contract is pinned here at the section level:
  *
- *   - the desk and assurance stores normalize shape-drifted records on read;
- *   - the summary projections dereference nothing that was not normalized;
- *   - Overview sections are built inside runSection: a failing section fails
- *     alone, the rest of the page renders;
- *   - the identity-aware projections the page uses survive malformed records
- *     end to end.
+ *   - a FAILED source (null) never renders as zero — the snapshot reports
+ *     "n/a" and the page shows a retry;
+ *   - a genuinely EMPTY source renders 0/none, because it is a fact;
+ *   - sections are isolated (runSection): one broken builder fails alone.
  */
 
 import { describe, expect, it } from "vitest";
@@ -31,13 +30,16 @@ import { deskEvidenceCounts } from "@/lib/desk/types";
 import { getDeskInvestigation, saveDeskInvestigation, summarizeDesk } from "@/lib/desk/store";
 import { audit, getInvestigation, saveInvestigation, summarize } from "@/lib/assurance/store";
 import { investigationsForCaller, publicTaskView, tasksForCaller } from "@/lib/api/public";
+import { readBounded, readOutcome } from "@/lib/api/bounded-read";
 import {
-  buildActivity,
-  buildAttention,
+  buildNetworkStatus,
   buildQuickAccess,
-  buildWorkspace,
+  buildRecentActivity,
+  buildSnapshot,
+  buildWorkInProgress,
   runSection,
   runSectionAsync,
+  type OverviewInput,
 } from "@/lib/overview/sections";
 import { persistence } from "@/lib/storage";
 import { listTasks } from "@/lib/engine/store";
@@ -45,8 +47,11 @@ import type { DeskInvestigation } from "@/lib/desk/types";
 import type { Investigation } from "@/lib/assurance/types";
 import type { TaskRecord } from "@/lib/engine/types";
 import type { BuyerJobView } from "@/lib/acp/buyer";
+import type { CommerceJob } from "@/lib/commerce/types";
 
 const USER = "0x1111111111111111111111111111111111111111";
+const NOW = Date.now();
+const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 
 /* ------------------------------------------------------------------ */
 /* The exact legacy records that killed production                     */
@@ -54,13 +59,13 @@ const USER = "0x1111111111111111111111111111111111111111";
 
 /** A desk file recorded before the evidence ledger, run list or audit trail
  *  existed — digest 1: "a.evidence is not iterable". */
-const LEGACY_DESK: DeskInvestigation = {
+const LEGACY_DESK = {
   id: "ov-legacy-desk",
   kind: "desk",
   reference: "NS-CP-OVTEST1",
   type: "counterparty_due_diligence",
   status: "collecting",
-  createdAt: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
+  createdAt: iso(-72 * 60 * 60 * 1000),
   subject: { legalName: "Legacy Company Ltd", jurisdiction: "GB" },
   runs: [],
   findings: [],
@@ -71,10 +76,10 @@ const LEGACY_DESK: DeskInvestigation = {
 
 /** An assurance file saved before the transaction step and the counterparty
  *  step had filled in — digest 2: "reading 'legalName'". */
-const LEGACY_ASSURANCE: Investigation = {
+const LEGACY_ASSURANCE = {
   id: "ov-legacy-assurance",
   reference: "NS-TX-OVTEST2",
-  createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+  createdAt: iso(-30 * 60 * 1000),
   status: "draft",
   dataMode: "live",
   owner: USER,
@@ -83,10 +88,10 @@ const LEGACY_ASSURANCE: Investigation = {
 
 /** A task recorded before the spend ledger existed. */
 function legacyTask(over: Partial<TaskRecord> = {}): TaskRecord {
-  const base: TaskRecord = {
+  return {
     id: "ov-legacy-task",
-    createdAt: Date.now() - 10 * 60 * 1000,
-    updatedAt: Date.now() - 5 * 60 * 1000,
+    createdAt: NOW - 10 * 60 * 1000,
+    updatedAt: NOW - 5 * 60 * 1000,
     state: "failed",
     goal: "Legacy ask recorded before the spend ledger existed",
     plan: null,
@@ -104,9 +109,119 @@ function legacyTask(over: Partial<TaskRecord> = {}): TaskRecord {
     error: "provider refused",
     origin: { source: "web" },
     ...over,
-  };
-  return base;
+  } as TaskRecord;
 }
+
+/** A complete, healthy desk record the way the create flow writes it. */
+function healthyDesk(over: Partial<DeskInvestigation> = {}): DeskInvestigation {
+  return {
+    id: "ov-desk-healthy",
+    kind: "desk",
+    reference: "NS-CP-OVTEST3",
+    type: "counterparty_due_diligence",
+    status: "collecting",
+    createdAt: iso(-3 * 60 * 60 * 1000),
+    updatedAt: iso(-2 * 60 * 60 * 1000),
+    dataMode: "live",
+    owner: USER,
+    subject: { legalName: "Healthy Corp", jurisdiction: "DE" },
+    unsupported: [],
+    evidence: [],
+    findings: [],
+    runs: [],
+    report: null,
+    spendLimitUsdCents: 100,
+    operator: { createdBy: "test", tenant: "test" },
+    audit: [],
+    ...over,
+  };
+}
+
+/** A complete, healthy assurance file. */
+function healthyAssurance(over: Partial<Investigation> = {}): Investigation {
+  return {
+    id: "ov-assurance-healthy",
+    reference: "NS-TX-OVTEST4",
+    createdAt: iso(-6 * 60 * 60 * 1000),
+    updatedAt: iso(-4 * 60 * 60 * 1000),
+    status: "assessed",
+    dataMode: "demonstration",
+    owner: null,
+    transaction: { payerWallet: "", recipientWallet: "", amountUsdc: 2400000, tokenMint: "", jurisdiction: "GB", approvedBeneficiary: "", contractRef: "", memo: "", documents: [], ownershipRequired: true },
+    counterparty: { legalName: "Example Trade Ltd" },
+    evidence: [],
+    findings: [],
+    decision: { outcome: "HOLD", rationale: "verification pending" } as Investigation["decision"],
+    intelligenceRuns: [],
+    settlement: null,
+    spendLimitUsdCents: 100,
+    operator: { createdBy: "test", tenant: "test" },
+    audit: [],
+    limitations: [],
+    ...over,
+  };
+}
+
+const buyerView = (over: Partial<BuyerJobView> = {}): BuyerJobView =>
+  ({
+    buyer: {
+      key: "8453:42",
+      chainId: 8453,
+      jobId: "42",
+      offering: "Counterparty Due Diligence",
+      clientAddress: USER,
+      txHash: null,
+      requirement: {},
+      requirementJson: "{}",
+      requirementSentAt: null,
+      expiresAt: null,
+      allowanceTxHash: null,
+      fundedTxHash: null,
+      completedTxHash: null,
+      notes: [],
+      createdAt: iso(-60 * 60 * 1000),
+      updatedAt: iso(-30 * 60 * 1000),
+    },
+    provider: null,
+    phase: "awaiting_payment",
+    phaseLabel: "Waiting for your payment",
+    action: "fund",
+    ...over,
+  }) as BuyerJobView;
+
+const commerceJob = (over: Partial<CommerceJob> = {}): CommerceJob =>
+  ({
+    id: "ov-commerce-1",
+    offeringId: "cap.test",
+    section: "service",
+    buyerWallet: USER,
+    priceUsdCents: 1900,
+    rail: "internal_settlement",
+    settled: true,
+    settlementNote: "intro purchase",
+    input: {},
+    deliverable: null,
+    status: "fulfilled",
+    createdAt: iso(-90 * 60 * 1000),
+    updatedAt: iso(-80 * 60 * 1000),
+    ...over,
+  }) as CommerceJob;
+
+const populatedInput = (over: Partial<OverviewInput> = {}): OverviewInput => ({
+  desk: [healthyDesk()],
+  assurance: [healthyAssurance()],
+  tasks: [legacyTask(), legacyTask({ id: "ov-t-await", state: "awaiting_approval", goal: "PAID intelligence plan", updatedAt: NOW - 60 * 1000 })],
+  buyerViews: [buyerView()],
+  commerceJobs: [commerceJob()],
+  buyerScoped: true,
+  operator: false,
+  signedIn: true,
+  ...over,
+});
+
+/* ------------------------------------------------------------------ */
+/* The exact records that killed the Overview render                   */
+/* ------------------------------------------------------------------ */
 
 describe("the exact records that killed the Overview render", () => {
   it("digest 1 — summarizeDesk survives a desk record without its evidence ledger", () => {
@@ -115,7 +230,6 @@ describe("the exact records that killed the Overview render", () => {
     expect(summary.verifiedCount).toBe(0);
     expect(summary.missingCount).toBe(0);
     expect(summary.subject).toContain("Legacy Company Ltd");
-    // A file collecting for over two days is honest attention material.
   });
 
   it("digest 1 — deskEvidenceCounts treats an absent ledger as empty, skips junk entries", () => {
@@ -125,8 +239,6 @@ describe("the exact records that killed the Overview render", () => {
     const junked = deskEvidenceCounts({
       evidence: [
         { id: "e1", provenance: "verified", class: "declared" },
-        // An entry whose provenance is not in the vocabulary must be skipped,
-        // never counted into NaN.
         { id: "e2", provenance: "future_provenance", class: "declared" },
         null as unknown as { id: string; provenance: string },
       ],
@@ -202,119 +314,137 @@ describe("sections fail alone — the blast radius of one broken record is one s
   });
 });
 
+describe("the availability contract — failed sources never render as zero", () => {
+  it("a failed source (null) makes the snapshot stat n/a, never 0", () => {
+    const stats = buildSnapshot(populatedInput({ desk: null }));
+    expect(stats.find((s) => s.key === "active")!.count).toBeNull();
+    expect(stats.find((s) => s.key === "completed")!.count).toBeNull();
+    // "Awaiting you" does not draw on the desk store — it still has a real count:
+    // the awaiting task, the HOLD decision, and the buyer job waiting on funding.
+    expect(stats.find((s) => s.key === "awaiting")!.count).toBe(3);
+  });
+
+  it("a genuinely empty workspace renders honest zeros, not n/a", () => {
+    const stats = buildSnapshot(
+      populatedInput({ desk: [], assurance: [], tasks: [], buyerViews: [], commerceJobs: [] }),
+    );
+    expect(stats.find((s) => s.key === "active")!.count).toBe(0);
+    expect(stats.find((s) => s.key === "completed")!.count).toBe(0);
+  });
+
+  it("buyer counts stay n/a for a failed buyer store and 0 for an empty one", () => {
+    const failed = buildSnapshot(populatedInput({ buyerViews: null }));
+    expect(failed.find((s) => s.key === "buyer")!.count).toBeNull();
+    const empty = buildSnapshot(populatedInput({ buyerViews: [], commerceJobs: [] }));
+    expect(empty.find((s) => s.key === "buyer")!.count).toBe(0);
+    // The operator identity is not wallet-scoped: the column reports the
+    // source as absent rather than pretending to have counted.
+    const operator = buildSnapshot(populatedInput({ buyerScoped: false, buyerViews: null, commerceJobs: null }));
+    expect(operator.find((s) => s.key === "buyer")!.count).toBeNull();
+  });
+});
+
 describe("section builders on production-shaped records", () => {
-  const healthyDesk = summarizeDesk({
-    ...LEGACY_DESK,
-    id: "ov-desk-healthy",
-    reference: "NS-CP-OVTEST3",
-    status: "collecting",
-    createdAt: new Date().toISOString(),
-    evidence: [],
-    runs: [],
-    findings: [],
-    unsupported: [],
-    audit: [],
-    report: null,
-    operator: { createdBy: "test", tenant: "test" },
-    updatedAt: new Date().toISOString(),
-    spendLimitUsdCents: 100,
+  it("work in progress: awaiting, stale, executing and buyer rows with next actions", () => {
+    const rows = buildWorkInProgress(
+      populatedInput({
+        desk: [healthyDesk({ status: "collecting", createdAt: iso(-72 * 60 * 60 * 1000) })],
+        tasks: [
+          legacyTask({ state: "executing", goal: "Free pre-flight" }),
+          legacyTask({ id: "ov-t-await", state: "awaiting_approval", goal: "PAID intelligence plan", updatedAt: NOW - 60 * 1000 }),
+        ],
+        buyerViews: [buyerView({ action: "fund" })],
+      }),
+      NOW,
+    );
+    const awaiting = rows.find((r) => r.stateLabel === "Awaiting approval");
+    expect(awaiting?.awaiting).toBe(true);
+    expect(awaiting?.nextAction).toContain("approve");
+    const stale = rows.find((r) => r.title.includes("NS-CP-OVTEST3"));
+    expect(stale?.stateLabel).toContain("longer than usual");
+    expect(rows.some((r) => r.kindLabel === "Buyer job" && r.nextAction.includes("fund"))).toBe(true);
+    expect(rows.some((r) => r.stateLabel === "Executing")).toBe(true);
+    // Sorted newest-first.
+    const times = rows.map((r) => r.updatedTs);
+    expect([...times].sort((a, b) => b - a)).toEqual(times);
   });
 
-  it("attention: decisions, HOLD files, stale files and buyer actions — nothing invented", () => {
-    const awaiting = legacyTask({ id: "ov-t-await", state: "awaiting_approval", goal: "PAID intelligence plan" });
-    const items = buildAttention({
-      tasks: [awaiting],
-      assurance: [summarize(LEGACY_ASSURANCE)],
-      desk: [healthyDesk],
-      buyerViews: [],
-      now: Date.now(),
-    });
-    // The legacy assurance record has no decision → NOT attention material.
-    // The fresh desk file is not stale → NOT attention material.
-    // Only the awaiting-approval run is.
-    expect(items).toHaveLength(1);
-    expect(items[0].href).toBe(`/activity/${awaiting.id}`);
-    expect(items[0].detail).toContain("approval");
-
-    const stale = buildAttention({
-      tasks: [],
-      assurance: [],
-      desk: [summarizeDesk(LEGACY_DESK)], // collecting, 3 days old
-      buyerViews: [],
-      now: Date.now(),
-    });
-    expect(stale).toHaveLength(1);
-    expect(stale[0].href).toBe(`/desk/${LEGACY_DESK.id}`);
-
-    // Empty workspace → empty attention; the page hides the section entirely.
-    expect(buildAttention({ tasks: [], assurance: [], desk: [], buyerViews: [], now: Date.now() })).toHaveLength(0);
+  it("recent activity: decisions, answers, failures, commerce — honest labels, newest first", () => {
+    const rows = buildRecentActivity(
+      populatedInput({
+        desk: [healthyDesk({ status: "reported", report: { confidence: "proceed_on_record" } as unknown as DeskInvestigation["report"] })],
+        tasks: [
+          legacyTask({ id: "ov-t-done", state: "completed", goal: "Which validator set secures the most stake on Base today?" }),
+          legacyTask(),
+        ],
+      }),
+    );
+    const decision = rows.find((r) => r.meta === "Decision: HOLD");
+    expect(decision?.title).toContain("NS-TX-OVTEST4");
+    const answered = rows.find((r) => r.meta === "Answered");
+    expect(answered).toBeTruthy(); // the spend-less task — no NaN, no crash
+    const failedRow = rows.find((r) => r.meta.startsWith("Failed"));
+    expect(failedRow?.failed).toBe(true);
+    const commerce = rows.find((r) => r.kindLabel === "Commerce");
+    expect(commerce?.meta).toContain("Delivered · $19.00");
+    const times = rows.map((r) => r.ts);
+    expect([...times].sort((a, b) => b - a)).toEqual(times);
   });
 
-  it("attention: a buyer action waiting on the wallet surfaces from its own view", () => {
-    const view = {
-      buyer: { key: "8453:42", offering: "Counterparty Due Diligence" },
-      phase: "awaiting_funding",
-      phaseLabel: "awaiting funding",
-      action: "fund",
-    } as unknown as BuyerJobView;
-    const items = buildAttention({ tasks: [], assurance: [], desk: [], buyerViews: [view], now: Date.now() });
-    expect(items).toHaveLength(1);
-    expect(items[0].href).toBe("/buyer");
-    expect(items[0].detail).toContain("fund");
+  it("network status reports configuration facts, never invented activity", () => {
+    const previous = { acp: process.env.ACP_ENABLED, tg: process.env.TELEGRAM_BOT_TOKEN };
+    try {
+      delete process.env.ACP_ENABLED;
+      process.env.TELEGRAM_BOT_TOKEN = "x";
+      const items = buildNetworkStatus();
+      expect(items.find((n) => n.label === "Agent commerce (ACP)")!.configured).toBe(false);
+      expect(items.find((n) => n.label === "Telegram intake")!.configured).toBe(true);
+      expect(items.find((n) => n.label === "Base RPC")!.configured).toBe(true);
+    } finally {
+      if (previous.acp === undefined) delete process.env.ACP_ENABLED;
+      else process.env.ACP_ENABLED = previous.acp;
+      if (previous.tg === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+      else process.env.TELEGRAM_BOT_TOKEN = previous.tg;
+    }
   });
 
-  it("workspace: honest counts per workspace, empty state labelled empty", () => {
-    const blocks = buildWorkspace({
-      desk: [healthyDesk],
-      assurance: [summarize(LEGACY_ASSURANCE)],
-      buyerViews: [],
-      commerceJobs: [],
-      buyerScoped: true,
-    });
-    expect(blocks).toHaveLength(3);
-    expect(blocks.find((b) => b.key === "desk")!.headline).toBe("1 file");
-    expect(blocks.find((b) => b.key === "desk")!.detail).toContain("investigating");
-    // The legacy file EXISTS — the block is not empty; it just has no decision.
-    expect(blocks.find((b) => b.key === "assurance")!.headline).toBe("1 file");
-    expect(blocks.find((b) => b.key === "assurance")!.empty).toBe(false);
-    expect(blocks.find((b) => b.key === "buyer")!.empty).toBe(true);
-
-    // Operator: buyer records are wallet-scoped and the block is absent.
-    const operatorBlocks = buildWorkspace({ desk: [], assurance: [], buyerViews: [], commerceJobs: [], buyerScoped: false });
-    expect(operatorBlocks.map((b) => b.key)).toEqual(["desk", "assurance"]);
-  });
-
-  it("activity: records with missing fields render honest rows, never throw", () => {
-    const rows = buildActivity({
-      tasks: [legacyTask(), legacyTask({ id: "ov-t-done", state: "completed", goal: "A completed ask", spend: { limitUsdCents: 4, spentUsdCents: 4, entries: [] } })],
-      desk: [healthyDesk],
-      assurance: [summarize(LEGACY_ASSURANCE)],
-    });
-    expect(rows.length).toBeGreaterThanOrEqual(4);
-    const failed = rows.find((r) => r.label.includes("Legacy ask"));
-    expect(failed?.meta).toContain("Failed or blocked");
-    const answered = rows.find((r) => r.meta === "Answered · $0.04" || r.meta === "Answered");
-    expect(answered).toBeTruthy();
-    const assuranceRow = rows.find((r) => r.label.includes("NS-TX-OVTEST2"));
-    expect(assuranceRow?.label).toContain("counterparty not recorded");
-  });
-
-  it("quick access: signed-out callers get nothing; a draft file gets its resume link", () => {
+  it("quick access: signed-out callers get nothing; a draft gets its resume link", () => {
     expect(buildQuickAccess({ signedIn: false, operator: false, desk: [] })).toHaveLength(0);
-    const actions = buildQuickAccess({ signedIn: true, operator: false, desk: [healthyDesk] });
+    const actions = buildQuickAccess({
+      signedIn: true,
+      operator: false,
+      desk: [healthyDesk({ status: "draft" })],
+    });
     expect(actions.some((a) => a.href === "/desk/new")).toBe(true);
     expect(actions.some((a) => a.href === "/history")).toBe(true);
+    expect(actions.some((a) => a.href.startsWith("/desk/") && a.label.includes("Resume"))).toBe(true);
     expect(actions.some((a) => a.href === "/console")).toBe(false);
     const operatorActions = buildQuickAccess({ signedIn: true, operator: true, desk: [] });
     expect(operatorActions.some((a) => a.href === "/console")).toBe(true);
   });
 });
 
+describe("bounded reads distinguish failed from genuinely empty", () => {
+  it("readBounded resolves null for reject and deadline alike", async () => {
+    expect(await readBounded(Promise.reject(new Error("x")), 50)).toBeNull();
+    expect(await readBounded(new Promise<never>(() => undefined), 50)).toBeNull();
+    expect(await readBounded(Promise.resolve(42), 50)).toBe(42);
+  });
+
+  it("readOutcome separates 'the store has no such record' from 'the store did not answer'", async () => {
+    const empty = await readOutcome(Promise.resolve(null), 50);
+    expect(empty.state).toBe("ok"); // verified-empty: a 404 may follow
+    if (empty.state === "ok") expect(empty.value).toBeNull();
+    const failed = await readOutcome(new Promise<never>(() => undefined), 50);
+    expect(failed.state).toBe("failed"); // must render a retry, not a 404
+    const rejected = await readOutcome(Promise.reject(new Error("db down")), 50);
+    expect(rejected.state).toBe("failed");
+  });
+});
+
 describe("the identity projections the page uses survive malformed records", () => {
   it("the full task chain — store read, caller projection, public view — with a spend-less record", async () => {
     await persistence().writeNamed("tasks-json-probe", legacyTask({ id: "ov-task-probe" }));
-    // The engine store normalizes on read (its own long-standing contract);
-    // the projections and public view then run over the result.
     const tasks = await listTasks();
     const projected = tasksForCaller(new Request("http://test/"), tasks);
     expect(projected.redacted).toBe(true);
@@ -324,8 +454,6 @@ describe("the identity projections the page uses survive malformed records", () 
 
   it("investigationsForCaller keeps a live legacy file visible to its owner and hidden from anonymous", () => {
     const reqUser = new Request("http://test/", { headers: { cookie: "irrelevant" } });
-    // Identity is anonymous here; the LIVE legacy file must be hidden, the
-    // projection must not throw on its missing fields.
     const anon = investigationsForCaller(reqUser, [LEGACY_ASSURANCE]);
     expect(anon.investigations).toHaveLength(0);
   });

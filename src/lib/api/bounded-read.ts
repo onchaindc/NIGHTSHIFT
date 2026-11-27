@@ -22,3 +22,30 @@ export function readBounded<T>(work: Promise<T>, ms: number): Promise<T | null> 
     );
   });
 }
+
+/**
+ * Outcome-valued read for pages that must DISTINGUISH a failed read from a
+ * verified-empty store. `readBounded`'s null is ambiguous: a detail page that
+ * renders "not found" for a timed-out read lies to the user about a record
+ * that exists, and a dashboard that renders 0 for a failed read manufactures
+ * data. `ok` means the read SETTLED with a value (null value allowed — the
+ * store genuinely has no such record); `failed` means the deadline passed or
+ * the read rejected, and the page renders a retry action instead of a fact.
+ */
+export type ReadOutcome<T> = { state: "ok"; value: T } | { state: "failed"; reason: string };
+
+export function readOutcome<T>(work: Promise<T>, ms: number): Promise<ReadOutcome<T>> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ state: "failed", reason: "read deadline exceeded" }), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve({ state: "ok", value });
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        resolve({ state: "failed", reason: err instanceof Error ? err.message : "read failed" });
+      },
+    );
+  });
+}
