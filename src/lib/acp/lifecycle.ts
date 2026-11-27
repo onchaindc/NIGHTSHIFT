@@ -111,8 +111,13 @@ export async function handleAcpEntry(
   if (entry.kind === "system" && entry.event) {
     switch (entry.event.type) {
       case "job.created":
-        // First sight: keep the record; the requirement message follows.
-        if (job.status === "received") await updateJob(job, "received", "job.created observed; waiting for the requirement");
+        // First sight: keep the record; the requirement follows — either as a
+        // job-room message (registered agent wallets) or, failing that, from
+        // the job's own on-chain description (any wallet can transact).
+        if (job.status === "received") {
+          await updateJob(job, "received", "job.created observed; waiting for the requirement");
+          await maybeIntakeFromDescription(transport, ref, job);
+        }
         break;
       case "budget.set":
         break; // our own act, echoed
@@ -148,6 +153,33 @@ export async function handleAcpEntry(
     return intake(transport, ref, job, entry.content);
   }
   return job;
+}
+
+/**
+ * The requirement may ride the job's own on-chain description — the only
+ * channel that works for a buyer wallet the ACP server has not registered
+ * as an agent (their chat API authenticates agents only; the on-chain job
+ * path is open to every wallet). Preferred path stays the job-room message;
+ * this runs only while the job is still unpriced and un-raw'd.
+ */
+async function maybeIntakeFromDescription(transport: AcpTransport, ref: AcpSessionRef, job: AcpJobRecord): Promise<void> {
+  if (job.rawRequirement || job.priceUsdCents) return;
+  if (!transport.jobDescription) return;
+  let description: string | null = null;
+  try {
+    description = await transport.jobDescription(ref);
+  } catch {
+    return; // no description reachable — wait for the message path
+  }
+  if (!description) return;
+  try {
+    const parsed = JSON.parse(description) as Record<string, unknown>;
+    if (parsed && typeof parsed.offering === "string") {
+      await intake(transport, ref, job, description);
+    }
+  } catch {
+    /* the description is not a requirement payload — nothing to do */
+  }
 }
 
 /** Intake: parse and validate the requirement; price (accept) or refuse. */

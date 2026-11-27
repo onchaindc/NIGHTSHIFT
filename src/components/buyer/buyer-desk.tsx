@@ -187,12 +187,15 @@ export function BuyerDesk() {
     setBusy("create");
     setError(null);
     try {
+      // The requirement JSON rides the job's on-chain description — the
+      // protocol-native channel open to every wallet. The job-room message
+      // below is still attempted (registered agent wallets get live chat too).
       const requirementJson = buildRequirement(selected.id, subject);
       const { txHash, jobId } = await rail.createJob({
         providerAddress: catalog.provider.walletAddress ?? "",
         evaluatorAddress: catalog.provider.evaluatorAddress,
         expiredAtSeconds: Math.floor(Date.now() / 1000) + JOB_EXPIRY_SECONDS,
-        description: selected.id,
+        description: requirementJson,
       });
       const res = await fetch("/api/acp/buyer/jobs", {
         method: "POST",
@@ -213,28 +216,24 @@ export function BuyerDesk() {
       setRoom([]);
       await loadJobs();
       setSelected(null);
+      // Best-effort: also post the requirement to the signed job room (live
+      // chat for ACP-registered agent wallets). The purchase does not depend
+      // on it — the requirement already rode the on-chain description.
+      void (async () => {
+        try {
+          const chat = await rail.openJobRoom();
+          await chat.postMessage(body.job!.buyer.jobId, body.job!.buyer.requirementJson, "requirement");
+          await fetch("/api/acp/buyer/jobs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "update", key: body.job!.buyer.key, note: "requirement also posted to the job room" }),
+          });
+        } catch {
+          /* recorded honestly: the description carries the requirement */
+        }
+      })();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function sendRequirement() {
-    if (!rail || !active) return;
-    setBusy("send-requirement");
-    setActionError(null);
-    try {
-      const chat = await rail.openJobRoom();
-      await chat.postMessage(active.buyer.jobId, active.buyer.requirementJson, "requirement");
-      await fetch("/api/acp/buyer/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update", key: active.buyer.key, requirementSent: true, note: "requirement posted to the job room" }),
-      });
-      await loadJobs();
-    } catch (err) {
-      setActionError(err instanceof Error ? `the requirement could not be sent: ${err.message}` : "the requirement could not be sent");
     } finally {
       setBusy(null);
     }
@@ -469,7 +468,6 @@ export function BuyerDesk() {
           chainJob={chainJob}
           busy={busy}
           actionError={actionError}
-          onSendRequirement={() => void sendRequirement()}
           onApprovePayment={() => void approvePayment()}
           onReleaseEscrow={() => void releaseEscrow()}
         >

@@ -75,7 +75,6 @@ export function JobPanel({
   view,
   chainJob,
   busy,
-  onSendRequirement,
   onApprovePayment,
   onReleaseEscrow,
   actionError,
@@ -84,7 +83,6 @@ export function JobPanel({
   view: BuyerJobView;
   chainJob: OnChainJobView | null;
   busy: string | null;
-  onSendRequirement: () => void;
   onApprovePayment: () => void;
   onReleaseEscrow: () => void;
   actionError: string | null;
@@ -111,9 +109,10 @@ export function JobPanel({
   const headline = () => {
     switch (phase) {
       case "submitted":
-        return buyer.requirementSentAt
-          ? { title: "Requirement sent — waiting for NIGHTSHIFT to price the job", sub: "The provider answers with the price via setBudget on-chain. Nothing moves until you fund." }
-          : { title: "Job created on-chain", sub: "Next: send the structured request to the job room. Nothing is priced yet." };
+        return {
+          title: "Job created — the request rides the on-chain job description",
+          sub: "NIGHTSHIFT reads the requirement directly from the job (and the job room when available) and answers with the price via setBudget. Nothing moves until you fund.",
+        };
       case "reading":
         return { title: "NIGHTSHIFT is reading your request", sub: provider?.statusDetail ?? "Validating the requirement against the offering's schema." };
       case "rejected_intake":
@@ -189,12 +188,6 @@ export function JobPanel({
           </p>
           {head.sub && <p className="mt-1 text-[12px] leading-relaxed text-ink-soft break-words [overflow-wrap:anywhere]">{head.sub}</p>}
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            {view.action === "send-requirement" && (
-              <button type="button" onClick={onSendRequirement} disabled={busy !== null} className="btn-primary !min-h-9">
-                {busy === "send-requirement" ? <LoaderCircle size={13} className="animate-spin" aria-hidden /> : null}
-                Send request to the job room
-              </button>
-            )}
             {view.action === "fund" && (
               <button type="button" onClick={onApprovePayment} disabled={busy !== null} className="btn-primary !min-h-9">
                 {busy === "fund" ? <LoaderCircle size={13} className="animate-spin" aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
@@ -232,6 +225,17 @@ export function JobPanel({
             <TriangleAlert size={13} aria-hidden className="mt-0.5 shrink-0" />
             The provider&apos;s quoted price differs from the budget currently on-chain — fund only what you agree with; the escrow takes exactly the budget.
           </p>
+        )}
+
+        {buyer.notes.length > 0 && (
+          <details className="rounded-lg border border-edge bg-panel-2 px-3.5 py-2.5">
+            <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.1em] text-ink-faint">Buyer record notes ({buyer.notes.length})</summary>
+            <ul className="mt-1.5 space-y-1">
+              {buyer.notes.map((n, i) => (
+                <li key={i} className="text-[11px] leading-relaxed text-ink-faint break-words [overflow-wrap:anywhere]">{n}</li>
+              ))}
+            </ul>
+          </details>
         )}
 
         {children}

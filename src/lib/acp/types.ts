@@ -88,6 +88,12 @@ export interface AcpTransport {
   submit(ref: AcpSessionRef, deliverable: string): Promise<void>;
   /** A plain message to the buyer (v2 `session.sendMessage`). */
   sendMessage(ref: AcpSessionRef, content: string): Promise<void>;
+  /** The job's on-chain description (the createJob `description` param).
+   *  The buyer's requirement rides here when the job-room chat is
+   *  unavailable to them (the ACP server authenticates the chat API only
+   *  for wallets registered as agents — any wallet can transact on-chain).
+   *  Optional: the mock always provides it; real fetches the live job. */
+  jobDescription?(ref: AcpSessionRef): Promise<string | null>;
   /** Live-transport diagnostics: SSE stream state and the last handler error.
    *  The mock reports connected: null — there is no connection to be honest about. */
   diagnostics?(): { connected: boolean | null; lastError: string | null };

@@ -74,7 +74,10 @@ export function newBuyerJob(input: {
     txHash: input.txHash,
     requirement: input.requirement,
     requirementJson: input.requirementJson,
-    requirementSentAt: null,
+    // The requirement rides the job's on-chain description (the createJob
+    // description param) — delivered the moment the job exists. The job-room
+    // message is an additional channel, not a prerequisite.
+    requirementSentAt: now,
     allowanceTxHash: null,
     fundedTxHash: null,
     completedTxHash: null,
@@ -172,8 +175,7 @@ export const BUYER_PHASE_LABEL: Record<BuyerPhase, string> = {
 };
 
 /** What the buyer can DO at this phase — no dead ends. */
-export function buyerActionOf(phase: BuyerPhase, job: BuyerJobRecord | null): "send-requirement" | "fund" | "review" | "none" {
-  if (phase === "submitted" && job && !job.requirementSentAt) return "send-requirement";
+export function buyerActionOf(phase: BuyerPhase, job: BuyerJobRecord | null): "fund" | "review" | "none" {
   if (phase === "awaiting_payment") return "fund";
   if (phase === "review_delivery") return "review";
   return "none";

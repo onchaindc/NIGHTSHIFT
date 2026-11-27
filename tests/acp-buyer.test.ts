@@ -72,7 +72,10 @@ describe("buyer job registration", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.view.phase).toBe("submitted");
-    expect(result.view.action).toBe("send-requirement");
+    // The requirement rides the on-chain description, so the job starts
+    // already delivered — the next action is the provider's price, then fund.
+    expect(result.view.buyer.requirementSentAt).not.toBeNull();
+    expect(result.view.action).toBe("none");
     expect(result.view.buyer.requirementJson).toBe(JSON.stringify({ offering: OFFERING.id, inputs: REQUIRED }));
     // The registry key joins with the provider's own ledger.
     expect(result.view.buyer.key).toBe(buyerJobKey(CHAIN, id));
@@ -135,8 +138,7 @@ describe("buyer phases map from the provider's real lifecycle", () => {
   });
 
   it("actions follow the money: nothing to fund before a price, nothing to release before delivery", () => {
-    // No buyer record on screen — the desk shows the register step instead.
-    expect(buyerActionOf("submitted", null)).toBe("none");
+    expect(buyerActionOf("submitted", null)).toBe("none"); // waiting for the provider's price — funding early would fail
     expect(buyerActionOf("awaiting_payment", null)).toBe("fund");
     expect(buyerActionOf("review_delivery", null)).toBe("review");
     expect(buyerActionOf("completed", null)).toBe("none");

@@ -36,6 +36,8 @@ export class MockAcpTransport implements AcpTransport {
   private handlers: { onEntry: (ref: AcpSessionRef, entry: AcpEntry) => Promise<void> } | null = null;
   /** Sessions the evaluator has not yet decided on — the mock's open state. */
   readonly openSessions = new Set<string>();
+  /** The on-chain description each simulated job was created with. */
+  readonly descriptions = new Map<string, string>();
 
   async start(handlers: { onEntry: (ref: AcpSessionRef, entry: AcpEntry) => Promise<void> }): Promise<void> {
     this.handlers = handlers;
@@ -61,11 +63,23 @@ export class MockAcpTransport implements AcpTransport {
     return { connected: null, lastError: null };
   }
 
-  /** Simulated buyer: an incoming job with a requirement message. */
-  async buyerJob(ref: AcpSessionRef, requirement: string, clientAddress = "0xbuyer"): Promise<void> {
+  /**
+   * Simulated buyer: an incoming job. Two arrival modes — "message" (the
+   * job-room requirement, the normal path) and "description" (the requirement
+   * rides the createJob description because the buyer wallet is not an
+   * ACP-registered agent and cannot authenticate the chat API).
+   */
+  async buyerJob(ref: AcpSessionRef, requirement: string, clientAddress = "0xbuyer", mode: "message" | "description" = "message"): Promise<void> {
     if (!this.handlers) throw new Error("mock transport not started");
+    this.descriptions.set(`${ref.chainId}:${ref.jobId}`, requirement);
     await this.handlers.onEntry(ref, { kind: "system", event: { type: "job.created" }, clientAddress });
-    await this.handlers.onEntry(ref, { kind: "message", contentType: "requirement", content: requirement, clientAddress });
+    if (mode === "message") {
+      await this.handlers.onEntry(ref, { kind: "message", contentType: "requirement", content: requirement, clientAddress });
+    }
+  }
+
+  async jobDescription(ref: AcpSessionRef): Promise<string | null> {
+    return this.descriptions.get(`${ref.chainId}:${ref.jobId}`) ?? null;
   }
 
   /** Simulated buyer funding the escrow. */
@@ -239,6 +253,14 @@ export async function createRealAcpTransport(cfg: AcpConfig): Promise<AcpTranspo
     },
     async sendMessage(ref, content) {
       await requireSession(ref).sendMessage(content);
+    },
+    async jobDescription(ref) {
+      try {
+        const job = await requireSession(ref).fetchJob();
+        return job?.description ?? null;
+      } catch {
+        return null; // the description path is best-effort; the message path remains primary
+      }
     },
     diagnostics() {
       return { connected, lastError };
