@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BrainCircuit, Compass, ShieldCheck, Wallet, type LucideIcon } from "lucide-react";
+import { BrainCircuit, Compass, Handshake, ShieldCheck, Wallet, type LucideIcon } from "lucide-react";
 
 /**
  * The phone's map: four destinations with room to breathe, named the way a
@@ -20,6 +20,7 @@ const ITEMS: Item[] = [
     activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/signals", "/developers", "/activity", "/intelligence"],
   },
   { href: "/desk", label: "Deal Desk", icon: ShieldCheck, activeFor: ["/desk", "/assurance"] },
+  { href: "/buyer", label: "Buyer Desk", icon: Handshake, activeFor: ["/buyer"] },
   { href: "/funds", label: "Wallet", icon: Wallet },
 ];
 

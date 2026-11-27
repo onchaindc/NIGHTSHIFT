@@ -22,6 +22,7 @@ const AREAS = [
     activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/signals", "/developers", "/activity", "/intelligence"],
   },
   { href: "/desk", label: "Deal Desk", activeFor: ["/desk", "/assurance"] },
+  { href: "/buyer", label: "Buyer Desk", activeFor: ["/buyer"] },
   { href: "/funds", label: "Wallet" },
 ];
 
