@@ -20,6 +20,14 @@ const PRICES_USD_CENTS: Record<string, number> = {
   trade_supplier_intelligence: 150,
 };
 
+/** The workflows' own worked examples — the buyer's "Fill sample values" action. */
+const SAMPLES: Record<string, Record<string, string>> = {
+  counterparty_due_diligence: DESK_WORKFLOWS.counterparty_due_diligence.samples,
+  listing_underwriter: DESK_WORKFLOWS.listing_underwriter.samples,
+  asset_intelligence: DESK_WORKFLOWS.asset_intelligence.samples,
+  trade_supplier_intelligence: DESK_WORKFLOWS.trade_supplier_intelligence.samples,
+};
+
 const OUTPUTS: Record<string, string> = {
   counterparty_due_diligence:
     "Structured due-diligence report: independently verified registry, screening and financial records with signal hashes and receipts, named verification failures, provider disagreements, missing evidence, unsupported requirements, an executive assessment with a verdict and traced next actions.",
@@ -67,6 +75,7 @@ export const ACP_OFFERINGS: AcpServiceOffering[] = (
   description: `${DESK_WORKFLOWS[type].summary} Scope: ${DESK_WORKFLOWS[type].scope}`,
   priceUsdCents: PRICES_USD_CENTS[type] ?? 100,
   inputs: inputsOf(type),
+  samples: SAMPLES[type] ?? {},
   outputs: OUTPUTS[type] ?? "",
   executionPolicy: POLICY[type] ?? "",
 }));

@@ -16,8 +16,9 @@ import { Check, ChevronDown, CircleAlert, LoaderCircle, ShieldCheck, TriangleAle
 import type { BuyerJobView, BuyerPhase } from "@/lib/acp/buyer";
 import { BUYER_PHASE_LABEL } from "@/lib/acp/buyer";
 import type { DeskDeliverable } from "@/lib/acp/lifecycle";
-import type { OnChainJobView } from "@/lib/acp/buyer-browser";
+import type { OnChainJobView, TxErrorView } from "@/lib/acp/buyer-browser";
 import { formatUsdc } from "@/lib/acp/buyer-browser";
+import { ErrorNotice } from "./error-notice";
 
 const PHASES: { key: BuyerPhase | "settle"; label: string }[] = [
   { key: "submitted", label: "Submit" },
@@ -85,7 +86,7 @@ export function JobPanel({
   busy: string | null;
   onApprovePayment: () => void;
   onReleaseEscrow: () => void;
-  actionError: string | null;
+  actionError: TxErrorView | null;
   children?: React.ReactNode;
 }) {
   const { buyer, provider, phase } = view;
@@ -205,8 +206,28 @@ export function JobPanel({
                 On-chain status is “{ONCHAIN_STATUS[chainJob.status] ?? chainJob.status}” — the release action becomes available once the deliverable is submitted on-chain.
               </p>
             )}
-            {actionError && <p className="w-full text-[12px] text-risk">{actionError}</p>}
+            {actionError && (
+              <div className="w-full">
+                <ErrorNotice error={actionError} />
+              </div>
+            )}
           </div>
+        </div>
+
+        {/* On-chain transactions — every reference, linked. A signature that
+            never happened shows no hash; the desk never reports a
+            transaction as submitted without its hash. */}
+        <div className="rounded-lg border border-edge bg-panel-2 px-3.5 py-3">
+          <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">On-chain transactions</p>
+          <ul className="mt-1.5 space-y-1">
+            <TxRow label="Job creation" hash={buyer.txHash} when={buyer.createdAt} />
+            <TxRow label="USDC allowance" hash={buyer.allowanceTxHash} />
+            <TxRow label="Escrow funding" hash={buyer.fundedTxHash} />
+            <TxRow label="Escrow release" hash={buyer.completedTxHash} />
+          </ul>
+          <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-faint">
+            Every signature you make lands here with its Basescan link. A row without a link means that signature has not happened yet.
+          </p>
         </div>
 
         {/* On-chain truth row */}
@@ -336,5 +357,20 @@ function Fact({ label, value, href }: { label: string; value: string; href?: str
         </p>
       )}
     </div>
+  );
+}
+
+function TxRow({ label, hash, when }: { label: string; hash: string | null; when?: string }) {
+  return (
+    <li className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+      <span className="text-[11.5px] text-ink-soft">{label}</span>
+      {hash ? (
+        <a href={`https://basescan.org/tx/${hash}`} target="_blank" rel="noreferrer" className="tabular text-[11px] text-teal hover:underline">
+          {hash.slice(0, 10)}…{hash.slice(-8)} ↗
+        </a>
+      ) : (
+        <span className="text-[11px] text-ink-faint">— not signed yet</span>
+      )}
+    </li>
   );
 }

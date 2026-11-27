@@ -34,6 +34,18 @@ import { parseJobIdFromReceipt } from "@virtuals-protocol/acp-node-v2/dist/utils
 import type { JobCreatedFilter } from "@virtuals-protocol/acp-node-v2/dist/utils/events.js";
 import type { TransactionReceipt } from "viem";
 
+// THE chain guarantee: before every signature the wallet's ACTIVE chain is
+// read (eth_chainId), repaired when needed (explicit switch request), and
+// signing is blocked outright when the wallet is not on Base. See
+// wallet-chain.ts for the enforcement and tests/acp-chain-guard.test.ts
+// for the regression contract.
+import { BASE_CHAIN_ID, ensureWalletChain, WalletChainError } from "./wallet-chain";
+import { classifyTxError } from "./tx-errors";
+
+export { BASE_CHAIN_ID, ensureWalletChain, readWalletChainId, chainLabel, WalletChainError } from "./wallet-chain";
+export { classifyTxError } from "./tx-errors";
+export type { TxErrorView, TxErrorCode } from "./tx-errors";
+
 /** Minimal EIP-1193 surface the Privy wallet provider exposes. */
 export interface Eip1193Provider {
   request(args: { method: string; params?: unknown[] | object }): Promise<unknown>;
@@ -97,6 +109,11 @@ class BrowserWalletAdapter implements IEvmProviderAdapter {
   }
 
   private async sendOne(call: Call): Promise<Hex> {
+    // Per-transaction verification: the wallet's ACTIVE chain is read again
+    // immediately before each eth_sendTransaction — batched calls are
+    // sequential, and a chain change mid-flow must block, never silently
+    // sign on the wrong network. Throws WalletChainError when not on Base.
+    await ensureWalletChain(this.eip1193, this.chainId);
     const params: Record<string, string> = { from: this.address, to: call.to, data: (call.data ?? "0x") as string };
     if (call.value !== undefined && call.value !== null && call.value !== 0n) params.value = toHex(call.value);
     const hash = (await this.eip1193.request({ method: "eth_sendTransaction", params: [params] })) as string;
@@ -108,6 +125,11 @@ class BrowserWalletAdapter implements IEvmProviderAdapter {
 
   async sendTransaction(chainId: number, call: Call | Call[]): Promise<Hex> {
     this.guardChain(chainId);
+    // First signature barrier: verify (and if needed request) the wallet's
+    // chain BEFORE any signing — the observed failure was exactly here:
+    // guardChain compared two configuration values while the wallet itself
+    // sat on Ethereum mainnet, so a Base transaction got signed on chain 1.
+    await ensureWalletChain(this.eip1193, this.chainId);
     if (Array.isArray(call)) {
       const hashes: Hex[] = [];
       for (const c of call) hashes.push(await this.sendOne(c));
@@ -118,6 +140,7 @@ class BrowserWalletAdapter implements IEvmProviderAdapter {
 
   async sendCalls(chainId: number, calls: Call[]): Promise<Hex | Hex[]> {
     this.guardChain(chainId);
+    await ensureWalletChain(this.eip1193, this.chainId);
     const hashes: Hex[] = [];
     for (const c of calls) hashes.push(await this.sendOne(c));
     return hashes.length === 1 ? hashes[0] : hashes;
@@ -159,13 +182,21 @@ class BrowserWalletAdapter implements IEvmProviderAdapter {
     return await this.publicClient().getBlockNumber();
   }
 
+  /** The native balance (Base ETH) of any address — the gas read. */
+  async getBalance(chainId: number, address: string): Promise<bigint> {
+    this.guardChain(chainId);
+    return await this.publicClient().getBalance({ address: address as `0x${string}` });
+  }
+
   async signMessage(chainId: number, message: string): Promise<string> {
     this.guardChain(chainId);
+    await ensureWalletChain(this.eip1193, this.chainId);
     return (await this.eip1193.request({ method: "personal_sign", params: [message, this.address] })) as string;
   }
 
   async signTypedData(chainId: number, typedData: unknown): Promise<string> {
     this.guardChain(chainId);
+    await ensureWalletChain(this.eip1193, this.chainId);
     return (await this.eip1193.request({
       method: "eth_signTypedData_v4",
       params: [this.address, JSON.stringify(typedData)],
@@ -192,6 +223,8 @@ export interface BuyerRail {
   /** Read the USDC allowance the ACP contract has over the buyer's wallet. */
   usdcAllowance(): Promise<bigint>;
   usdcBalance(): Promise<bigint>;
+  /** The wallet's native Base ETH — the gas the signatures will spend. */
+  gasBalance(): Promise<bigint>;
   /** Read the on-chain job (source of truth: status, budget, parties). */
   readJob(jobId: string): Promise<OnChainJobView | null>;
   /** Create the on-chain job and resolve its id from the receipt. */
@@ -239,6 +272,12 @@ export async function createBuyerRail(input: {
   address: string;
   chainId: number;
 }): Promise<BuyerRail> {
+  // The rail is Base-only. A caller asking for another chain is a bug, not
+  // a configuration — refuse it instead of building a rail that signs
+  // somewhere else.
+  if (input.chainId !== BASE_CHAIN_ID) {
+    throw new WalletChainError("wrong_chain", input.chainId, BASE_CHAIN_ID, `buyer rail refused: NIGHTSHIFT ACP jobs run on Base (${BASE_CHAIN_ID}), not chain ${input.chainId}`);
+  }
   const adapter = new BrowserWalletAdapter(input.eip1193, input.address, input.chainId);
   const contract = contractAddress(input.chainId);
   const client = await EvmAcpClient.create({ contractAddresses: { [input.chainId]: contract }, provider: adapter });
@@ -265,6 +304,11 @@ export async function createBuyerRail(input: {
         functionName: "balanceOf",
         args: [lower],
       })) as bigint;
+    },
+
+    /** The wallet's native Base ETH — the gas the signatures will spend. */
+    async gasBalance(): Promise<bigint> {
+      return await adapter.getBalance(input.chainId, lower);
     },
 
     async readJob(jobId: string): Promise<OnChainJobView | null> {

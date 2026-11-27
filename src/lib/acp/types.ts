@@ -122,6 +122,8 @@ export interface AcpServiceOffering {
   priceUsdCents: number;
   /** The input schema, derived from the workflow's own form fields. */
   inputs: AcpServiceInput[];
+  /** The workflow's worked example — "Fill sample values" fills exactly these. */
+  samples: Record<string, string>;
   /** What the buyer receives back. */
   outputs: string;
   /** The execution policy, verbatim — what runs free, what needs whose approval. */
