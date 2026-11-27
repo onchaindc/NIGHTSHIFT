@@ -18,6 +18,10 @@ const nextConfig: NextConfig = {
       // The pre-pivot task pages retired; keep every old task link working by
       // preserving the id — /tasks/:id lands on the same record in Activity.
       { source: "/tasks/:id", destination: "/activity/:id", permanent: false },
+      // The old /desk/i/:id deep links predate the unified /desk/:id resolver,
+      // which opens Deal Desk investigations and safely redirects Assurance
+      // settlement files by their stored record type.
+      { source: "/desk/i/:id", destination: "/desk/:id", permanent: false },
       { source: "/settings", destination: "/developers", permanent: false },
       // The tab says Wallet; keep the old-ish path working for links and bookmarks.
       { source: "/wallet", destination: "/funds", permanent: false },

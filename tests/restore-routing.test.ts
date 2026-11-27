@@ -147,10 +147,12 @@ describe("/desk/:id resolves by the stored record type, not the id prefix", () =
 });
 
 describe("legacy link compatibility", () => {
-  it("/desk/i/:id redirects to the canonical /desk/:id, preserving the id", async () => {
-    const mod = await import("@/app/(explorer)/desk/i/[id]/page");
-    await expect(renderPage(mod, RESOLVER_ID)).rejects.toThrow(/NEXT_REDIRECT/);
-    expect(redirectMock).toHaveBeenCalledWith(`/desk/${RESOLVER_ID}`);
+  it("/desk/i/:id redirects to the canonical /desk/:id, preserving the id", () => {
+    const config = src("next.config.ts");
+    const compat = config.match(/\{[^{}]*source: "\/desk\/i\/:id"[^{}]*\}/)?.[0] ?? "";
+    expect(compat).toContain('destination: "/desk/:id"');
+    // The page is retired behind the redirect; nothing shadows it.
+    expect(existsSync("src/app/(explorer)/desk/i")).toBe(false);
   });
 
   it("/tasks/:id keeps the id: next.config redirects to /activity/:id", () => {
