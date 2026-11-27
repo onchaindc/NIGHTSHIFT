@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
       offering: typeof body.offering === "string" ? body.offering : "",
       txHash: typeof body.txHash === "string" ? body.txHash : null,
       requirement: (body.requirement as Record<string, unknown>) ?? {},
+      expiresAt: typeof body.expiresAt === "string" ? body.expiresAt : null,
     });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ job: result.view });

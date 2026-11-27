@@ -31,11 +31,33 @@ export function HistoryView({
   jobs,
   activeKey,
   onOpen,
+  loadFailed = false,
+  onRetry,
 }: {
   jobs: BuyerJobView[];
   activeKey: string | null;
   onOpen: (key: string) => void;
+  /** The last jobs fetch FAILED — never render "No requests yet" for that:
+   *  an empty list and a failed load are different truths. */
+  loadFailed?: boolean;
+  onRetry?: () => void;
 }) {
+  if (loadFailed && jobs.length === 0) {
+    return (
+      <div className="rounded-xl border border-risk/30 bg-panel px-4 py-6 sm:px-5" role="alert">
+        <p className="x-label !mt-0">Your requests</p>
+        <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
+          Your requests could not be loaded — the connection to the server dropped. Nothing was lost: your on-chain jobs and their escrows are unaffected.
+        </p>
+        {onRetry && (
+          <button type="button" onClick={onRetry} className="btn-quiet mt-3 !min-h-8 !text-[12px]">
+            Try again
+          </button>
+        )}
+      </div>
+    );
+  }
+
   if (jobs.length === 0) {
     return (
       <div className="rounded-xl border border-edge bg-panel px-4 py-6 sm:px-5">
@@ -50,6 +72,16 @@ export function HistoryView({
       <p className="x-label !mt-0">
         Your requests <span className="ml-1 normal-case tracking-normal tabular">({jobs.length})</span>
       </p>
+      {loadFailed && (
+        <p className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber/40 bg-amber-soft/40 px-3 py-2 text-[11px] text-amber-deep" role="status">
+          <span>The last refresh failed — showing the last loaded list.</span>
+          {onRetry && (
+            <button type="button" onClick={onRetry} className="btn-quiet !min-h-7 !text-[11px]">
+              Retry
+            </button>
+          )}
+        </p>
+      )}
       <ul className="mt-3 space-y-1.5">
         {jobs.map((j) => {
           const refs = [

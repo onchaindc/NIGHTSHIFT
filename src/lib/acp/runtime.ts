@@ -16,6 +16,7 @@ import { persistence } from "@/lib/storage";
 
 import { handleAcpEntry, tickAcpJobs } from "./lifecycle";
 import { acpConfig, realAcpConfigured, selectAcpTransport, MockAcpTransport, acpSdkInstalled } from "./transport";
+import type { AcpConfig } from "./transport";
 import type { AcpEntry, AcpProviderStatus, AcpSessionRef, AcpTransport } from "./types";
 
 /** A start() that has not resolved after this long is recorded as failed —
@@ -287,4 +288,75 @@ export async function acpProviderStatus(): Promise<AcpProviderStatus> {
     streamObservedAt,
     registration: stored?.registration ?? { found: null, detail: null, checkedAt: null },
   };
+}
+
+/**
+ * The catalog's provider view, computed ONLY from configuration and the
+ * persisted runtime record — it never constructs, boots, awaits or touches
+ * the transport. The storefront's critical path must not depend on the ACP
+ * provider's startup: that coupling was the "offerings never load" failure
+ * (a cold catalog request paid the full Privy/ACP handshake inside the
+ * request, and a hung handshake hung the storefront forever). Freshness is
+ * the instrumentation boot's, the status endpoint's and the tick cron's job;
+ * buyer-facing reads stay instant and truthful about what they know.
+ */
+export function catalogProviderView(
+  cfg: AcpConfig,
+  stored: AcpRuntimeState | null,
+  sdkInstalled: boolean,
+  opts: { nowMs?: number } = {},
+): AcpProviderStatus {
+  const nowMs = opts.nowMs ?? Date.now();
+  // Purity rule: everything is derived from the ARGUMENTS — realAcpConfigured()
+  // reads process.env, which would make this "pure" view silently depend on
+  // the test/server environment instead of the config it was handed.
+  const configured = Boolean(cfg.enabled && cfg.walletAddress && cfg.walletId && cfg.signerKey);
+  const mode: AcpProviderStatus["mode"] = !cfg.enabled ? "disabled" : configured ? "real" : "mock";
+  const attemptState = stored?.attemptState ?? "idle";
+  const connected = mode === "real" ? (stored?.connected ?? null) : null;
+  const observedAt = stored?.streamObservedAt ?? null;
+  const ageMin = observedAt && Number.isFinite(Date.parse(observedAt)) ? Math.max(0, Math.round((nowMs - Date.parse(observedAt)) / 60_000)) : null;
+  const note = !cfg.enabled
+    ? "ACP_ENABLED is not set — the ACP provider is off; offerings below are published configuration, not a live connection."
+    : attemptState === "started"
+      ? `The live transport started at ${stored?.startedAt ?? "?"} and the SSE stream was last observed ${observedAt ?? "?"}${ageMin !== null ? ` (${ageMin} min ago)` : ""}. This catalog never waited on the provider to answer.`
+      : attemptState === "failed"
+        ? `The last recorded provider startup FAILED: ${stored?.startupError ?? "unknown reason"}. Published offerings still list; the provider must recover before it can price jobs.`
+        : attemptState === "starting"
+          ? "A provider startup attempt is in flight (recorded from the server boot)."
+          : configured
+            ? "Live ACP transport configured; it starts with the server boot. No boot attempt has been recorded yet."
+            : "No ACP credentials configured — the mock transport serves simulated buyers only; nothing connects to the ACP network.";
+  return {
+    mode,
+    enabled: cfg.enabled,
+    sdkInstalled,
+    credentials: {
+      walletAddress: Boolean(cfg.walletAddress),
+      walletId: Boolean(cfg.walletId),
+      signerKey: Boolean(cfg.signerKey),
+    },
+    agentWalletAddress: mode === "real" ? cfg.walletAddress || null : null,
+    chainId: cfg.chainId,
+    note,
+    runtimeStarted: attemptState === "started",
+    startupError: attemptState === "failed" ? (stored?.startupError ?? null) : null,
+    connected,
+    attemptState,
+    startedAt: stored?.startedAt ?? null,
+    streamObservedAt: observedAt,
+    registration: stored?.registration ?? { found: null, detail: null, checkedAt: null },
+  };
+}
+
+/**
+ * The provider snapshot for buyer-facing reads (the catalog): configuration
+ * plus the persisted record, never a boot. Same shape as acpProviderStatus
+ * so consumers cannot tell the difference — they just never wait.
+ */
+export async function acpProviderSnapshot(): Promise<AcpProviderStatus> {
+  const cfg = acpConfig();
+  const sdk = cfg.enabled ? await acpSdkInstalled() : false;
+  const stored = await readRuntimeState();
+  return catalogProviderView(cfg, stored, sdk);
 }

@@ -149,3 +149,89 @@ export function preflightBlocking(checks: PreflightCheck[]): boolean {
 function formatUsdcShort(baseUnits: bigint): string {
   return `$${(Number(baseUnits) / 1_000_000).toFixed(2)}`;
 }
+
+/* ------------------------------------------------------------------ */
+/* Stalled-job view — waiting honestly, never pretending progress      */
+/* ------------------------------------------------------------------ */
+
+/** A job with no provider movement for this long tells the buyer so. */
+const ACK_STALL_MINUTES = 15;
+/** A funded investigation running this long names the approval gate. */
+const PROCESSING_STALL_MINUTES = 120;
+
+export interface StallView {
+  /** Minutes since the job was created on-chain. */
+  waitingMinutes: number;
+  /** Minutes since the job last moved (provider record or creation). */
+  sinceProgressMinutes: number;
+  /** True when this phase's wait is unusually long and must be said so. */
+  stalled: boolean;
+  stallTitle: string | null;
+  stallDetail: string | null;
+  /** On-chain expiry: a countdown while open, past tense once expired. */
+  expiryNote: string | null;
+  expired: boolean;
+}
+
+/**
+ * The buyer's honest view of a WAITING job. Never invents progress: "stalled"
+ * here means only "this is taking unusually long, and here is what that
+ * means" — always with the money-truth attached (nothing is at risk until
+ * the buyer's own signature funds the escrow).
+ */
+export function stallView(input: {
+  phase: BuyerPhase;
+  createdAt: string;
+  /** The provider record's last transition (its updatedAt); null when the
+   *  provider has not acknowledged the job at all. */
+  providerUpdatedAt: string | null;
+  /** The on-chain expiry in epoch seconds (from the live job read or the
+   *  buyer's creation record). null when unknown. */
+  expiresAtSeconds: number | null;
+  nowMs?: number;
+}): StallView {
+  const now = input.nowMs ?? Date.now();
+  const createdMs = Date.parse(input.createdAt);
+  const waitingMinutes = Number.isFinite(createdMs) ? Math.max(0, Math.floor((now - createdMs) / 60_000)) : 0;
+  const progressMs = input.providerUpdatedAt ? Date.parse(input.providerUpdatedAt) : NaN;
+  const lastProgress = Number.isFinite(progressMs) && Number.isFinite(createdMs) ? Math.max(progressMs, createdMs) : createdMs;
+  const sinceProgressMinutes = Number.isFinite(createdMs) ? Math.max(0, Math.floor((now - lastProgress) / 60_000)) : waitingMinutes;
+
+  let stalled = false;
+  let stallTitle: string | null = null;
+  let stallDetail: string | null = null;
+  if (input.phase === "submitted" && sinceProgressMinutes > ACK_STALL_MINUTES) {
+    stalled = true;
+    stallTitle = `NIGHTSHIFT has not acknowledged this job for ${sinceProgressMinutes} minutes`;
+    stallDetail =
+      "The job exists on-chain and the requirement rides its description. The provider either prices it or refuses it at intake — nothing is at risk: the escrow is funded only by your own signature.";
+  } else if (input.phase === "reading" && sinceProgressMinutes > ACK_STALL_MINUTES) {
+    stalled = true;
+    stallTitle = `The request has been with NIGHTSHIFT for ${sinceProgressMinutes} minutes without being priced`;
+    stallDetail =
+      "Pricing is the provider's on-chain acceptance act. Until it lands there is nothing to pay and nothing at risk. If this does not clear, contact support with the job id shown above.";
+  } else if (input.phase === "processing" && sinceProgressMinutes > PROCESSING_STALL_MINUTES) {
+    const hours = Math.floor(sinceProgressMinutes / 60);
+    const minutes = sinceProgressMinutes % 60;
+    stalled = true;
+    stallTitle = `The investigation has been running for ${hours} h ${minutes} m`;
+    stallDetail =
+      "Paid runs park at NIGHTSHIFT's human approval gate before execution — a long wait here is usually that gate, not a failure. The escrow settles only when you accept the deliverable.";
+  }
+
+  let expiryNote: string | null = null;
+  let expired = false;
+  if (input.expiresAtSeconds !== null && input.expiresAtSeconds !== undefined && Number.isFinite(input.expiresAtSeconds)) {
+    const remainingMs = input.expiresAtSeconds * 1000 - now;
+    if (remainingMs <= 0) {
+      expired = true;
+      expiryNote = "The job expired on-chain. An unfunded job simply lapses; if you already funded the escrow, contact support with the job id — the escrow is accounted for on-chain.";
+    } else {
+      const totalMin = Math.floor(remainingMs / 60_000);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      expiryNote = h > 0 ? `Job expires on-chain in ${h} h ${m} m — after expiry the escrow can no longer be funded.` : `Job expires on-chain in ${m} m — after expiry the escrow can no longer be funded.`;
+    }
+  }
+  return { waitingMinutes, sinceProgressMinutes, stalled, stallTitle, stallDetail, expiryNote, expired };
+}

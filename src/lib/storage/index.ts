@@ -77,6 +77,19 @@ export interface Persistence {
   readManyNamed<T>(names: string[]): Promise<Array<T | null>>;
   writeNamed<T>(name: string, value: T): Promise<void>;
   deleteNamed(name: string): Promise<void>;
+  /**
+   * ATOMIC read-modify-write of a named document. The mutator sees the
+   * current value (or null when the document does not exist yet) and its
+   * return value (sync or awaited promise) is persisted before this promise
+   * resolves. Two overlapping callers can never interleave their mutations:
+   * the file backend serializes same-process mutations per document through
+   * a promise chain, and the Postgres backend locks the row with FOR UPDATE
+   * inside a transaction. This is the ONLY safe way to append to an index
+   * document (the buyer job index, the provider job index): a bare
+   * readNamed → writeNamed race silently dropped one writer's key.
+   * Returns the value that was persisted.
+   */
+  updateNamed<T>(name: string, mutate: (current: T | null) => T | Promise<T>): Promise<T>;
 
   /** Returns a release fn, or null when another live worker holds the lease. */
   acquireLease(name: string, ttlMs: number): Promise<(() => Promise<void>) | null>;
@@ -330,6 +343,25 @@ class FilePersistence implements Persistence {
     }
   }
 
+  // Concurrent updateNamed calls on the SAME document serialize through this
+  // per-name promise chain (the same pattern claimUpdate uses): the second
+  // mutator always sees the first one's persisted value. Different documents
+  // proceed in parallel.
+  private namedChains = new Map<string, Promise<unknown>>();
+  async updateNamed<T>(name: string, mutate: (current: T | null) => T | Promise<T>): Promise<T> {
+    const next = (this.namedChains.get(name) ?? Promise.resolve()).then(async (): Promise<T> => {
+      const current = await this.readNamed<T>(name);
+      // Await the mutator: an async mutator's PROMISE must never be
+      // stringified into the document (that wrote `{}` and poisoned the
+      // next reader).
+      const result = (await mutate(current)) as T;
+      await atomicWrite(this.namedFile(name), JSON.stringify(result, null, 2));
+      return result;
+    });
+    this.namedChains.set(name, next.catch(() => undefined));
+    return next;
+  }
+
   // leases: exclusive create (wx) + steal expired + OWNER-CONDITIONAL release
   async acquireLease(name: string, ttlMs: number): Promise<(() => Promise<void>) | null> {
     const file = this.leaseFile(name);
@@ -389,6 +421,7 @@ class FilePersistence implements Persistence {
     this.seen.clear();
     this.seenLoaded = false;
     this.claimChain = Promise.resolve();
+    this.namedChains.clear();
   }
 }
 
@@ -577,6 +610,25 @@ class PostgresPersistence implements Persistence {
   }
   async deleteNamed(name: string): Promise<void> {
     await dbSql()`delete from ns_kv where name = ${name}`;
+  }
+  /**
+   * Atomic read-modify-write on ns_kv: the row is locked with FOR UPDATE
+   * inside a transaction (inserting it first when absent), mutated, and
+   * written back — two overlapping workers can never interleave their
+   * mutations, so index appends can never lose a key.
+   */
+  async updateNamed<T>(name: string, mutate: (current: T | null) => T | Promise<T>): Promise<T> {
+    await this.ready();
+    const client = dbSql();
+    return (await client.begin(async (tx) => {
+      const locked = await tx<Record<string, unknown>[]>`select data from ns_kv where name = ${name} for update`;
+      const raw = locked.length === 0 ? null : locked[0].data;
+      const current = raw === null ? null : ((typeof raw === "string" ? (JSON.parse(raw) as T) : (raw as T)) ?? null);
+      const next = (await mutate(current)) as T;
+      await tx`insert into ns_kv (name, data) values (${name}, ${JSON.stringify(next)}::jsonb)
+        on conflict (name) do update set data = excluded.data, updated_at = now()`;
+      return next;
+    })) as T;
   }
 
   // leases: atomic ttl lease with steal-on-expiry (INSERT ... ON CONFLICT)

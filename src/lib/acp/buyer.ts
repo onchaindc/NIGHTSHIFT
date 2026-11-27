@@ -46,6 +46,9 @@ export interface BuyerJobRecord {
   /** The exact JSON sent to the job room as the requirement message. */
   requirementJson: string;
   requirementSentAt: string | null;
+  /** The on-chain expiry the buyer set at creation (ISO, best-effort; the
+   *  live on-chain read leads when available). Powers the expiry countdown. */
+  expiresAt: string | null;
   allowanceTxHash: string | null;
   fundedTxHash: string | null;
   /** The buyer's own completion tx (escrow release) when they accept delivery. */
@@ -63,6 +66,7 @@ export function newBuyerJob(input: {
   txHash: string | null;
   requirement: Record<string, string>;
   requirementJson: string;
+  expiresAt?: string | null;
 }): BuyerJobRecord {
   const now = new Date().toISOString();
   return {
@@ -78,6 +82,7 @@ export function newBuyerJob(input: {
     // description param) — delivered the moment the job exists. The job-room
     // message is an additional channel, not a prerequisite.
     requirementSentAt: now,
+    expiresAt: input.expiresAt ?? null,
     allowanceTxHash: null,
     fundedTxHash: null,
     completedTxHash: null,
@@ -95,12 +100,15 @@ export async function getBuyerJob(key: string): Promise<BuyerJobRecord | null> {
 export async function saveBuyerJob(job: BuyerJobRecord): Promise<void> {
   job.updatedAt = new Date().toISOString();
   await persistence().writeNamed(docName(job.key), job);
-  const index = await persistence().readNamed<string[]>(indexName(job.clientAddress));
-  const list = Array.isArray(index) ? index.filter((k) => typeof k === "string") : [];
-  if (!list.includes(job.key)) {
-    list.push(job.key);
-    await persistence().writeNamed(indexName(job.clientAddress), list);
-  }
+  // ATOMIC index append: two concurrent registrations from the same wallet
+  // (a retry, a double-click, two tabs) must both land in the index. The old
+  // readNamed → writeNamed race silently dropped one writer's key — the job
+  // document existed but history never showed it.
+  await persistence().updateNamed<string[]>(indexName(job.clientAddress), (current) => {
+    const list = Array.isArray(current) ? current.filter((k) => typeof k === "string") : [];
+    if (!list.includes(job.key)) list.push(job.key);
+    return list;
+  });
 }
 
 export async function listBuyerJobs(clientAddress: string): Promise<BuyerJobRecord[]> {
@@ -216,6 +224,8 @@ export async function registerBuyerJob(input: {
   offering: string;
   txHash: string | null;
   requirement: Record<string, unknown>;
+  /** The expiry the browser set on the on-chain job (ISO 8601). */
+  expiresAt?: string | null;
 }): Promise<RegisterBuyerJobResult> {
   const offering = offeringById(input.offering);
   if (!offering) {
@@ -226,6 +236,9 @@ export async function registerBuyerJob(input: {
   }
   if (input.txHash !== null && !/^0x[0-9a-fA-F]{64}$/.test(input.txHash)) {
     return { ok: false, error: "txHash must be a 32-byte transaction hash", status: 400 };
+  }
+  if (input.expiresAt !== undefined && input.expiresAt !== null && Number.isNaN(Date.parse(input.expiresAt))) {
+    return { ok: false, error: "expiresAt must be an ISO 8601 timestamp or null", status: 400 };
   }
   const validation = validateRequirement(offering, input.requirement);
   if (!validation.ok) {
@@ -247,8 +260,10 @@ export async function registerBuyerJob(input: {
       txHash: input.txHash,
       requirement: validation.subject,
       requirementJson: JSON.stringify({ offering: offering.id, inputs: validation.subject }),
+      expiresAt: input.expiresAt ?? null,
     });
   if (input.txHash && !job.txHash) job.txHash = input.txHash;
+  if (input.expiresAt && !job.expiresAt) job.expiresAt = input.expiresAt;
   await saveBuyerJob(job);
   return { ok: true, view: await buildBuyerJobView(job) };
 }

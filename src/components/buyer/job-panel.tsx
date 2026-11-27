@@ -10,12 +10,13 @@
  * lifecycle — never one instead of the other.
  */
 
-import Link from "next/link";
 import { Check, ChevronDown, CircleAlert, LoaderCircle, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import type { BuyerJobView, BuyerPhase } from "@/lib/acp/buyer";
 import { BUYER_PHASE_LABEL } from "@/lib/acp/buyer";
 import type { DeskDeliverable } from "@/lib/acp/lifecycle";
+import type { StallView } from "@/lib/acp/buyer-stages";
+import type { DeskReport } from "@/lib/desk/types";
 import type { OnChainJobView, TxErrorView } from "@/lib/acp/buyer-browser";
 import { formatUsdc } from "@/lib/acp/buyer-browser";
 import { ErrorNotice } from "./error-notice";
@@ -76,6 +77,8 @@ export function JobPanel({
   view,
   chainJob,
   busy,
+  stepNote,
+  stall,
   onApprovePayment,
   onReleaseEscrow,
   actionError,
@@ -84,6 +87,11 @@ export function JobPanel({
   view: BuyerJobView;
   chainJob: OnChainJobView | null;
   busy: string | null;
+  /** The echo between the two payment confirmations, so the buyer always
+   *  knows which signature they are looking at. */
+  stepNote?: string | null;
+  /** The honest waiting view (elapsed, unusual-wait notice, expiry). */
+  stall?: StallView | null;
   onApprovePayment: () => void;
   onReleaseEscrow: () => void;
   actionError: TxErrorView | null;
@@ -211,8 +219,26 @@ export function JobPanel({
                 <ErrorNotice error={actionError} />
               </div>
             )}
+            {stepNote && (
+              <p className="flex w-full items-center gap-2 text-[11.5px] font-medium text-teal" role="status">
+                <LoaderCircle size={12} className="animate-spin" aria-hidden /> {stepNote}
+              </p>
+            )}
           </div>
         </div>
+
+        {/* Honest waiting: an unusually long wait is said so — with the
+            money-truth (nothing is at risk until the buyer funds) and the
+            on-chain expiry countdown. Terminal phases keep their own words. */}
+        {stall?.stalled && !dead && (
+          <div className="rounded-lg border border-amber/40 bg-amber-soft/40 px-3.5 py-2.5" role="status">
+            <p className="flex items-start gap-2 text-[12px] font-medium leading-snug text-amber-deep">
+              <TriangleAlert size={13} aria-hidden className="mt-0.5 shrink-0" /> {stall.stallTitle}
+            </p>
+            {stall.stallDetail && <p className="mt-1 pl-[21px] text-[11.5px] leading-relaxed text-amber-deep/90">{stall.stallDetail}</p>}
+          </div>
+        )}
+        {stall?.expiryNote && !dead && <p className="px-1 text-[11px] leading-relaxed text-ink-faint">{stall.expiryNote}</p>}
 
         {/* On-chain transactions — every reference, linked. A signature that
             never happened shows no hash; the desk never reports a
@@ -328,18 +354,104 @@ export function JobPanel({
                   <p className="mt-1 text-[11.5px] leading-relaxed text-ink-soft">{deliverable.missingEvidence.join(" · ")}</p>
                 </div>
               )}
-              <p className="text-[11px] leading-relaxed text-ink-faint">
-                The full structured report (every record, its provenance and the traced assessment) is carried in this deliverable&apos;s{" "}
-                <span className="tabular">report</span> field — reference {deliverable.reference}, investigation{" "}
-                <Link href={`/desk/i/${deliverable.investigationId}`} className="text-teal hover:underline">
-                  {deliverable.investigationId.slice(0, 8)}…
-                </Link>
-              </p>
+              {deliverable.report ? (
+                <FullReport report={deliverable.report} />
+              ) : (
+                <p className="text-[11px] leading-relaxed text-ink-faint">
+                  The full structured report is part of this deliverable — reference <span className="tabular">{deliverable.reference}</span>, investigation{" "}
+                  <span className="tabular">{deliverable.investigationId.slice(0, 8)}…</span>.
+                </p>
+              )}
             </div>
           </details>
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * The full structured report, rendered IN the buyer's desk — every section,
+ * finding, limitation and open question the provider delivered, exactly as
+ * recorded. The buyer paid for this; it does not live behind the operator
+ * console (the old layout pointed buyers at /desk/i/<id>), and nothing here
+ * is re-worded: it is the delivered evidence ledger, verbatim.
+ */
+function FullReport({ report }: { report: DeskReport }) {
+  const verdict = report.assessment.verdict.replace(/_/g, " ");
+  return (
+    <details className="group rounded-lg border border-edge bg-panel-2" open>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-2.5">
+        <span className="text-[12.5px] font-medium text-ink">The full report — every section, finding and limitation</span>
+        <ChevronDown size={14} aria-hidden className="text-ink-faint transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="space-y-3 border-t border-edge px-3.5 py-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Fact label="Verdict" value={verdict} />
+          <Fact label="Confidence" value={report.confidence.replace(/_/g, " ")} />
+          <Fact label="Verified records" value={String(report.counts.verified)} />
+          <Fact label="Prepared" value={new Date(report.preparedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} />
+        </div>
+        {report.assessment.summary && <p className="text-[12.5px] leading-relaxed text-ink-soft">{report.assessment.summary}</p>}
+        {report.assessment.basis.length > 0 && (
+          <div>
+            <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">The assessment rests on</p>
+            <ul className="mt-1 space-y-1">
+              {report.assessment.basis.map((b, i) => (
+                <li key={i} className="text-[11.5px] leading-relaxed text-ink-soft">— {b}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {report.sections.length > 0 && (
+          <div>
+            <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Sections</p>
+            <ul className="mt-1.5 space-y-2">
+              {report.sections.map((s) => (
+                <li key={s.id} className="rounded-lg border border-edge bg-panel px-3 py-2.5">
+                  <p className="text-[12px] font-medium text-ink">
+                    {s.title} <span className="ml-1 text-[10px] font-normal text-ink-faint">provenance: {s.provenance.replace(/_/g, " ")}</span>
+                  </p>
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-soft">{s.summary}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {report.findings.length > 0 && (
+          <div>
+            <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Findings</p>
+            <ul className="mt-1 space-y-1.5">
+              {report.findings.map((f) => (
+                <li key={f.id} className="text-[11.5px] leading-relaxed text-ink-soft">
+                  <span className="font-medium text-ink">{f.title}</span> — {f.detail} <span className="text-ink-faint">({f.provenance.replace(/_/g, " ")})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {report.limitations.length > 0 && (
+          <div>
+            <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Limitations — stated plainly</p>
+            <ul className="mt-1 space-y-1">
+              {report.limitations.map((l, i) => (
+                <li key={i} className="text-[11.5px] leading-relaxed text-ink-soft">{l}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {report.outstandingQuestions.length > 0 && (
+          <div>
+            <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Outstanding questions</p>
+            <ul className="mt-1 space-y-1">
+              {report.outstandingQuestions.map((q, i) => (
+                <li key={i} className="text-[11.5px] leading-relaxed text-ink-soft">{q}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 

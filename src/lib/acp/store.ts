@@ -40,12 +40,14 @@ export async function getAcpJob(key: string): Promise<AcpJobRecord | null> {
 export async function saveAcpJob(job: AcpJobRecord): Promise<void> {
   job.updatedAt = new Date().toISOString();
   await persistence().writeNamed(docName(job.key), job);
-  const keys = await persistence().readNamed<string[]>(INDEX);
-  const list = Array.isArray(keys) ? keys.filter((k) => typeof k === "string") : [];
-  if (!list.includes(job.key)) {
-    list.push(job.key);
-    await persistence().writeNamed(INDEX, list);
-  }
+  // ATOMIC index append (updateNamed): concurrent event handlers and API
+  // routes can upsert jobs in parallel — a bare readNamed → writeNamed race
+  // here dropped one writer's key from acp-jobs-index, hiding a live job.
+  await persistence().updateNamed<string[]>(INDEX, (current) => {
+    const list = Array.isArray(current) ? current.filter((k) => typeof k === "string") : [];
+    if (!list.includes(job.key)) list.push(job.key);
+    return list;
+  });
 }
 
 export async function countAcpJobsByStatus(): Promise<Record<string, number>> {

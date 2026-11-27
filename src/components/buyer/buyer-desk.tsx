@@ -32,7 +32,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { Check, CircleAlert, History as HistoryIcon, LoaderCircle, ShieldCheck, Store } from "lucide-react";
 
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
-import { friendlyNetworkError } from "@/lib/api/client-errors";
+import { loadBuyerCatalog } from "@/lib/api/catalog-client";
 import { JobPanel } from "@/components/buyer/job-panel";
 import { Storefront } from "./storefront";
 import { RequestConfig } from "./request-config";
@@ -62,8 +62,10 @@ import {
   journeyStep,
   preflightChecks,
   usableSamples,
+  stallView,
   type BuyerStage,
   type PreflightCheck,
+  type StallView,
 } from "@/lib/acp/buyer-stages";
 
 interface Catalog {
@@ -78,6 +80,12 @@ export function BuyerDesk() {
   const { wallets } = useWallets();
 
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  /** The catalog has its own honest state machine: loading → ready | failed.
+   *  "Loading" never outlives a failure, and failure is retryable — the old
+   *  one-bare-fetch loader left a permanent "Loading the published
+   *  offerings…" label on any error. */
+  const [catalogState, setCatalogState] = useState<"loading" | "ready" | "failed">("loading");
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [session, setSession] = useState<SessionState>({ mode: "loading" });
   const [rail, setRail] = useState<BuyerRail | null>(null);
   const [railError, setRailError] = useState<TxErrorView | null>(null);
@@ -87,6 +95,10 @@ export function BuyerDesk() {
   const [selected, setSelected] = useState<AcpServiceOffering | null>(null);
   const [subject, setSubject] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  /** Which payment confirmation is in flight — the echo between the two
+   *  signatures (allowance → escrow funding), so the buyer always knows
+   *  which of the two confirmations they are looking at. */
+  const [payStep, setPayStep] = useState<"allowance" | "fund" | null>(null);
   const [pageError, setPageError] = useState<TxErrorView | null>(null);
   const [actionError, setActionError] = useState<TxErrorView | null>(null);
 
@@ -97,6 +109,7 @@ export function BuyerDesk() {
   const [allowance, setAllowance] = useState<bigint | null>(null);
 
   const [jobs, setJobs] = useState<BuyerJobView[]>([]);
+  const [jobsError, setJobsError] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [chainJob, setChainJob] = useState<OnChainJobView | null>(null);
   const [room, setRoom] = useState<RoomEntry[]>([]);
@@ -113,23 +126,32 @@ export function BuyerDesk() {
   const networkOk = walletChainId === BASE_CHAIN_ID;
 
   const loadCatalog = useCallback(async () => {
-    try {
-      const res = await fetch("/api/acp/buyer/catalog", { cache: "no-store" });
-      setCatalog((await res.json()) as Catalog);
-    } catch (err) {
-      setPageError(classifyTxError(new Error(friendlyNetworkError(err))));
+    setCatalogState("loading");
+    const outcome = await loadBuyerCatalog();
+    if (outcome.ok) {
+      setCatalog(outcome.catalog as unknown as Catalog);
+      setCatalogError(null);
+      setCatalogState("ready");
+    } else {
+      setCatalogError(outcome.reason);
+      setCatalogState("failed");
     }
   }, []);
 
   const loadJobs = useCallback(async (): Promise<BuyerJobView[]> => {
     try {
       const res = await fetch("/api/acp/buyer/jobs", { cache: "no-store" });
-      if (res.status === 401) return [];
+      if (res.status === 401) return []; // signed out — not a failure
+      if (!res.ok) throw new Error(`the requests endpoint answered ${res.status}`);
       const body = (await res.json()) as { jobs?: BuyerJobView[] };
-      const list = body.jobs ?? [];
-      setJobs(list);
-      return list;
+      if (!Array.isArray(body.jobs)) throw new Error("the requests answer was malformed");
+      setJobs(body.jobs);
+      setJobsError(false);
+      return body.jobs;
     } catch {
+      // A failed refresh must never masquerade as "no requests yet": the
+      // history view distinguishes the two.
+      setJobsError(true);
       return [];
     }
   }, []);
@@ -300,10 +322,11 @@ export function BuyerDesk() {
       // The adapter verifies the wallet's ACTIVE chain before the signature
       // (wallet-chain.ts); a mismatch throws before anything is requested.
       const requirementJson = buildRequirement(selected.id, subject);
+      const expiresAtSeconds = Math.floor(Date.now() / 1000) + JOB_EXPIRY_SECONDS;
       const { txHash, jobId } = await rail.createJob({
         providerAddress: catalog.provider.walletAddress ?? "",
         evaluatorAddress: catalog.provider.evaluatorAddress,
-        expiredAtSeconds: Math.floor(Date.now() / 1000) + JOB_EXPIRY_SECONDS,
+        expiredAtSeconds: expiresAtSeconds,
         description: requirementJson,
       });
       const res = await fetch("/api/acp/buyer/jobs", {
@@ -316,6 +339,7 @@ export function BuyerDesk() {
           txHash,
           offering: selected.id,
           requirement: subject,
+          expiresAt: new Date(expiresAtSeconds * 1000).toISOString(),
         }),
       });
       const body = (await res.json()) as { job?: BuyerJobView; error?: string };
@@ -359,6 +383,8 @@ export function BuyerDesk() {
       const amount = usdcBaseUnits(priceCents);
       const allowanceNow = await rail.usdcAllowance();
       if (allowanceNow < amount) {
+        // Confirmation 1 of 2 — an approval, not a transfer.
+        setPayStep("allowance");
         const allowanceTx = await rail.approveAllowance(amount);
         await fetch("/api/acp/buyer/jobs", {
           method: "POST",
@@ -366,14 +392,20 @@ export function BuyerDesk() {
           body: JSON.stringify({ action: "update", key: active.buyer.key, allowanceTxHash: allowanceTx, note: `allowance approved (${formatUsdc(amount)} USDC)` }),
         });
       }
+      // Confirmation 2 of 2 — the actual payment into the escrow.
+      setPayStep("fund");
       const fundedTx = await rail.fund(active.buyer.jobId, amount);
       await fetch("/api/acp/buyer/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update", key: active.buyer.key, fundedTxHash: fundedTx, note: `escrow funded (${formatUsdc(amount)} USDC)` }),
       });
+      setPayStep(null);
       await loadJobs();
     } catch (err) {
+      // An allowance that LANDED stays recorded (its tx hash is on the job);
+      // the error names the step that failed, never a false payment claim.
+      setPayStep(null);
       setActionError(classifyTxError(err));
     } finally {
       setBusy(null);
@@ -425,6 +457,26 @@ export function BuyerDesk() {
   const journey = journeyStep(stage, active?.phase ?? null);
   const livePhaseLabel = active && stage === "tracking" ? active.phaseLabel : null;
 
+  /** Honest waiting view for the open job: elapsed time, unusual-wait notice,
+   *  on-chain expiry countdown. Computed from real records only. */
+  const stall: StallView | null = useMemo(() => {
+    if (!active) return null;
+    const fromRecord = active.buyer.expiresAt ? Date.parse(active.buyer.expiresAt) : NaN;
+    const fromChain = chainJob ? Number(chainJob.expiredAt) : NaN;
+    return stallView({
+      phase: active.phase,
+      createdAt: active.buyer.createdAt,
+      providerUpdatedAt: active.provider?.updatedAt ?? null,
+      expiresAtSeconds: Number.isFinite(fromChain) ? fromChain : Number.isFinite(fromRecord) ? Math.floor(fromRecord / 1000) : null,
+    });
+  }, [active, chainJob]);
+  const stepNote: string | null =
+    payStep === "allowance"
+      ? "Step 1 of 2 — approve the USDC allowance in your wallet…"
+      : payStep === "fund"
+        ? "Allowance confirmed — step 2 of 2 — fund the escrow (this is the payment)."
+        : null;
+
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-4 pb-16 pt-6 sm:px-6">
       {/* Header */}
@@ -435,7 +487,7 @@ export function BuyerDesk() {
           Pick a published service, configure the request, approve the payment from your own wallet, and receive the evidence-backed report.
           Every step is a real Virtuals ACP action on Base — job creation, escrow funding and release are your signatures, linked on Basescan.
         </p>
-        {catalog && (
+        {catalogState === "ready" && catalog && (
           <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-ink-faint">
             <span className={`rounded-full border px-2 py-0.5 ${catalog.provider.live ? "border-teal/30 bg-teal/5 text-teal" : "border-amber/40 bg-amber-soft/40 text-amber-deep"}`}>
               {catalog.provider.live ? "provider live" : `provider ${catalog.provider.mode}`}
@@ -468,10 +520,12 @@ export function BuyerDesk() {
               </button>
             )}
           </div>
-          {catalog ? (
+          {catalogState === "ready" && catalog ? (
             <Storefront offerings={catalog.offerings} onPick={pickOffering} busy={busy !== null} />
+          ) : catalogState === "failed" ? (
+            <CatalogFailure reason={catalogError} onRetry={() => void loadCatalog()} />
           ) : (
-            <p className="rounded-xl border border-edge bg-panel px-4 py-6 text-[12.5px] text-ink-faint">Loading the published offerings…</p>
+            <CatalogSkeleton />
           )}
           {pageError && <ErrorNotice error={pageError} />}
 
@@ -530,6 +584,8 @@ export function BuyerDesk() {
             view={active}
             chainJob={chainJob}
             busy={busy}
+            stepNote={stepNote}
+            stall={stall}
             actionError={actionError}
             onApprovePayment={() => void approvePayment()}
             onReleaseEscrow={() => void releaseEscrow()}
@@ -575,7 +631,7 @@ export function BuyerDesk() {
 
       {stage === "history" && (
         <>
-          <HistoryView jobs={jobs} activeKey={activeKey} onOpen={openJob} />
+          <HistoryView jobs={jobs} activeKey={activeKey} onOpen={openJob} loadFailed={signedIn && jobsError} onRetry={() => void loadJobs()} />
           <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
             <button type="button" onClick={() => setStage("storefront")} className="btn-quiet w-full !min-h-9 sm:w-auto">
               <Store size={13} aria-hidden /> Storefront
@@ -644,6 +700,54 @@ export function BuyerDesk() {
           </li>
         </ul>
       </section>
+    </div>
+  );
+}
+
+/**
+ * The storefront's loading shape: the catalogue is four cards, so the
+ * placeholder is four card skeletons — the buyer sees what is coming and
+ * roughly how long it takes, instead of one ambiguous line of text.
+ */
+function CatalogSkeleton() {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" role="status" aria-label="Loading the published services">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="rounded-xl border border-edge bg-panel px-4 py-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="size-8 rounded-lg bg-panel-3 motion-safe:animate-pulse" aria-hidden />
+            <div className="h-5 w-16 rounded-md bg-panel-3 motion-safe:animate-pulse" aria-hidden />
+          </div>
+          <div className="mt-3 h-3.5 w-40 rounded bg-panel-3 motion-safe:animate-pulse" aria-hidden />
+          <div className="mt-2 h-3 w-full rounded bg-panel-2 motion-safe:animate-pulse" aria-hidden />
+          <div className="mt-1.5 h-3 w-2/3 rounded bg-panel-2 motion-safe:animate-pulse" aria-hidden />
+          <div className="mt-4 h-8 w-32 rounded-lg bg-panel-2 motion-safe:animate-pulse" aria-hidden />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The catalog failure state — the state the old loader never had: it kept
+ * saying "Loading…" after the request had already died. This one says what
+ * happened, that nothing signed is affected, and offers the retry.
+ */
+function CatalogFailure({ reason, onRetry }: { reason: string | null; onRetry: () => void }) {
+  return (
+    <div className="rounded-xl border border-risk/30 bg-panel px-4 py-4" role="alert">
+      <p className="flex items-start gap-2 text-[13.5px] font-semibold leading-snug text-risk">
+        <CircleAlert size={15} aria-hidden className="mt-0.5 shrink-0" />
+        The published services could not load
+      </p>
+      <p className="mt-1 pl-[23px] text-[12.5px] leading-relaxed text-ink-soft">
+        {reason ?? "The request to the services endpoint did not complete."}
+      </p>
+      <div className="mt-2.5 pl-[23px]">
+        <button type="button" onClick={onRetry} className="btn-quiet !min-h-8 !text-[12px]">
+          Try again
+        </button>
+      </div>
     </div>
   );
 }
