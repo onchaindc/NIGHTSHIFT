@@ -87,44 +87,49 @@ describe("the answer is the spotlight on every result surface", () => {
   });
 });
 
-describe("every paid run asks before it starts", () => {
-  it("each surface that can start a paid run renders the shared ConfirmPaidRun", () => {
+describe("paid runs start directly — the confirmation gate is gone", () => {
+  // The confirmation modal was removed by product decision: every paid run
+  // already stops at the SERVER-SIDE approval gate, where the exact priced
+  // plan is shown before anything is signed. The extra client-side popup was
+  // redundant friction with no safety value.
+  it("no surface renders ConfirmPaidRun any more", () => {
     for (const file of PAID_RUN_SURFACES) {
       const source = src(file);
-      expect(source, `${file} must import ConfirmPaidRun`).toMatch(/import \{ ConfirmPaidRun \} from "@\/components\/confirm-paid-run"/);
-      expect(source, `${file} must render <ConfirmPaidRun`).toContain("<ConfirmPaidRun");
+      expect(source, `${file} must not import ConfirmPaidRun`).not.toMatch(/from "@\/components\/confirm-paid-run"/);
+      expect(source, `${file} must not render <ConfirmPaidRun`).not.toContain("<ConfirmPaidRun");
     }
   });
 
-  it("the desk paid button only opens the confirmation — the fetch lives behind Confirm", () => {
+  it("the desk paid button fires the run directly — the fetch lives on the click", () => {
     const source = src("src/components/desk/desk-workspace.tsx");
-    expect(source).toContain('onClick={() => setPaidConfirmOpen(true)}');
-    const buttonToModal = source.indexOf('onClick={() => setPaidConfirmOpen(true)}');
+    expect(source).toContain('action: "run", mode: "intel"');
+    expect(source).not.toContain("setPaidConfirmOpen");
+    const click = source.indexOf("onClick={() =>");
     const runFetch = source.indexOf('body: JSON.stringify({ action: "run", mode: "intel" })');
-    const confirmHandler = source.indexOf("onConfirm={() => {");
-    expect(buttonToModal, "the button opens the modal").toBeGreaterThan(-1);
-    expect(confirmHandler, "the fetch sits in the Confirm handler").toBeGreaterThan(-1);
-    expect(runFetch, "the intel fetch appears after the Confirm handler").toBeGreaterThan(confirmHandler);
+    expect(click).toBeGreaterThan(-1);
+    expect(runFetch, "the intel fetch appears after the button's onClick").toBeGreaterThan(click);
   });
 
-  it("the modal itself always offers a real Cancel and states the cost", () => {
-    const source = src("src/components/confirm-paid-run.tsx");
-    expect(source).toContain("Cancel");
-    expect(source).toContain("cost");
-    expect(source, "Escape cancels").toContain('if (e.key === "Escape") onCancel()');
-    expect(source, "the default cost line is honest about the live offer").toContain("exact amount is fixed by the live offer");
-  });
-
-  it("the flagship consoles gate their intel start behind the confirmation", () => {
+  it("the flagship consoles start their intel run straight from the button", () => {
     const capability = src("src/components/minds/capability-console.tsx");
-    expect(capability).toContain('onClick={() => (mode === "intel" ? setPaidConfirmOpen(true) : void start())}');
+    expect(capability).toContain("onClick={() => void start()}");
     const mining = src("src/components/bitcoinmining/bitcoin-mining-client.tsx");
-    expect(mining).toContain('onClick={() => (mode === "intel" ? setPaidConfirmOpen(true) : void start())}');
+    expect(mining).toContain("onClick={() => void start()}");
     const index = src("src/components/indexdesk/index-desk-client.tsx");
-    expect(index).toContain('onClick={() => (mode === "intel" && !creating ? setPaidConfirmOpen(true) : void runDesk())}');
+    expect(index).toContain("onClick={() => void runDesk()}");
     const assurance = src("src/components/assurance/assurance-workspace.tsx");
-    expect(assurance).toContain('onClick={() => setPaidConfirm("run")}');
-    expect(assurance).toContain('onRunAgain={() => setPaidConfirm("again")}');
+    expect(assurance).toContain('body: JSON.stringify({ action: "run", mode: "intel" })');
+    expect(assurance).not.toContain("setPaidConfirm");
+  });
+
+  it("modals render through a portal — fixed positioning cannot be captured", () => {
+    // A filled transform animation on a page root made that root the
+    // containing block for position:fixed — the withdraw dialog appeared
+    // mid-document. Portals to document.body are immune to every ancestor.
+    const funds = src("src/app/(explorer)/funds/page.tsx");
+    expect(funds).toContain("createPortal");
+    const confirm = src("src/components/confirm-paid-run.tsx");
+    expect(confirm).toContain("createPortal");
   });
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { PrivyProvider } from "@privy-io/react-auth";
-import { base } from "viem/chains";
+import { base, sepolia } from "viem/chains";
 
 /**
  * The app's Privy configuration. THE root cause of the buyer transaction
@@ -34,10 +34,11 @@ export function AppPrivyProvider({
           accentColor: "#0f766e",
           walletChainType: "ethereum-only",
         },
-        // NIGHTSHIFT is Base-only: embedded wallets initialize on Base
-        // (chain 8453) and Base is the only chain the app offers.
+        // Base is the DEFAULT chain; Sepolia (11155111) is also supported so
+        // in-app wallets can receive, hold and withdraw testnet ETH on the
+        // Sepolia faucet chain.
         defaultChain: base,
-        supportedChains: [base],
+        supportedChains: [base, sepolia],
         // Google is not enabled in the Privy dashboard for this app.
         // Offering it produces "Login with Google not allowed".
         loginMethods: ["email", "wallet"],

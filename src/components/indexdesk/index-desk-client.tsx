@@ -36,7 +36,6 @@ import type { IndexDeskReport } from "@/lib/indexdesk/report";
 import { openTaskStream } from "@/components/minds/task-stream";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import RunFlow from "@/components/minds/run-flow";
-import { ConfirmPaidRun } from "@/components/confirm-paid-run";
 import type { TaskRecord } from "@/lib/engine/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import {
@@ -116,7 +115,6 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   const [session, setSession] = useState<DeskSession>("loading");
   const [sessionAddress, setSessionAddress] = useState<string | null>(null);
   const [mode, setMode] = useState<"free" | "intel">("free");
-  const [paidConfirmOpen, setPaidConfirmOpen] = useState(false);
   const [spendLimit, setSpendLimit] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -655,29 +653,11 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
             )}
           </div>
 
-          <button type="button" onClick={() => (mode === "intel" && !creating ? setPaidConfirmOpen(true) : void runDesk())} disabled={!canRun} className="btn-primary inline-flex items-center gap-2">
+          <button type="button" onClick={() => void runDesk()} disabled={!canRun} className="btn-primary inline-flex items-center gap-2">
             {creating ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Play size={14} aria-hidden />}
             {creating ? "Starting the investigation…" : "Run the desk"}
           </button>
 
-          <ConfirmPaidRun
-            open={paidConfirmOpen}
-            title="Start a paid desk run?"
-            body="The desk plans every routable dimension against the live network, then stops at the approval gate — you see the exact priced plan before anything is signed."
-            cost={(() => {
-              const parsed = parseSpendLimitUsd(spendLimit);
-              return parsed.ok && parsed.cents
-                ? `Paid from the deployment's payer wallet, hard-capped at $${(parsed.cents / 100).toFixed(2)} for this run.`
-                : "This run is paid from the deployment's payer wallet. Set a maximum spend above, or let the approval gate fix the exact amount — nothing is signed until you approve.";
-            })()}
-            confirmLabel="Start the paid run"
-            busy={creating}
-            onConfirm={() => {
-              setPaidConfirmOpen(false);
-              void runDesk();
-            }}
-            onCancel={() => setPaidConfirmOpen(false)}
-          />
           {!canRun && !creating && (
             <p className="text-[11.5px] text-ink-faint">
               Add an index name and at least two complete assets (symbol, registered legal name, jurisdiction) to run.

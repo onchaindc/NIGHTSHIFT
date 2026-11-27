@@ -14,7 +14,6 @@ import type {
 } from "@/lib/assurance/types";
 import { SEVERITY_ORDER } from "@/lib/assurance/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
-import { ConfirmPaidRun } from "@/components/confirm-paid-run";
 import { friendlyNetworkError } from "@/lib/api/client-errors";
 import type { TaskRecord } from "@/lib/engine/types";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
@@ -122,7 +121,6 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [signature, setSignature] = useState("");
-  const [paidConfirm, setPaidConfirm] = useState<"run" | "again" | null>(null);
   // The latest run's raw engine task drives the shared RunFlow panel — the
   // same state-first experience as the Minds consoles and the specialised
   // investigation workspace. Older runs stay compact history rows.
@@ -429,7 +427,15 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
               </button>
               <button
                 type="button"
-                onClick={() => setPaidConfirm("run")}
+                onClick={() =>
+                  void act("intel", () =>
+                    fetch(`/api/assurance/${inv.id}/intelligence`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "run", mode: "intel" }),
+                    }),
+                  )
+                }
                 disabled={busy !== null || payload.readOnly || inv.dataMode === "demonstration"}
                 className="btn-quiet !min-h-9 !text-[12px]"
                 title={inv.dataMode === "demonstration" ? "Demonstration files cannot spend" : payload.readOnly ? "Sign in as the file's owner to run intelligence" : undefined}
@@ -520,7 +526,15 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
                           )
                         }
                         resuming={busy === `resume-${run.taskId}`}
-                        onRunAgain={() => setPaidConfirm("again")}
+                        onRunAgain={() =>
+                      void act("intel", () =>
+                        fetch(`/api/assurance/${inv.id}/intelligence`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "run", mode: "intel" }),
+                        }),
+                      )
+                    }
                         onSignIn={() => window.scrollTo({ top: 0, behavior: "smooth" })}
                         onReadReport={() => document.getElementById("decision")?.scrollIntoView({ behavior: "smooth", block: "start" })}
                         redacted={runRedacted}
@@ -934,27 +948,6 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
         </aside>
       </div>
 
-      {/* The paid run asks before it starts — the button sits close to the
-          approval card and a stray tap must never launch one. */}
-      <ConfirmPaidRun
-        open={paidConfirm !== null}
-        title="Request paid intelligence?"
-        body="The run plans every routable dimension against the live network, then stops at the approval gate — you approve the exact priced plan before anything is signed."
-        cost={`Paid from the deployment's payer wallet, hard-capped at ${money(inv.spendLimitUsdCents)} for this run.`}
-        confirmLabel="Request the paid run"
-        busy={busy === "intel"}
-        onConfirm={() => {
-          setPaidConfirm(null);
-          void act("intel", () =>
-            fetch(`/api/assurance/${inv.id}/intelligence`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "run", mode: "intel" }),
-            }),
-          );
-        }}
-        onCancel={() => setPaidConfirm(null)}
-      />
     </div>
   );
 }

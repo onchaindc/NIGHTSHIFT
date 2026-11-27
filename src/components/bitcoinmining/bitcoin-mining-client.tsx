@@ -18,7 +18,6 @@ import type { TaskRecord } from "@/lib/engine/types";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import RunFlow from "@/components/minds/run-flow";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
-import { ConfirmPaidRun } from "@/components/confirm-paid-run";
 import type { CapabilityReport } from "@/lib/minds/capability-runner";
 import type { BitcoinMiningReport } from "@/lib/bitcoinmining/report";
 import { openTaskStream } from "@/components/minds/task-stream";
@@ -117,7 +116,6 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
   const [session, setSession] = useState<Session>("loading");
   const [sessionAddress, setSessionAddress] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const [paidConfirmOpen, setPaidConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [task, setTask] = useState<TaskRecord | null>(null);
@@ -466,27 +464,16 @@ export default function BitcoinMiningClient({ guarantees }: { guarantees: Bitcoi
           <div className="flex flex-wrap items-center gap-3 border-t border-edge pt-4">
             <button
               type="button"
-              onClick={() => (mode === "intel" ? setPaidConfirmOpen(true) : void start())}
+              // No confirmation gate: paid runs stop at the approval gate
+              // anyway, where the exact priced plan is shown before anything
+              // is signed.
+              onClick={() => void start()}
               disabled={starting || (mode === "intel" && !signedIn)}
               className="btn-primary !min-h-10"
             >
               {starting ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <ArrowRight size={14} aria-hidden />}
               {mode === "free" ? "Run free preflight" : "Build plan & request approval"}
             </button>
-
-            <ConfirmPaidRun
-              open={paidConfirmOpen}
-              title="Start a paid mining investigation?"
-              body="The run plans three signal-verified asks against the live network, then stops at the approval gate — you approve the exact priced plan before anything is signed."
-              cost="Paid from the deployment's payer wallet, hard ceiling $0.03 for the three asks."
-              confirmLabel="Start the paid run"
-              busy={starting}
-              onConfirm={() => {
-                setPaidConfirmOpen(false);
-                void start();
-              }}
-              onCancel={() => setPaidConfirmOpen(false)}
-            />
             <p className="text-[11.5px] text-ink-faint">
               {mode === "intel" && !signedIn ? (
                 <button
