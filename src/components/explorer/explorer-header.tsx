@@ -7,25 +7,14 @@ import { ThemeToggle } from "@/components/theme-toggle";
 
 import { NavLinks } from "@/components/explorer/nav-links";
 import { Wordmark } from "@/components/explorer/brand";
+import { PRIMARY_NAV, SECONDARY_NAV, navItemActive } from "@/lib/explorer/nav";
 
 /**
- * Four destinations, named the way a customer names them: Minds (ask),
- * Network (who answers), Deal Desk (verify before you settle), Wallet.
- * No sub-tabs: every destination is one tap from anywhere, and the old
- * jargon strip (miners/intents/evaluators/validators/...) is gone.
+ * Five primary destinations, named the way a customer names them: Overview,
+ * Minds, Work (Deal Desk + Assurance), Buyer Desk, Wallet. The Network catalog
+ * and its family stay reachable as the quiet secondary link in the right
+ * cluster — a destination, not a competing tab row.
  */
-const AREAS = [
-  { href: "/minds", label: "Minds" },
-  {
-    href: "/miners",
-    label: "Network",
-    activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/signals", "/developers", "/activity", "/intelligence"],
-  },
-  { href: "/desk", label: "Deal Desk", activeFor: ["/desk", "/assurance"] },
-  { href: "/buyer", label: "Buyer Desk", activeFor: ["/buyer"] },
-  { href: "/funds", label: "Wallet" },
-];
-
 export function ExplorerHeader() {
   const pathname = usePathname();
 
@@ -42,10 +31,25 @@ export function ExplorerHeader() {
         </div>
 
         <nav aria-label="Primary" className="hidden items-center gap-1 sm:flex sm:justify-self-center">
-          <NavLinks items={AREAS} />
+          <NavLinks items={PRIMARY_NAV} />
         </nav>
 
         <div className="flex items-center gap-2 justify-self-end">
+          {SECONDARY_NAV.map((item) => {
+            const active = navItemActive(item, pathname);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={`items-center whitespace-nowrap text-[12px] transition-colors max-md:hidden md:inline-flex ${
+                  active ? "font-semibold text-ink" : "text-ink-faint hover:text-ink"
+                }`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
           <ThemeToggle />
           <Link
             href="/terminal"

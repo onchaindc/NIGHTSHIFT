@@ -14,7 +14,9 @@ const nextConfig: NextConfig = {
       { source: "/nightshift", destination: "/", permanent: false },
       { source: "/watch", destination: "/signals", permanent: false },
       { source: "/history", destination: "/activity", permanent: false },
-      { source: "/tasks/:id", destination: "/activity", permanent: false },
+      // The pre-pivot task pages retired; keep every old task link working by
+      // preserving the id — /tasks/:id lands on the same record in Activity.
+      { source: "/tasks/:id", destination: "/activity/:id", permanent: false },
       { source: "/settings", destination: "/developers", permanent: false },
       // The tab says Wallet; keep the old-ish path working for links and bookmarks.
       { source: "/wallet", destination: "/funds", permanent: false },

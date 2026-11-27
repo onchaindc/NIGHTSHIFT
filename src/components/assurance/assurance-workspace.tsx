@@ -15,6 +15,7 @@ import type {
 import { SEVERITY_ORDER } from "@/lib/assurance/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import { ConfirmPaidRun } from "@/components/confirm-paid-run";
+import { friendlyNetworkError } from "@/lib/api/client-errors";
 import type { TaskRecord } from "@/lib/engine/types";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { openTaskStream } from "@/components/minds/task-stream";
@@ -143,7 +144,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
       setPayload(body);
       setLoadError(null);
     } catch (err) {
-      setLoadError(`Could not reach the server. ${err instanceof Error ? err.message : String(err)}`);
+      setLoadError(friendlyNetworkError(err));
     }
   }, [investigationId]);
 
@@ -173,7 +174,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
         setNotice(body.note ?? (body.delivery?.detail ? `Report delivery: ${body.delivery.detail}` : null));
         await refresh();
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : String(err));
+        setActionError(friendlyNetworkError(err));
       } finally {
         setBusy(null);
       }
@@ -243,7 +244,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
         <p role="alert" className="rounded-md border border-risk/40 bg-risk/5 px-4 py-3 text-[13px] text-risk">
           {loadError}
         </p>
-        <Link href="/desk" className="mt-4 inline-flex items-center gap-1.5 text-[12.5px] text-ink-soft">
+        <Link href="/assurance" className="mt-4 inline-flex items-center gap-1.5 text-[12.5px] text-ink-soft">
           <ArrowLeft size={13} aria-hidden /> Back to files
         </Link>
       </div>
@@ -285,8 +286,8 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">
-          <Link href="/desk" className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
-            <ArrowLeft size={12} aria-hidden /> Deal Desk
+          <Link href="/assurance" className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-faint transition-colors hover:text-ink">
+            <ArrowLeft size={12} aria-hidden /> Assurance
           </Link>
           <div className="mt-3 flex flex-wrap items-center gap-2.5">
             <h1 className="tabular text-[17px] font-semibold tracking-tight text-ink">{inv.reference}</h1>

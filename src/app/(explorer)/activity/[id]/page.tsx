@@ -411,9 +411,6 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3">
-        <Link href={`/tasks/${task.id}`} className="btn-quiet !min-h-9">
-          Full execution timeline
-        </Link>
         <Link href="/activity" className="btn-quiet !min-h-9">
           Back to activity
         </Link>

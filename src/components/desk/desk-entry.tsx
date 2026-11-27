@@ -148,7 +148,7 @@ export function DeskEntry({ workflows }: { workflows: DeskWorkflowSummary[] }) {
               {rows.map((row) => (
                 <li key={row.id}>
                   <Link
-                    href={`/desk/i/${row.id}`}
+                    href={`/desk/${row.id}`}
                     className="group flex h-full flex-col rounded-2xl border border-edge bg-panel p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-edge-strong hover:shadow-[0_12px_30px_-22px_rgba(22,24,29,0.4)]"
                   >
                     <div className="flex items-center justify-between gap-3">

@@ -267,7 +267,7 @@ export function AssuranceIndex() {
         setFormError(body.error ?? `The file could not be opened (status ${res.status}).`);
         return;
       }
-      router.push(`/desk/${body.investigation.id}`);
+      router.push(`/assurance/${body.investigation.id}`);
     } catch (err) {
       setFormError(friendlyNetworkError(err));
     } finally {
@@ -512,7 +512,7 @@ export function AssuranceIndex() {
               {liveRows.map((row) => (
                 <li key={row.id}>
                   <Link
-                    href={`/desk/${row.id}`}
+                    href={`/assurance/${row.id}`}
                     className="group flex h-full flex-col rounded-2xl border border-edge bg-panel p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-edge-strong hover:shadow-[0_12px_30px_-22px_rgba(22,24,29,0.4)]"
                   >
                     <div className="flex items-center justify-between gap-3">

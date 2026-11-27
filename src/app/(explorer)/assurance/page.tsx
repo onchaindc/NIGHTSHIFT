@@ -1,6 +1,15 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 
-/** /assurance lives on as the Deal Desk. */
-export default function AssuranceRedirect() {
-  redirect("/desk");
+import { AssuranceIndex } from "@/components/assurance/assurance-index";
+
+export const metadata: Metadata = {
+  title: "Assurance",
+  description:
+    "Investigate a high-value transaction before settlement: counterparties, ownership, sanctions exposure, documents and the authorization decision.",
+};
+
+export const dynamic = "force-dynamic";
+
+export default function AssurancePage() {
+  return <AssuranceIndex />;
 }

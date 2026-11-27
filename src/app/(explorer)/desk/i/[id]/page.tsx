@@ -1,15 +1,11 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { DeskWorkspace } from "@/components/desk/desk-workspace";
-
-export const metadata: Metadata = {
-  title: "Investigation file",
-  description: "One specialised Deal Desk investigation: its evidence ledger with provenance, its runs and its report.",
-};
-
-export const dynamic = "force-dynamic";
-
-export default async function DeskInvestigationPage({ params }: { params: Promise<{ id: string }> }) {
+/**
+ * The /desk/i/:id deep links predate the unified /desk/:id resolver. They keep
+ * working: the id resolves at /desk/:id, which opens Deal Desk investigations
+ * and safely redirects Assurance settlement files to /assurance/:id.
+ */
+export default async function DeskInvestigationCompatPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <DeskWorkspace investigationId={id} />;
+  redirect(`/desk/${id}`);
 }

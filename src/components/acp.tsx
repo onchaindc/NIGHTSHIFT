@@ -210,7 +210,7 @@ export default function Acp() {
                         <td className="px-3.5 py-2 text-ink-soft">{j.settlementSettled ? `settled ${money(j.settlementUsdCents)}` : "escrow pending"}</td>
                         <td className="px-3.5 py-2">
                           {j.investigationId ? (
-                            <a className="text-teal underline-offset-2 hover:underline" href={`/desk/i/${j.investigationId}`}>open file →</a>
+                            <a className="text-teal underline-offset-2 hover:underline" href={`/desk/${j.investigationId}`}>open file →</a>
                           ) : (
                             <span className="text-ink-faint">—</span>
                           )}

@@ -2,27 +2,27 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BrainCircuit, Compass, Handshake, ShieldCheck, Wallet, type LucideIcon } from "lucide-react";
+import { BrainCircuit, Compass, Handshake, LayoutGrid, Wallet, type LucideIcon } from "lucide-react";
+
+import { PRIMARY_NAV, navItemActive, type NavItem } from "@/lib/explorer/nav";
 
 /**
- * The phone's map: four destinations with room to breathe, named the way a
- * customer names them. The header stays pinned to the top for wayfinding and
- * the global Ask action.
+ * The phone's map: the five primary destinations, driven by the one shared
+ * navigation contract (src/lib/explorer/nav.ts) so the tab bar and the desktop
+ * header can never drift apart. The header stays pinned to the top for
+ * wayfinding and the global Ask action.
  */
-type Item = { href: string; label: string; icon: LucideIcon; activeFor?: string[] };
+const ICONS: Record<string, LucideIcon> = {
+  "/": LayoutGrid,
+  "/minds": BrainCircuit,
+  "/work": Compass,
+  "/buyer": Handshake,
+  "/funds": Wallet,
+};
 
-const ITEMS: Item[] = [
-  { href: "/minds", label: "Minds", icon: BrainCircuit },
-  {
-    href: "/miners",
-    label: "Network",
-    icon: Compass,
-    activeFor: ["/miners", "/intents", "/evaluators", "/validators", "/signals", "/developers", "/activity", "/intelligence"],
-  },
-  { href: "/desk", label: "Deal Desk", icon: ShieldCheck, activeFor: ["/desk", "/assurance"] },
-  { href: "/buyer", label: "Buyer Desk", icon: Handshake, activeFor: ["/buyer"] },
-  { href: "/funds", label: "Wallet", icon: Wallet },
-];
+function iconFor(item: NavItem): LucideIcon {
+  return ICONS[item.href] ?? Compass;
+}
 
 export function MobileTabBar() {
   const pathname = usePathname();
@@ -39,11 +39,9 @@ export function MobileTabBar() {
         className="fixed inset-x-0 bottom-0 z-50 border-t border-edge bg-night/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_-24px_rgba(22,24,29,0.45)] backdrop-blur-md sm:hidden"
       >
         <div className="mx-auto flex max-w-md">
-          {ITEMS.map((item) => {
-            const active = (item.activeFor ?? [item.href]).some((href) =>
-              href === "/" ? pathname === "/" : pathname.startsWith(href),
-            );
-            const Icon = item.icon;
+          {PRIMARY_NAV.map((item) => {
+            const active = navItemActive(item, pathname);
+            const Icon = iconFor(item);
             return (
               <Link
                 key={item.href}

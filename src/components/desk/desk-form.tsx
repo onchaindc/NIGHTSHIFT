@@ -62,7 +62,7 @@ export function DeskForm({ workflow }: { workflow: DeskWorkflowSummary }) {
         setError(body.error ?? `The file could not be opened (status ${res.status}).`);
         return;
       }
-      router.push(`/desk/i/${body.investigation.id}`);
+      router.push(`/desk/${body.investigation.id}`);
     } catch (err) {
       setError(friendlyNetworkError(err));
     } finally {
