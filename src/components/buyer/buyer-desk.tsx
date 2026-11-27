@@ -33,6 +33,8 @@ import { Check, CircleAlert, History as HistoryIcon, LoaderCircle, ShieldCheck, 
 
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
 import { loadBuyerCatalog } from "@/lib/api/catalog-client";
+import { CommerceDesk } from "@/components/commerce/commerce-desk";
+import { Layers } from "lucide-react";
 import { JobPanel } from "@/components/buyer/job-panel";
 import { Storefront } from "./storefront";
 import { RequestConfig } from "./request-config";
@@ -92,6 +94,8 @@ export function BuyerDesk() {
   const eip1193Ref = useRef<Eip1193Provider | null>(null);
 
   const [stage, setStage] = useState<BuyerStage>("storefront");
+  /** The Buyer Desk's two views: the real ACP purchase journey, and the four internal Agent Commerce sections. */
+  const [view, setView] = useState<"store" | "commerce">("store");
   const [selected, setSelected] = useState<AcpServiceOffering | null>(null);
   const [subject, setSubject] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -502,6 +506,32 @@ export function BuyerDesk() {
         )}
       </header>
 
+      {/* View switch — the ACP purchase journey vs the internal Agent Commerce desk */}
+      <div role="tablist" aria-label="Buyer Desk views" className="flex gap-2 rounded-xl border border-edge bg-panel p-1">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "store"}
+          onClick={() => setView("store")}
+          className={`flex-1 !min-h-9 !text-[12px] ${view === "store" ? "btn-primary" : "btn-quiet"}`}
+        >
+          <Store size={13} aria-hidden className="mr-1.5 inline" /> Buy services
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "commerce"}
+          onClick={() => setView("commerce")}
+          className={`flex-1 !min-h-9 !text-[12px] ${view === "commerce" ? "btn-primary" : "btn-quiet"}`}
+        >
+          <Layers size={13} aria-hidden className="mr-1.5 inline" /> Agent Commerce
+        </button>
+      </div>
+
+      {view === "commerce" && <CommerceDesk buyerAddress={buyerAddress} signedIn={signedIn} onSession={setSession} />}
+
+      {view === "store" && (
+        <>
       {/* Journey rail */}
       {(stage !== "storefront" || active) && <StageNav current={journey} livePhase={livePhaseLabel} />}
 
@@ -700,6 +730,8 @@ export function BuyerDesk() {
           </li>
         </ul>
       </section>
+        </>
+      )}
     </div>
   );
 }
