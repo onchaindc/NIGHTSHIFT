@@ -278,6 +278,9 @@ describe("navigation: five primary destinations, Network secondary, one shared c
     expect(overview).toContain("listInvestigations");
     expect(overview).toContain("tasksForCaller");
     expect(overview).toContain("investigationsForCaller");
+    // Every store read runs under a deadline: a stalled read degrades the page
+    // to an honest partial view — it can never hang the RSC stream again.
+    expect(overview).toContain("readBounded");
     expect(overview).toContain('dynamic = "force-dynamic"');
     // The stale pre-pivot redirect no longer shadows the page.
     const config = src("next.config.ts");

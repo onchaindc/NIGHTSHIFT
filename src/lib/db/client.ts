@@ -142,6 +142,32 @@ export function boundedQuery<T>(work: Promise<T>, ms = QUERY_TIMEOUT_MS, label =
 }
 
 /**
+ * One-at-a-time execution chain. `run(work)` starts `work` only after every
+ * previously submitted work has settled — resolve OR reject, so one failure
+ * can never stall the chain. This is the guard that keeps concurrent callers
+ * from queueing on a pool that may never hand them a connection: against the
+ * pooled upstream, a query submitted while the pool is busy has been observed
+ * to wait forever with a perfectly healthy database (the poolMax history
+ * below records the two-query edition; Overview's three parallel reads were
+ * the third). With one query in flight per runtime, over-subscription of the
+ * pool is impossible — queries are short, and the upstream does the real
+ * pooling across instances.
+ */
+export function createQueryChain(): { run: <T>(work: () => Promise<T>) => Promise<T> } {
+  let tail: Promise<unknown> = Promise.resolve();
+  return {
+    run<T>(work: () => Promise<T>): Promise<T> {
+      const run = tail.then(work, work) as Promise<T>;
+      tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
+  };
+}
+
+/**
  * Lazy shared client; never opens a connection until a query runs. Every
  * query issued through it carries the client-side bound above — callers get
  * that guarantee for free and must not bypass this factory.
@@ -164,11 +190,15 @@ function sql(): postgres.Sql {
     onnotice: () => {}, // CREATE TABLE IF NOT EXISTS notices are noise
   });
   // Bounded facade over the real client: the tagged-template call and unsafe()
-  // carry the client-side timeout; everything else passes through untouched.
+  // carry the client-side timeout AND run through the one-at-a-time chain;
+  // everything else passes through untouched.
   const tagged = real as unknown as (query: TemplateStringsArray, ...args: unknown[]) => Promise<unknown>;
   const unsafeFn = real.unsafe as unknown as (query: string, ...args: unknown[]) => Promise<unknown>;
-  const bound = ((query: TemplateStringsArray, ...args: unknown[]) => boundedQuery(tagged(query, ...args))) as postgres.Sql;
-  bound.unsafe = ((query: string, ...args: unknown[]) => boundedQuery(unsafeFn(query, ...args))) as typeof real.unsafe;
+  const chain = createQueryChain();
+  const bound = ((query: TemplateStringsArray, ...args: unknown[]) =>
+    chain.run(() => boundedQuery(tagged(query, ...args)))) as postgres.Sql;
+  bound.unsafe = ((query: string, ...args: unknown[]) =>
+    chain.run(() => boundedQuery(unsafeFn(query, ...args)))) as typeof real.unsafe;
   bound.end = (...args: Parameters<typeof real.end>) => real.end(...args);
   const proxy = new Proxy(bound, {
     get(target, prop, receiver) {

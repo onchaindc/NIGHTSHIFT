@@ -5,6 +5,7 @@ import { ArrowRight, CircleAlert, FileSearch, ShieldCheck } from "lucide-react";
 
 import { callerIdentity } from "@/lib/api/auth";
 import { investigationsForCaller, tasksForCaller } from "@/lib/api/public";
+import { readBounded } from "@/lib/api/bounded-read";
 import { listDeskInvestigations, summarizeDesk } from "@/lib/desk/store";
 import { listInvestigations, summarize } from "@/lib/assurance/store";
 import { listTasks } from "@/lib/engine/store";
@@ -61,27 +62,34 @@ export default async function OverviewPage() {
   let desk: DeskInvestigationSummary[] = [];
   let assurance: InvestigationSummary[] = [];
   let tasks: TaskRecord[] = [];
-  let storeFailed = false;
-  try {
-    const [deskAll, assuranceAll, taskAll] = await Promise.all([
-      listDeskInvestigations(),
-      listInvestigations(),
-      listTasks(),
-    ]);
-    desk = deskAll
-      .filter((inv) =>
-        identity.kind === "operator"
-          ? true
-          : identity.kind === "user"
-            ? inv.owner?.toLowerCase() === identity.address
-            : false,
-      )
-      .map(summarizeDesk);
-    assurance = investigationsForCaller(req, assuranceAll).investigations.map(summarize);
-    tasks = tasksForCaller(req, taskAll).tasks;
-  } catch {
-    storeFailed = true;
-  }
+  // Every read carries its own deadline. A stalled store degrades this page to
+  // an honest partial view within seconds — a hung RSC stream is what showed
+  // as an endless loading state until the platform killed it into the error
+  // boundary, and that failure class is never allowed here again.
+  const STORE_DEADLINE_MS = 8_000;
+  const [deskAll, assuranceAll, taskAll] = await Promise.all([
+    readBounded(listDeskInvestigations(), STORE_DEADLINE_MS),
+    readBounded(listInvestigations(), STORE_DEADLINE_MS),
+    readBounded(listTasks(), STORE_DEADLINE_MS),
+  ]);
+  const deskReady = deskAll !== null;
+  const assuranceReady = assuranceAll !== null;
+  const tasksReady = taskAll !== null;
+  const storeFailed = !deskReady || !assuranceReady || !tasksReady;
+
+  desk = deskAll
+    ? deskAll
+        .filter((inv) =>
+          identity.kind === "operator"
+            ? true
+            : identity.kind === "user"
+              ? inv.owner?.toLowerCase() === identity.address
+              : false,
+        )
+        .map(summarizeDesk)
+    : [];
+  assurance = assuranceAll ? investigationsForCaller(req, assuranceAll).investigations.map(summarize) : [];
+  tasks = taskAll ? tasksForCaller(req, taskAll).tasks : [];
 
   const signedIn = identity.kind === "operator" || identity.kind === "user";
 
@@ -177,7 +185,8 @@ export default async function OverviewPage() {
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 8);
 
-  const nothingAtAll = !storeFailed && signedIn && desk.length === 0 && assurance.length === 0 && tasks.length === 0;
+  const nothingAtAll =
+    signedIn && deskReady && assuranceReady && tasksReady && desk.length === 0 && assurance.length === 0 && tasks.length === 0;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-14">
@@ -192,7 +201,8 @@ export default async function OverviewPage() {
 
       {storeFailed && (
         <p role="alert" className="mt-6 rounded-lg border border-risk/40 bg-risk/5 px-4 py-3 text-[13px] text-risk">
-          The record stores could not be read just now. Nothing is invented to fill the gap — retry in a moment.
+          Some record stores could not be read just now, so what follows may be partial. Nothing is invented to fill
+          the gap — retry in a moment.
         </p>
       )}
 
@@ -211,7 +221,7 @@ export default async function OverviewPage() {
         </div>
       )}
 
-      {signedIn && !storeFailed && attention.length > 0 && (
+      {signedIn && attention.length > 0 && (
         <section aria-label="Needs your attention" className="mt-8">
           <h2 className="x-label">NEEDS YOUR ATTENTION · {attention.length}</h2>
           <ul className="mt-2 divide-y divide-edge rounded-2xl border border-edge bg-panel">
@@ -233,7 +243,7 @@ export default async function OverviewPage() {
         </section>
       )}
 
-      {signedIn && !storeFailed && (
+      {signedIn && (deskReady || assuranceReady || tasksReady) && (
         <>
           <div className="mt-8 grid gap-8 lg:grid-cols-2 lg:gap-6">
             <section aria-label="Active investigations" className="min-w-0">
