@@ -231,7 +231,7 @@ describe("acp vertical slice (mock transport, real pipeline)", () => {
     expect(accepted?.requirement?.assetName).toBe("USDC");
     // The v2 acceptance act happened exactly once.
     expect(transport.callsOf("setBudget")).toHaveLength(1);
-    expect(transport.callsOf("setBudget")[0]?.amountUsdCents).toBe(150);
+    expect(transport.callsOf("setBudget")[0]?.amountUsdCents).toBe(offeringById("nightshift/listing-underwriter")?.priceUsdCents);
 
     await transport.buyerFunded(ref);
     const funded = await getAcpJob("8453:701");
@@ -239,7 +239,7 @@ describe("acp vertical slice (mock transport, real pipeline)", () => {
     const inv = await getDeskInvestigation(funded!.investigationId!);
     expect(inv?.type).toBe("listing_underwriter");
     expect(inv?.runs).toHaveLength(2);
-    expect(inv?.spendLimitUsdCents).toBe(150);
+    expect(inv?.spendLimitUsdCents).toBe(offeringById("nightshift/listing-underwriter")?.priceUsdCents);
 
     // The paid run is PARKED at the human gate with zero spend — the ACP
     // layer has no approval power whatsoever.

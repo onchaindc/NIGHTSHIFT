@@ -119,6 +119,69 @@ body {
   color: var(--color-ink);
 }
 
+/* ---- Modern platform polish (structure untouched) ------------------
+   Native controls take the brand accent; scrolling is smooth unless the
+   user asked for reduced motion; scrollbars match the paper/night
+   surfaces instead of the platform default; headings and paragraphs use
+   the browser's balanced/pretty line breaking. */
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+:where(input, textarea, select, button, [role="switch"], progress) {
+  accent-color: var(--color-teal);
+}
+
+p {
+  text-wrap: pretty;
+}
+
+:where(h1, h2, h3, h4) {
+  text-wrap: balance;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-strong) transparent;
+}
+
+.dark {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  background-clip: content-box;
+}
+
 /* Inline code carries URLs, hashes and paths: let any of them break rather
    than widen the paragraph they sit in. */
 :where(code) {

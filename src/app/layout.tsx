@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { AppPrivyProvider } from "@/components/privy-provider";
@@ -47,6 +47,18 @@ export const metadata: Metadata = {
     title: "See who answers. Know what it costs.",
     description: SITE_DESCRIPTION,
   },
+};
+
+// The browser's own chrome (status bar, tab strip on iOS/Android) follows the
+// active theme instead of flashing the platform default over the paper/night
+// surfaces.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f7f6f2" },
+    { media: "(prefers-color-scheme: dark)", color: "#14120f" },
+  ],
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

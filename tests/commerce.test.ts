@@ -76,11 +76,12 @@ describe("the intro catalog keeps its boundaries", () => {
   it("never touches the published ACP listings", () => {
     expect(ACP_OFFERINGS).toHaveLength(4);
     const byPrice = Object.fromEntries(ACP_OFFERINGS.map((o) => [o.id, o.priceUsdCents]));
+    // Repriced to the $0.01 intro price to match the Virtuals dashboard (2026-11).
     expect(byPrice).toEqual({
-      "nightshift/counterparty-due-diligence": 200,
-      "nightshift/listing-underwriter": 150,
-      "nightshift/asset-intelligence": 100,
-      "nightshift/trade-supplier-intelligence": 150,
+      "nightshift/counterparty-due-diligence": 1,
+      "nightshift/listing-underwriter": 1,
+      "nightshift/asset-intelligence": 1,
+      "nightshift/trade-supplier-intelligence": 1,
     });
     for (const o of COMMERCE_OFFERINGS) {
       expect(ACP_OFFERINGS.some((a) => a.id === o.id)).toBe(false);

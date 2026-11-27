@@ -12,12 +12,19 @@
 import { DESK_WORKFLOWS } from "@/lib/desk/workflows";
 import type { AcpServiceInput, AcpServiceOffering } from "./types";
 
-/** The four desk workflows exposed as commercial services, with launch prices. */
+/**
+ * The four desk workflows exposed as commercial services. Repriced to the
+ * $0.01 introductory price to match the Virtuals dashboard update
+ * (2026-11): this table is the ONE pricing source — the provider quotes it
+ * (setBudget), the buyer catalog serves it, and every display derives from
+ * it. If the Virtuals-side price changes again, change it here in the same
+ * motion or the two will drift apart.
+ */
 const PRICES_USD_CENTS: Record<string, number> = {
-  counterparty_due_diligence: 200,
-  listing_underwriter: 150,
-  asset_intelligence: 100,
-  trade_supplier_intelligence: 150,
+  counterparty_due_diligence: 1,
+  listing_underwriter: 1,
+  asset_intelligence: 1,
+  trade_supplier_intelligence: 1,
 };
 
 /** The workflows' own worked examples — the buyer's "Fill sample values" action. */
