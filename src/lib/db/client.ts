@@ -172,6 +172,42 @@ export function createQueryChain(): { run: <T>(work: () => Promise<T>) => Promis
  * query issued through it carries the client-side bound above — callers get
  * that guarantee for free and must not bypass this factory.
  */
+/**
+ * Bounded facade over a real client: the tagged-template call and unsafe()
+ * carry the client-side timeout AND run through the one-at-a-time chain;
+ * everything else passes through untouched.
+ *
+ * EVERY client that becomes the shared `g.__nightshiftSql` must be wrapped in
+ * this — resolveDatabase used to install the RAW probe client after the first
+ * successful resolution, which silently removed the chain for the rest of the
+ * process: Overview's three parallel reads then over-subscribed the small
+ * pool unbounded, and "a query submitted while the pool is busy waits forever
+ * against the pooled upstream" returned as the 20s-deadline partial-store
+ * banner (the probe's own 6-8s caps did not save it — the pooled upstream
+ * accepts the connection and answers nothing, which queue_timeout does not
+ * cover). One chain per process, always.
+ */
+function makeBoundedFacade(real: postgres.Sql): postgres.Sql {
+  const tagged = real as unknown as (query: TemplateStringsArray, ...args: unknown[]) => Promise<unknown>;
+  const unsafeFn = real.unsafe as unknown as (query: string, ...args: unknown[]) => Promise<unknown>;
+  const chain = createQueryChain();
+  const bound = ((query: TemplateStringsArray, ...args: unknown[]) =>
+    chain.run(() => boundedQuery(tagged(query, ...args)))) as postgres.Sql;
+  bound.unsafe = ((query: string, ...args: unknown[]) =>
+    chain.run(() => boundedQuery(unsafeFn(query, ...args)))) as typeof real.unsafe;
+  bound.end = (...args: Parameters<typeof real.end>) => real.end(...args);
+  return new Proxy(bound, {
+    get(target, prop, receiver) {
+      if (prop in target) return Reflect.get(target, prop, receiver);
+      const value = Reflect.get(real, prop, real);
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(real) : value;
+    },
+    apply(target, _thisArg, args) {
+      return (target as unknown as (...a: unknown[]) => Promise<unknown>)(...args) as never;
+    },
+  }) as postgres.Sql;
+}
+
 function sql(): postgres.Sql {
   if (g.__nightshiftSql) return g.__nightshiftSql;
   const url = activeUrl();
@@ -189,28 +225,7 @@ function sql(): postgres.Sql {
     connect_timeout: 10,
     onnotice: () => {}, // CREATE TABLE IF NOT EXISTS notices are noise
   });
-  // Bounded facade over the real client: the tagged-template call and unsafe()
-  // carry the client-side timeout AND run through the one-at-a-time chain;
-  // everything else passes through untouched.
-  const tagged = real as unknown as (query: TemplateStringsArray, ...args: unknown[]) => Promise<unknown>;
-  const unsafeFn = real.unsafe as unknown as (query: string, ...args: unknown[]) => Promise<unknown>;
-  const chain = createQueryChain();
-  const bound = ((query: TemplateStringsArray, ...args: unknown[]) =>
-    chain.run(() => boundedQuery(tagged(query, ...args)))) as postgres.Sql;
-  bound.unsafe = ((query: string, ...args: unknown[]) =>
-    chain.run(() => boundedQuery(unsafeFn(query, ...args)))) as typeof real.unsafe;
-  bound.end = (...args: Parameters<typeof real.end>) => real.end(...args);
-  const proxy = new Proxy(bound, {
-    get(target, prop, receiver) {
-      if (prop in target) return Reflect.get(target, prop, receiver);
-      const value = Reflect.get(real, prop, real);
-      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(real) : value;
-    },
-    apply(target, _thisArg, args) {
-      return (target as unknown as (...a: unknown[]) => Promise<unknown>)(...args) as never;
-    },
-  }) as postgres.Sql;
-  g.__nightshiftSql = proxy;
+  g.__nightshiftSql = makeBoundedFacade(real);
   return g.__nightshiftSql;
 }
 
@@ -253,7 +268,11 @@ export function resolveDatabase(): Promise<DbResolution> {
         if (g.__nightshiftSql && g.__nightshiftSql !== probe) {
           await g.__nightshiftSql.end({ timeout: 5 }).catch(() => undefined);
         }
-        g.__nightshiftSql = probe;
+        // The resolved probe becomes the shared client ONLY through the
+        // bounded facade: raw probe clients bypass the one-at-a-time chain,
+        // and parallel page reads over-subscribing the small pool is exactly
+        // the hang class this module exists to prevent.
+        g.__nightshiftSql = makeBoundedFacade(probe);
         return { ok: true, host, tried };
       } catch (err) {
         const code =

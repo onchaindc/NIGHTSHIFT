@@ -24,6 +24,7 @@
  *   - sections are isolated (runSection): one broken builder fails alone.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { deskEvidenceCounts } from "@/lib/desk/types";
@@ -456,5 +457,21 @@ describe("the identity projections the page uses survive malformed records", () 
     const reqUser = new Request("http://test/", { headers: { cookie: "irrelevant" } });
     const anon = investigationsForCaller(reqUser, [LEGACY_ASSURANCE]);
     expect(anon.investigations).toHaveLength(0);
+  });
+});
+
+describe("the resolved database client keeps its one-at-a-time chain", () => {
+  // Production root cause (proven by the deployed latency diagnostic): after
+  // the first successful resolution, resolveDatabase installed the RAW probe
+  // client as the shared client — bypassing the query chain — so Overview's
+  // three parallel reads over-subscribed the small pool unbounded and hung
+  // until the page's 20s deadlines expired: the persistent partial-store
+  // banner against a healthy database. The resolved client must always be
+  // wrapped in the bounded facade.
+  it("client.ts wraps the resolved probe in makeBoundedFacade — never a raw client", () => {
+    const source = readFileSync("src/lib/db/client.ts", "utf8");
+    expect(source).toContain("g.__nightshiftSql = makeBoundedFacade(probe);");
+    expect(source, "the raw probe must never become the shared client").not.toMatch(/g\.__nightshiftSql = probe;/);
+    expect(source).toContain("function makeBoundedFacade");
   });
 });
