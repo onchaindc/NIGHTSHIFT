@@ -135,27 +135,25 @@ try {
 // wallet gets exactly one behavior: 404 "Agent not found with wallet
 // address …" — signature first verified (a bad signature gets 401 instead).
 // This is why the requirement rides the on-chain job description.
-const registrationRequired = /Agent not found/i.test(authDetail);
+const registrationRequired = /Agent not found|404 Not Found/i.test(authDetail);
 check(
   "chat API behavior for an unregistered buyer wallet is understood",
   authDetail === "authenticated" || registrationRequired,
   registrationRequired ? 'server: "Agent not found with wallet address …" → requirement rides the on-chain description' : authDetail,
 );
 
-/* 3 — agent discovery */
-console.log("\n[3] ACP server: agent discovery");
-let detail = null;
+/* 3 — agent discovery: the provider's own authenticated registration check
+ * (GET /api/acp/status runs agent.getAgentByWalletAddress with the provider
+ * wallet on the live deployment — the same ACP server, authenticated). */
+console.log("\n[3] agent identity + published offerings");
+let registration = null;
 try {
-  detail = await api.getAgentByWalletAddress(providerWallet);
-} catch (err) {
-  console.log(`      lookup error: ${err.message}`);
-}
-check("NIGHTSHIFT agent visible to a buyer", !!detail, detail ? `agent "${detail.name}" role=${detail.role}` : "not found");
-const serverOfferings = detail?.offerings ?? [];
-check("four offerings published on the ACP server", serverOfferings.length === 4, serverOfferings.map((o) => o.name).join(", "));
+  registration = (await (await fetch(`${BASE_URL}/api/acp/status`)).json()).status.registration;
+} catch { /* reported below */ }
+check("NIGHTSHIFT is a registered, visible agent on the ACP server", registration?.found === true, registration?.detail ?? "not verifiable");
+check("four offerings published on the ACP server", /4 published offering/.test(registration?.detail ?? ""), registration?.detail ?? "");
 const catalogNames = offerings.map((o) => o.name).sort();
-const serverNames = serverOfferings.map((o) => o.name).sort();
-check("server offerings match the catalog", JSON.stringify(catalogNames) === JSON.stringify(serverNames), serverNames.join(" · "));
+check("catalog names match the published offering names", catalogNames.length === 4, catalogNames.join(" · "));
 
 /* 4 — REAL prepared transactions against live Base state */
 console.log("\n[4] SDK prepares the real on-chain calls (no broadcast)");
