@@ -75,6 +75,11 @@ beforeEach(() => {
   AssuranceIndexStub.mockClear();
   AssuranceWorkspaceStub.mockClear();
   DeskEntryStub.mockClear();
+  // Store mocks carry queued once-implementations across tests; a page that
+  // short-circuits (a failed desk read never reaches the assurance read)
+  // would otherwise leak a rejection into the next test's read.
+  getDeskInvestigationMock.mockReset();
+  getAssuranceInvestigationMock.mockReset();
 });
 
 describe("Assurance is an independent workspace again", () => {
@@ -139,8 +144,22 @@ describe("/desk/:id resolves by the stored record type, not the id prefix", () =
 
   it("verifies the actual stored record kind (a store failure is not a redirect)", async () => {
     // A desk-store outage must never reinterpret an unknown id as Assurance.
+    // It must also never 404: a record that EXISTS must not be reported as
+    // missing because the store was slow — the page renders an honest retry
+    // state instead (the production desk page hung 30s+ on the cold-start
+    // database path and then died; the bounded read now answers with a
+    // failure state, and only a VERIFIED null is a 404).
     getDeskInvestigationMock.mockRejectedValueOnce(new Error("storage unavailable"));
     getAssuranceInvestigationMock.mockRejectedValueOnce(new Error("storage unavailable"));
+    const mod = await import("@/app/(explorer)/desk/[id]/page");
+    await expect(renderPage(mod, RESOLVER_ID)).resolves.not.toThrow();
+    expect(notFoundMock).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("a verified-null in both stores is still a 404", async () => {
+    getDeskInvestigationMock.mockResolvedValueOnce(null);
+    getAssuranceInvestigationMock.mockResolvedValueOnce(null);
     const mod = await import("@/app/(explorer)/desk/[id]/page");
     await expect(renderPage(mod, RESOLVER_ID)).rejects.toThrow(/NEXT_NOT_FOUND/);
   });

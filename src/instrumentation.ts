@@ -9,6 +9,8 @@
  * `executing` by a dead instance. During production builds this file is not
  * executed as the server, so no check can run while merely building.
  */
+import { dbMigrate, dbSql, isDatabaseConfigured, resolveDatabase } from "@/lib/db/client";
+
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   try {
@@ -55,4 +57,34 @@ export async function register(): Promise<void> {
       console.error("abandoned task recovery failed:", err);
     }
   })();
+
+  // Database warmup, AWAITED (capped): on a cold instance the first query
+  // pays resolveDatabase (up to 7s per candidate probe) plus dbMigrate before
+  // any collection read can run. Overview's bounded reads expired their
+  // deadlines inside that window and rendered the partial-store banner with
+  // empty sections, and the desk detail page hung 30s+ on the same path —
+  // both against a perfectly healthy database. The platform waits for
+  // register() before serving the first request, so paying the cold-start
+  // cost HERE is correct: the first user request gets a connected, migrated
+  // client. The cap keeps a genuinely dead database from blocking the
+  // instance — reads then fail fast and honestly, as designed.
+  if (process.env.NEXT_RUNTIME === "nodejs" && isDatabaseConfigured()) {
+    try {
+      const warmup = (async () => {
+        const resolved = await resolveDatabase();
+        if (!resolved.ok) throw new Error("no reachable database candidate");
+        await dbMigrate();
+        await dbSql()`select 1`;
+      })();
+      await Promise.race([
+        warmup,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("database warmup timeout")), 25_000)),
+      ]);
+      console.log("database warm at boot");
+    } catch (err) {
+      // Never block the instance on a warmup failure: per-read bounds still
+      // produce an honest partial view.
+      console.error("database warmup failed (reads will retry per request):", err instanceof Error ? err.message : err);
+    }
+  }
 }
