@@ -3,21 +3,23 @@ import Link from "next/link";
 import { ArrowRight, Handshake, ShieldCheck } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Work",
+  title: "Investigations",
   description:
     "Two distinct workspaces: the Deal Desk for specialised investigations and Assurance for settlement-grade transaction files — one evidence engine, explicit provenance, named gaps.",
 };
 
 /**
- * The Work hub: navigation architecture only. It exposes the two clearly
- * distinct workspaces without merging or redesigning them — each card opens
- * the workspace's own homepage, which keeps its full existing UI.
+ * The Investigations hub: navigation architecture only. It gives Deal Desk and
+ * Assurance each a distinct entry point and product identity without merging
+ * or redesigning them — each card opens the workspace's own homepage, which
+ * keeps its full existing UI. The two complete product interfaces are never
+ * stacked on this page.
  */
-export default function WorkPage() {
+export default function InvestigationsPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 sm:py-14">
       <header className="max-w-[56ch]">
-        <p className="x-eyebrow">Work</p>
+        <p className="x-eyebrow">Investigations</p>
         <h1 className="x-display-1 mt-3 text-balance text-ink">Two workspaces, one evidence engine.</h1>
         <p className="mt-3 text-[14px] leading-relaxed text-pretty text-ink-soft">
           Pick the desk that matches the decision. Both keep the same rules: every verified fact carries its
@@ -25,7 +27,7 @@ export default function WorkPage() {
         </p>
       </header>
 
-      <section aria-label="Workspaces" className="mt-8 grid gap-4">
+      <section aria-label="Workspaces" className="mt-8 grid gap-4 sm:grid-cols-2">
         <Link
           href="/desk"
           className="group flex flex-col rounded-2xl border border-edge bg-panel p-6 transition-all duration-200 hover:-translate-y-0.5 hover:border-edge-strong hover:shadow-[0_12px_30px_-22px_rgba(22,24,29,0.4)]"
@@ -71,7 +73,8 @@ export default function WorkPage() {
 
       <p className="mt-8 text-[11px] leading-relaxed text-ink-faint">
         Missing evidence stays missing — it is never inferred. Old links keep working: /desk/:id resolves Deal Desk
-        investigations and Assurance settlement files by their stored record type.
+        investigations and Assurance settlement files by their stored record type, and /desk/i/:id still lands on the
+        same file.
       </p>
     </div>
   );

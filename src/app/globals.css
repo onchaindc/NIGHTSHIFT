@@ -426,6 +426,15 @@ textarea {
   animation: page-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Dialog panels fit the viewport and scroll internally. A modal taller than
+   the screen must never put its action buttons off-screen (or under the
+   mobile browser chrome) — the panel scrolls, the page behind stays put. */
+.x-modal-panel {
+  max-height: min(85dvh, 44rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 /* Section reveal driven by scroll position, where the browser supports it.
    Without support the block simply renders in place — nothing is hidden. */
 /* Content settles into place on first paint for cards and rows. */

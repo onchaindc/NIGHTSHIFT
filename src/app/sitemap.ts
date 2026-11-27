@@ -8,7 +8,7 @@ const ROUTES: Array<{ path: string; priority: number }> = [
   { path: "/miners", priority: 0.9 },
   { path: "/terminal", priority: 0.9 },
   { path: "/minds", priority: 0.9 },
-  { path: "/work", priority: 0.6 },
+  { path: "/investigations", priority: 0.6 },
   { path: "/overview", priority: 0.6 },
   { path: "/minds/counterparty", priority: 0.9 },
   { path: "/minds/bitcoin-mining", priority: 0.9 },

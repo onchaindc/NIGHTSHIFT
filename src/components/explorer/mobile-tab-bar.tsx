@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BrainCircuit, Compass, Handshake, LayoutGrid, Wallet, type LucideIcon } from "lucide-react";
+import { BrainCircuit, FileSearch, Handshake, LayoutGrid, Wallet, type LucideIcon } from "lucide-react";
 
 import { PRIMARY_NAV, navItemActive, type NavItem } from "@/lib/explorer/nav";
 
@@ -15,13 +15,13 @@ import { PRIMARY_NAV, navItemActive, type NavItem } from "@/lib/explorer/nav";
 const ICONS: Record<string, LucideIcon> = {
   "/overview": LayoutGrid,
   "/minds": BrainCircuit,
-  "/work": Compass,
+  "/investigations": FileSearch,
   "/buyer": Handshake,
   "/funds": Wallet,
 };
 
 function iconFor(item: NavItem): LucideIcon {
-  return ICONS[item.href] ?? Compass;
+  return ICONS[item.href] ?? LayoutGrid;
 }
 
 export function MobileTabBar() {

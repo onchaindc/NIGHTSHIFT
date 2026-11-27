@@ -25,6 +25,9 @@ const nextConfig: NextConfig = {
       { source: "/settings", destination: "/developers", permanent: false },
       // The tab says Wallet; keep the old-ish path working for links and bookmarks.
       { source: "/wallet", destination: "/funds", permanent: false },
+      // The primary tab is Investigations now; /work was its old name and old
+      // links keep landing on the same hub instead of a 404.
+      { source: "/work", destination: "/investigations", permanent: false },
       // Counterparty intelligence became the first Mind; keep old links working.
       { source: "/counterparty", destination: "/minds/counterparty", permanent: false },
     ];

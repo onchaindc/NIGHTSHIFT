@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 import { MINDS, mindIndex, mindsByStatus } from "@/lib/minds/registry";
 import { CAPABILITIES } from "@/lib/minds/capabilities";
 import { MIND_FOUNDATION } from "@/lib/minds/foundation";
+import { NETWORK_DIRECTORIES } from "@/lib/explorer/nav";
 import { MindStatusChip } from "@/components/minds/status-chip";
 import { BudgetStrip } from "@/components/minds/budget-strip";
 
@@ -172,6 +173,40 @@ export default function MindsPage() {
           </div>
         </section>
       )}
+
+      {/* Network family: the six Telegraph directories, one section. */}
+      <section id="network" className="mt-12 scroll-mt-20 border-t border-edge pt-8" aria-label="The Telegraph network">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="x-eyebrow">NETWORK</p>
+          <span className="text-[11px] text-ink-faint">Who answers, what settles, how to integrate</span>
+        </div>
+        <h2 className="mt-2.5 text-[20px] font-semibold leading-tight tracking-tight text-ink">
+          The Telegraph network behind every answer.
+        </h2>
+        <p className="mt-2 max-w-[60ch] text-[12.5px] leading-relaxed text-ink-soft">
+          The directory of the network this deployment runs on. Each part keeps its own page; nothing here is a
+          copy of the catalogue above.
+        </p>
+        <ul className="mt-5 grid gap-x-8 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+          {NETWORK_DIRECTORIES.map((dir) => (
+            <li key={dir.href}>
+              <Link
+                href={dir.href}
+                className="group flex items-center justify-between gap-3 border-b border-edge py-3 transition-colors hover:bg-panel/50 sm:px-1"
+              >
+                <span className="text-[14px] font-medium text-ink transition-colors group-hover:text-teal">
+                  {dir.label}
+                </span>
+                <ArrowRight
+                  size={13}
+                  aria-hidden
+                  className="shrink-0 text-ink-faint transition-all group-hover:translate-x-0.5 group-hover:text-teal"
+                />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       {/* Shared foundation */}
       <section id="foundation" className="mt-12 scroll-mt-20 border-t border-edge pt-8" aria-label="Shared foundation">

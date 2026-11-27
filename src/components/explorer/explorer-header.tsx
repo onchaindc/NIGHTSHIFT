@@ -11,9 +11,10 @@ import { PRIMARY_NAV, SECONDARY_NAV, navItemActive } from "@/lib/explorer/nav";
 
 /**
  * Five primary destinations, named the way a customer names them: Overview,
- * Minds, Work (Deal Desk + Assurance), Buyer Desk, Wallet. The Network catalog
- * and its family stay reachable as the quiet secondary link in the right
- * cluster — a destination, not a competing tab row.
+ * Minds, Investigations (Deal Desk + Assurance), Buyer Desk, Wallet. The
+ * Network catalog and its family stay reachable as the quiet secondary link in
+ * the right cluster — it lands on the Network section of Minds, not on a
+ * competing tab row.
  */
 export function ExplorerHeader() {
   const pathname = usePathname();
@@ -25,12 +26,12 @@ export function ExplorerHeader() {
     /* Opaque on purpose: translucent headers let scrolling text bleed through
        on mobile, which read as broken rendering. */
     <header className="sticky top-0 z-40 border-b border-edge bg-night">
-      <div className="mx-auto grid h-14 max-w-6xl grid-cols-[1fr_auto] items-center gap-4 px-4 sm:grid-cols-[1fr_auto_1fr] sm:px-6">
+      <div className="mx-auto grid h-14 max-w-6xl grid-cols-[1fr_auto] items-center gap-3 px-4 sm:grid-cols-[auto_1fr_auto] sm:gap-4 sm:px-6">
         <div className="justify-self-start">
-          <Wordmark />
+          <Wordmark hideTextBelow="lg" />
         </div>
 
-        <nav aria-label="Primary" className="hidden items-center gap-1 sm:flex sm:justify-self-center">
+        <nav aria-label="Primary" className="hidden min-w-0 items-center gap-0.5 justify-self-center sm:flex md:gap-1">
           <NavLinks items={PRIMARY_NAV} />
         </nav>
 

@@ -4,6 +4,9 @@ import { usePrivy, useWallets, useConnectWallet, useCreateWallet, useSendTransac
 import { useCallback, useEffect, useState } from "react";
 import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins, RefreshCw } from "lucide-react";
 
+import { SpendAllowance } from "@/components/wallet/spend-allowance";
+import { WalletActivity } from "@/components/wallet/wallet-activity";
+
 const SEPOLIA_RPCS = [
   "https://ethereum-sepolia-rpc.publicnode.com",
   "https://rpc.sepolia.org",
@@ -54,6 +57,14 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+type Balances = { eth: string | null; circle: string | null; telegraph: string | null };
+
+/**
+ * THE wallet summary card. The page renders exactly one of these: the
+ * wallet that signs in and owns files (the in-app wallet when it exists,
+ * otherwise the connected one). Any second wallet collapses into a compact
+ * row beneath it — never a second card repeating the same presentation.
+ */
 function WalletCard({
   label,
   address,
@@ -101,11 +112,11 @@ function WalletCard({
     <div className="relative overflow-hidden rounded-2xl border border-edge bg-panel p-6 shadow-sm">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal/40 to-transparent" />
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">{label}</p>
           <p className="mt-1 tabular text-[12.5px] text-ink-soft">{shortAddr(address)}</p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           {onRefresh && (
             <button
               type="button"
@@ -193,6 +204,32 @@ function WalletCard({
   );
 }
 
+/**
+ * The second wallet, when one exists: a compact row, not a second summary
+ * card. It repeats no card chrome — address once, balances inline once.
+ */
+function SecondaryWalletRow({
+  kind,
+  address,
+  balances,
+}: {
+  kind: "in-app" | "connected";
+  address: string;
+  balances: Balances | undefined;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-xl border border-edge bg-panel-3 px-4 py-2.5">
+      <p className="min-w-0 text-[12px] text-ink-soft">
+        Also connected · {kind === "in-app" ? "in-app wallet" : "external wallet"}{" "}
+        <span className="tabular text-ink">{shortAddr(address)}</span>
+      </p>
+      <p className="tabular text-[11.5px] text-ink-faint">
+        {balances?.circle ?? "…"} USDC · {balances?.telegraph ?? "…"} Telegraph USDC · {balances?.eth ?? "…"} ETH
+      </p>
+    </div>
+  );
+}
+
 function WithdrawModal({
   fromAddress,
   onClose,
@@ -239,7 +276,11 @@ function WithdrawModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-night/60 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl border border-edge bg-panel p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      {/* Dialogs fit the viewport and scroll internally — never off-screen. */}
+      <div
+        className="x-modal-panel w-full max-w-sm rounded-2xl border border-edge bg-panel p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between">
           <p className="text-[14px] font-medium text-ink">Withdraw</p>
           <button type="button" onClick={onClose} className="grid h-7 w-7 place-items-center rounded text-ink-faint hover:text-ink">
@@ -288,8 +329,6 @@ function WithdrawModal({
   );
 }
 
-type Balances = { eth: string | null; circle: string | null; telegraph: string | null };
-
 interface PayerRail {
   network: string;
   chain: string;
@@ -303,7 +342,8 @@ interface PayerRail {
  * run actually spends (Terminal, Minds, Deal Desk; the per-user cap only
  * meters against it). Fed by GET /api/wallet/balance, the same public
  * eth_call reads the verification step uses. A failed read stays "…", never
- * zero, so a flaky RPC never makes a funded wallet look empty.
+ * zero, so a flaky RPC never makes a funded wallet look empty. Presented as
+ * spending context, not as a second wallet summary card.
  */
 function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
   const [rails, setRails] = useState<PayerRail[] | null>(null);
@@ -351,7 +391,7 @@ function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
     <div className="relative overflow-hidden rounded-2xl border border-amber/30 bg-panel p-6 shadow-sm">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber/40 to-transparent" />
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">Payer wallet · funds every autonomous paid run</p>
           <p className="mt-1 tabular text-[12.5px] text-ink-soft">{payer ? shortAddr(payer) : "…"}</p>
         </div>
@@ -360,7 +400,7 @@ function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
           onClick={() => void refresh()}
           aria-label="Refresh payer balances"
           title={`Auto-syncs every 20s · updated ${syncedLabel}`}
-          className="grid h-8 w-8 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
         >
           <RefreshCw size={13} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
         </button>
@@ -530,13 +570,17 @@ export default function FundsPage() {
   if (!ready) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-16">
-        <p className="text-[13px] text-ink-faint">Loading wallet…</p>
+        <p aria-live="polite" className="text-[13px] text-ink-faint">Loading wallet…</p>
       </div>
     );
   }
 
-  const hasWallet = !!(embedded || external);
   const hasEmbedded = !!embedded;
+  // Exactly ONE summary card: the identity wallet (in-app) wins; a connected
+  // external wallet is the summary card only when no in-app wallet exists.
+  const primary = embedded ?? external;
+  const secondary = primary === embedded ? external : embedded;
+  const secondaryKind = secondary === embedded ? "in-app" : "connected";
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
@@ -545,7 +589,7 @@ export default function FundsPage() {
           <p className="x-tag">WALLET</p>
           <h1 className="x-display-1 mt-3 text-ink">Wallet</h1>
         </div>
-        {hasWallet && (
+        {(embedded || external) && (
           <button
             type="button"
             onClick={handleLogout}
@@ -558,85 +602,84 @@ export default function FundsPage() {
         )}
       </div>
 
-      {hasWallet && (
-        <div className="mt-6 space-y-3">
-          {embedded && (
+      {/* ONE wallet summary card. A second wallet, when present, is a compact
+          row — never a second card repeating the same presentation. */}
+      <section aria-label="Wallet summary" className="mt-6 space-y-3">
+        {primary ? (
+          <>
             <WalletCard
-              label="In-app wallet · your identity, never debited by paid runs"
-              address={embedded.address}
-              ethBalance={balances[embedded.address]?.eth ?? null}
-              circleUsdc={balances[embedded.address]?.circle ?? null}
-              telegraphUsdc={balances[embedded.address]?.telegraph ?? null}
+              label={
+                primary === embedded
+                  ? "In-app wallet · your identity, never debited by paid runs"
+                  : "Connected wallet · your identity, never debited by paid runs"
+              }
+              address={primary.address}
+              ethBalance={balances[primary.address]?.eth ?? null}
+              circleUsdc={balances[primary.address]?.circle ?? null}
+              telegraphUsdc={balances[primary.address]?.telegraph ?? null}
               syncing={syncing}
               lastSynced={lastSynced}
-              onDeposit={() => setShowDeposit(embedded.address)}
-              onWithdraw={() => setShowWithdraw(embedded.address)}
-              onMint={handleMint}
+              onDeposit={primary === embedded ? () => setShowDeposit(primary.address) : undefined}
+              onWithdraw={primary === embedded ? () => setShowWithdraw(primary.address) : undefined}
+              onMint={primary === embedded ? handleMint : undefined}
               minting={minting}
               onRefresh={() => void refreshBalances()}
             />
-          )}
-          {external && (
-            <WalletCard
-              label="Connected wallet · your identity, never debited by paid runs"
-              address={external.address}
-              ethBalance={balances[external.address]?.eth ?? null}
-              circleUsdc={balances[external.address]?.circle ?? null}
-              telegraphUsdc={balances[external.address]?.telegraph ?? null}
-              syncing={syncing}
-              lastSynced={lastSynced}
-              onRefresh={() => void refreshBalances()}
-            />
-          )}
-        </div>
-      )}
-
-      {/* The wallet that actually pays: fed by /api/wallet/balance, live. */}
-      <div className="mt-4">
-        <PayerCard sessionSignedIn={hasWallet} />
-      </div>
-
-      <div className={`mt-8 grid gap-4 ${hasEmbedded ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
-        <button
-          type="button"
-          onClick={handleConnectExternal}
-          className="group rounded-2xl border border-edge bg-panel p-5 text-left transition-all hover:border-teal hover:shadow-sm"
-        >
-          <div className="flex items-center gap-2">
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-panel-2 text-ink-soft group-hover:text-teal">
-              <Wallet size={14} strokeWidth={1.8} />
-            </span>
-            <p className="text-[13.5px] font-medium text-ink">Connect wallet</p>
+            {secondary && (
+              <SecondaryWalletRow
+                kind={secondaryKind}
+                address={secondary.address}
+                balances={balances[secondary.address]}
+              />
+            )}
+          </>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-edge bg-panel px-6 py-8">
+            <p className="text-[14px] font-medium text-ink">No wallet connected yet.</p>
+            <p className="mt-1.5 max-w-[52ch] text-[12.5px] leading-relaxed text-ink-soft">
+              Create an in-app wallet that stays with your account, or connect MetaMask, WalletConnect or another
+              external wallet. Balances appear here once one exists.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="button" onClick={handleCreateInApp} disabled={creating} className="btn-primary !min-h-9 !px-4 disabled:opacity-60">
+                <Plus size={13} aria-hidden />
+                {creating ? "Creating…" : "Create in-app wallet"}
+              </button>
+              <button type="button" onClick={handleConnectExternal} className="btn-quiet !min-h-9 !px-4">
+                <Wallet size={13} aria-hidden />
+                Connect wallet
+              </button>
+            </div>
           </div>
-          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-            MetaMask, WalletConnect, or another external wallet.
-          </p>
-        </button>
-
-        {!hasEmbedded && (
+        )}
+        {primary && !hasEmbedded && (
           <button
             type="button"
             onClick={handleCreateInApp}
             disabled={creating}
-            className="group rounded-2xl border border-edge bg-panel p-5 text-left transition-all hover:border-teal hover:shadow-sm disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-1.5 text-[12px] text-ink-soft transition-colors hover:border-teal hover:text-ink disabled:opacity-50"
           >
-            <div className="flex items-center gap-2">
-              <span className="grid h-7 w-7 place-items-center rounded-full bg-panel-2 text-ink-soft group-hover:text-teal">
-                <Plus size={14} strokeWidth={1.8} />
-              </span>
-              <p className="text-[13.5px] font-medium text-ink">
-                {creating ? "Creating…" : "Create in-app wallet"}
-              </p>
-            </div>
-            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-              A wallet that stays with your account.
-            </p>
+            <Plus size={12} aria-hidden />
+            {creating ? "Creating…" : "Create the in-app wallet"}
           </button>
         )}
-      </div>
+      </section>
+
+      {/* Spending: the payer wallet that funds autonomous runs + the enforced
+          per-user allowance. Both keep their existing APIs. */}
+      <section aria-label="Spending controls" className="mt-8 space-y-4">
+        <h2 className="x-label !mt-0">SPENDING</h2>
+        <PayerCard sessionSignedIn={!!primary} />
+        <SpendAllowance />
+      </section>
+
+      {/* Transactions and receipts: one component, both real ledgers. */}
+      <section aria-label="Wallet activity" className="mt-8">
+        <WalletActivity />
+      </section>
 
       {error && (
-        <p className="mt-4 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">{error}</p>
+        <p className="mt-6 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">{error}</p>
       )}
       {notice && (
         <p className="mt-4 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-[12.5px] text-teal">{notice}</p>
@@ -644,7 +687,10 @@ export default function FundsPage() {
 
       {showDeposit && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-night/60 p-4 backdrop-blur-sm" onClick={() => setShowDeposit(null)}>
-          <div className="w-full max-w-sm rounded-2xl border border-edge bg-panel p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="x-modal-panel w-full max-w-sm rounded-2xl border border-edge bg-panel p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between">
               <p className="text-[14px] font-medium text-ink">Deposit</p>
               <button type="button" onClick={() => setShowDeposit(null)} className="grid h-7 w-7 place-items-center rounded text-ink-faint hover:text-ink">

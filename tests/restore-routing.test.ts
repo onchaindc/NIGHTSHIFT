@@ -173,18 +173,61 @@ describe("legacy link compatibility", () => {
 describe("navigation: five primary destinations, Network secondary, one shared contract", () => {
   it("the shared nav contract lists exactly the five primary destinations", async () => {
     const { PRIMARY_NAV, SECONDARY_NAV } = await import("@/lib/explorer/nav");
-    expect(PRIMARY_NAV.map((i: { label: string }) => i.label)).toEqual(["Overview", "Minds", "Work", "Buyer Desk", "Wallet"]);
-    expect(PRIMARY_NAV.map((i: { href: string }) => i.href)).toEqual(["/overview", "/minds", "/work", "/buyer", "/funds"]);
+    expect(PRIMARY_NAV.map((i: { label: string }) => i.label)).toEqual([
+      "Overview",
+      "Minds",
+      "Investigations",
+      "Buyer Desk",
+      "Wallet",
+    ]);
+    expect(PRIMARY_NAV.map((i: { href: string }) => i.href)).toEqual([
+      "/overview",
+      "/minds",
+      "/investigations",
+      "/buyer",
+      "/funds",
+    ]);
     // Overview is its own destination, not the landing page.
     expect(PRIMARY_NAV[0].href).not.toBe("/");
-    // Work exposes both clearly distinct workspaces.
-    const work = PRIMARY_NAV.find((i: { label: string }) => i.label === "Work");
-    expect(work?.activeFor).toEqual(expect.arrayContaining(["/work", "/desk", "/assurance"]));
-    // Network is a secondary destination, not a primary tab.
+    // Investigations exposes both clearly distinct workspaces.
+    const investigations = PRIMARY_NAV.find((i: { label: string }) => i.label === "Investigations");
+    expect(investigations?.activeFor).toEqual(expect.arrayContaining(["/investigations", "/desk", "/assurance"]));
+    // Network is a secondary destination, not a primary tab, and it lands in
+    // the Minds section that holds the family.
     expect(PRIMARY_NAV.some((i: { label: string }) => i.label === "Network")).toBe(false);
     expect(SECONDARY_NAV.map((i: { label: string }) => i.label)).toEqual(["Network"]);
-    expect(SECONDARY_NAV[0].href).toBe("/miners");
-    expect(SECONDARY_NAV[0].activeFor).toEqual(expect.arrayContaining(["/miners", "/signals", "/activity", "/intelligence"]));
+    expect(SECONDARY_NAV[0].href).toBe("/minds#network");
+    expect(SECONDARY_NAV[0].activeFor).toEqual(
+      expect.arrayContaining(["/miners", "/intents", "/validators", "/evaluators", "/signals", "/developers"]),
+    );
+    // Activity is the user's own record history (it belongs to the Wallet's
+    // transactions surface), not a network directory.
+    expect(SECONDARY_NAV[0].activeFor).not.toContain("/activity");
+  });
+
+  it("the Network family section under Minds carries all six directories", async () => {
+    const { NETWORK_DIRECTORIES } = await import("@/lib/explorer/nav");
+    expect(NETWORK_DIRECTORIES.map((d: { href: string }) => d.href)).toEqual([
+      "/miners",
+      "/intents",
+      "/validators",
+      "/evaluators",
+      "/signals",
+      "/developers",
+    ]);
+    expect(NETWORK_DIRECTORIES.map((d: { label: string }) => d.label)).toEqual([
+      "Miners",
+      "Intents",
+      "Validators",
+      "Evaluators",
+      "Signals",
+      "Developers",
+    ]);
+    const minds = src("src/app/(explorer)/minds/page.tsx");
+    expect(minds).toContain('id="network"');
+    expect(minds).toContain("NETWORK_DIRECTORIES");
+    // The directories are one clearly marked section, not scattered cards.
+    expect(minds).toContain('aria-label="The Telegraph network"');
   });
 
   it("the desktop header and the mobile tab bar consume the shared contract, not their own lists", () => {
@@ -201,32 +244,46 @@ describe("navigation: five primary destinations, Network secondary, one shared c
     expect(header).toMatch(/aria-label="Secondary"|SECONDARY_NAV\.map/);
   });
 
-  it("the Work hub exposes Deal Desk and Assurance as distinct workspaces", () => {
-    const work = src("src/app/(explorer)/work/page.tsx");
-    expect(work).toContain('href="/desk"');
-    expect(work).toContain('href="/assurance"');
-    expect(work).toContain("Deal Desk");
-    expect(work).toContain("Assurance");
-    // Navigation architecture only — no workspace is reimplemented here.
-    expect(work).not.toContain("AssuranceIndex");
-    expect(work).not.toContain("DeskEntry");
+  it("the Investigations hub exposes Deal Desk and Assurance as distinct workspaces", () => {
+    const hub = src("src/app/(explorer)/investigations/page.tsx");
+    expect(hub).toContain('href="/desk"');
+    expect(hub).toContain('href="/assurance"');
+    expect(hub).toContain("Deal Desk");
+    expect(hub).toContain("Assurance");
+    // Navigation architecture only — no workspace is reimplemented here, and
+    // the two complete product interfaces are not stacked on the hub.
+    expect(hub).not.toContain("AssuranceIndex");
+    expect(hub).not.toContain("DeskEntry");
+    // The old /work page is retired; the route survives as a redirect.
+    expect(existsSync("src/app/(explorer)/work")).toBe(false);
+    const config = src("next.config.ts");
+    const workRedirect = config.match(/\{[^{}]*source: "\/work"[^{}]*\}/)?.[0] ?? "";
+    expect(workRedirect).toContain('destination: "/investigations"');
   });
 
-  it("Overview is its own page, not the landing page", () => {
-    // The page exists and points at every primary surface plus the network
-    // (links are driven from data arrays, so pin the route strings).
+  it("Overview is its own page showing records, not navigation", () => {
     const overview = src("src/app/(explorer)/overview/page.tsx");
-    for (const href of ["/minds", "/work", "/buyer", "/funds", "/miners", "/signals", "/activity", "/developers"]) {
-      expect(overview).toContain(`href: "${href}"`);
+    // No navbar destination re-listed as shortcut cards, no wallet card, no
+    // Minds or Network directory — the primary tabs appear exactly once.
+    for (const href of ["/minds", "/buyer", "/funds", "/miners", "/signals", "/developers"]) {
+      expect(overview).not.toContain(`href: "${href}"`);
     }
-    // The terminal entry is an inline link inside the prose.
-    expect(overview).toContain('href="/terminal"');
-    // Registry-driven Minds, no fabricated live data.
-    expect(overview).toContain("mindsByStatus");
+    expect(overview).not.toContain("WalletCard");
+    expect(overview).not.toContain("PayerCard");
+    expect(overview).not.toContain("mindsByStatus");
+    // It reads the real stores through the SAME caller projections the APIs
+    // use — never more than this caller may see, never fabricated rows.
+    expect(overview).toContain("listTasks");
+    expect(overview).toContain("listDeskInvestigations");
+    expect(overview).toContain("listInvestigations");
+    expect(overview).toContain("tasksForCaller");
+    expect(overview).toContain("investigationsForCaller");
+    expect(overview).toContain('dynamic = "force-dynamic"');
     // The stale pre-pivot redirect no longer shadows the page.
     const config = src("next.config.ts");
     expect(config).not.toContain('source: "/overview"');
     expect(src("src/app/sitemap.ts")).toContain('path: "/overview"');
+    expect(src("src/app/sitemap.ts")).toContain('path: "/investigations"');
   });
 });
 
@@ -252,7 +309,8 @@ describe("assurance error handling and case navigation moved to /assurance", () 
     expect(src("src/components/acp.tsx")).toContain("href={`/desk/${j.investigationId}`}");
   });
 
-  it("/work is discoverable: the sitemap lists it", () => {
-    expect(src("src/app/sitemap.ts")).toContain('path: "/work"');
+  it("the Investigations hub is discoverable: the sitemap lists it, /work is gone", () => {
+    expect(src("src/app/sitemap.ts")).toContain('path: "/investigations"');
+    expect(src("src/app/sitemap.ts")).not.toContain('path: "/work"');
   });
 });

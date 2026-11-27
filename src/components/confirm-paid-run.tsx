@@ -48,7 +48,7 @@ export function ConfirmPaidRun({ open, title, body, cost, confirmLabel, busy, on
         onClick={onCancel}
         className="absolute inset-0 cursor-default bg-ink/45 backdrop-blur-[2px]"
       />
-      <div className="relative w-full max-w-md rounded-t-2xl border border-edge bg-panel p-4 shadow-[0_-12px_48px_-16px_rgba(0,0,0,0.45)] sm:rounded-2xl sm:shadow-[0_24px_60px_-20px_rgba(0,0,0,0.5)] sm:p-5">
+      <div className="x-modal-panel relative w-full max-w-md rounded-t-2xl border border-edge bg-panel p-4 shadow-[0_-12px_48px_-16px_rgba(0,0,0,0.45)] sm:rounded-2xl sm:shadow-[0_24px_60px_-20px_rgba(0,0,0,0.5)] sm:p-5">
         <p className="flex items-center gap-2 text-[14.5px] font-semibold text-ink">
           <ShieldAlert size={15} aria-hidden className="shrink-0 text-amber-deep" />
           {title}

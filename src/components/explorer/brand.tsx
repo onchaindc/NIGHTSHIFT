@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 /** The mark: a moon in an ink tile, sized to read as a logo rather than a badge. */
-export function Wordmark() {
+export function Wordmark({ hideTextBelow }: { hideTextBelow?: "lg" } = {}) {
   return (
     <Link href="/" aria-label="NIGHTSHIFT home" className="flex items-center gap-2.5">
       <span
@@ -12,7 +12,15 @@ export function Wordmark() {
           <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
         </svg>
       </span>
-      <span className="text-[12.5px] font-bold tracking-[0.22em] text-ink">NIGHTSHIFT</span>
+      {/* Between phone and desktop the five-tab row needs the width: the mark
+          alone keeps the wordmark legible without squeezing the tabs. */}
+      <span
+        className={`text-[12.5px] font-bold tracking-[0.22em] text-ink ${
+          hideTextBelow === "lg" ? "hidden lg:inline" : ""
+        }`}
+      >
+        NIGHTSHIFT
+      </span>
     </Link>
   );
 }
