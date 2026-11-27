@@ -19,10 +19,34 @@ import { acpConfig, realAcpConfigured, selectAcpTransport, MockAcpTransport, acp
 import type { AcpConfig } from "./transport";
 import type { AcpEntry, AcpProviderStatus, AcpSessionRef, AcpTransport } from "./types";
 
-/** A start() that has not resolved after this long is recorded as failed —
- *  the underlying connect may still be retried by the SDK, but the operator
- *  must see that the runtime never became usable. */
+/** The WHOLE boot budget — transport CONSTRUCTION (the Privy server adapter
+ *  and AcpAgent.create make network calls of their own) and transport.start()
+ *  together. Construction used to sit OUTSIDE this race: a hung Privy/ACP
+ *  handshake wedged every awaiter of ensureAcpRuntime forever — cold
+ *  instances never recovered and the status endpoint hung indefinitely.
+ *  The underlying connect may still be retried by the SDK, but the caller
+ *  is released and the failure is recorded. */
 const START_TIMEOUT_MS = 45_000;
+
+/** The persisted-record read budget for BUYER-FACING snapshots: a wedged
+ *  database must never hold the storefront hostage — the snapshot answers
+ *  "no record" honestly instead. */
+const SNAPSHOT_READ_TIMEOUT_MS = 2_500;
+
+/** Resolve with `fallback` when `p` has not settled within `ms`. The loser
+ *  keeps running (it may still persist its result) — the caller is released. */
+async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return await Promise.race([p, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+}
+
+function bootTimeout(): Promise<never> {
+  return new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`the ACP transport did not start within ${Math.round(START_TIMEOUT_MS / 1000)}s — the Privy/ACP handshake or the SSE connect is hanging`)),
+      START_TIMEOUT_MS,
+    ),
+  );
+}
 
 const STATE_DOC = "acp-runtime-state";
 
@@ -84,29 +108,33 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
   if (transport) return transport;
   if (starting) return starting.then(() => transport);
   starting = (async () => {
-    const selected = await selectAcpTransport();
-    if (!selected.transport) {
-      startNote = selected.reason;
-      transport = null;
-      startupError = selected.reason.includes("failed to start") ? selected.reason : null;
-      starting = null;
-      await writeRuntimeState({
-        attemptState: "failed",
-        startupError,
-        connected: null,
-        mode: null,
-        startedAt: null,
-        streamObservedAt: null,
-        note: selected.reason,
-      });
-      return;
-    }
-    startingDiagnostics = selected.transport.diagnostics?.bind(selected.transport) ?? null;
+    let selected: { transport: AcpTransport | null; reason: string } | null = null;
     try {
+      // ONE bounding race around the whole boot: construction first, then
+      // start(). A hung handshake times out and is recorded as failed —
+      // callers are released, the instance recovers.
+      selected = await Promise.race([selectAcpTransport(), bootTimeout()]);
+      if (!selected.transport) {
+        startNote = selected.reason;
+        transport = null;
+        startupError = selected.reason.includes("failed to start") ? selected.reason : null;
+        await writeRuntimeState({
+          attemptState: "failed",
+          startupError,
+          connected: null,
+          mode: null,
+          startedAt: null,
+          streamObservedAt: null,
+          note: selected.reason,
+        });
+        return;
+      }
+      const activeTransport: AcpTransport = selected.transport;
+      startingDiagnostics = activeTransport.diagnostics?.bind(activeTransport) ?? null;
       await Promise.race([
-        selected.transport.start({
+        activeTransport.start({
           onEntry: async (ref, entry) => {
-            await handleAcpEntry(selected.transport!, ref, entry);
+            await handleAcpEntry(activeTransport, ref, entry);
           },
           onStreamState: (connected) => {
             void writeRuntimeState({
@@ -118,21 +146,16 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
             });
           },
         }),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`transport.start() did not resolve within ${Math.round(START_TIMEOUT_MS / 1000)}s — the SSE connect or session hydration is hanging`)),
-            START_TIMEOUT_MS,
-          ),
-        ),
+        bootTimeout(),
       ]);
-      transport = selected.transport;
+      transport = activeTransport;
       startupError = null;
       startNote = selected.reason;
       // Registration check through the LIVE authenticated client: what does
       // the ACP server actually see for this wallet?
       let registration: AcpRuntimeState["registration"] = { found: null, detail: null, checkedAt: null };
       try {
-        const check = await selected.transport.verifyRegistration?.();
+        const check = await activeTransport.verifyRegistration?.();
         registration = { found: check?.found ?? null, detail: check?.detail ?? null, checkedAt: new Date().toISOString() };
         if (check && !check.found) console.error("ACP registration check failed:", check.detail);
       } catch (err) {
@@ -141,19 +164,20 @@ export async function ensureAcpRuntime(): Promise<AcpTransport | null> {
       await writeRuntimeState({
         attemptState: "started",
         startupError: null,
-        connected: selected.transport.diagnostics?.().connected ?? null,
-        mode: selected.transport.mode,
+        connected: activeTransport.diagnostics?.().connected ?? null,
+        mode: activeTransport.mode,
         startedAt: new Date().toISOString(),
         streamObservedAt: new Date().toISOString(),
         note: selected.reason,
         registration,
       });
     } catch (err) {
-      // A start() that merely EXCEEDED the window but whose SSE stream is up
+      // A boot that merely EXCEEDED the window but whose SSE stream is up
       // (the SDK finished connecting late) is a slow success, not a failure —
-      // record it as started; a genuinely broken connect reports failed.
+      // record it as started; a genuinely broken or timed-out boot reports
+      // failed and RELEASES every caller (no wedge, no silent hang).
       const diag = startingDiagnostics?.() ?? null;
-      if (diag?.connected === true) {
+      if (selected?.transport && diag?.connected === true) {
         transport = selected.transport;
         startupError = null;
         startNote = `started slowly (start() exceeded ${Math.round(START_TIMEOUT_MS / 1000)}s) but the SSE stream is connected`;
@@ -357,6 +381,9 @@ export function catalogProviderView(
 export async function acpProviderSnapshot(): Promise<AcpProviderStatus> {
   const cfg = acpConfig();
   const sdk = cfg.enabled ? await acpSdkInstalled() : false;
-  const stored = await readRuntimeState();
+  // The persisted-record read is BOUNDED: this snapshot serves the buyer's
+  // storefront — a wedged database degrades to "no record" (the view then
+  // reports idle/disconnected honestly) instead of hanging the response.
+  const stored = await withTimeout(readRuntimeState(), SNAPSHOT_READ_TIMEOUT_MS, null);
   return catalogProviderView(cfg, stored, sdk);
 }

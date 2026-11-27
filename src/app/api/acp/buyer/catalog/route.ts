@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { ACP_OFFERINGS } from "@/lib/acp/offerings";
-import { acpProviderSnapshot, ensureAcpRuntime } from "@/lib/acp/runtime";
-import { acpConfig, realAcpConfigured } from "@/lib/acp/transport";
+import { acpProviderSnapshot } from "@/lib/acp/runtime";
+import { acpConfig } from "@/lib/acp/transport";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,23 +15,18 @@ export const dynamic = "force-dynamic";
  * buyer's own wallet signs every transaction in their browser; no provider
  * credential is involved or exposed.
  *
- * THE STOREFRONT'S CRITICAL PATH NEVER WAITS ON THE PROVIDER. This route
- * answers from configuration + the persisted runtime record
- * (`acpProviderSnapshot`) — it must not boot the transport, because that
- * coupling was the production failure where the storefront sat on "Loading…"
- * forever while a cold instance paid the full Privy/ACP handshake inside
- * this request. Connection freshness instead comes from the instrumentation
- * boot, the operator status endpoint and the tick cron; when this request
- * lands on an instance without a transport, a background boot is fired
- * WITHOUT being awaited so the record self-heals for the next read.
+ * THE STOREFRONT'S CRITICAL PATH NEVER WAITS ON — OR TRIGGERS — THE PROVIDER
+ * BOOT. This route answers from configuration + the persisted runtime record
+ * (`acpProviderSnapshot`, whose DB read is itself bounded at 2.5 s). It must
+ * not boot the transport, and it must not even FIRE a background boot: a
+ * boot per cold request multiplied across serverless instances and wedged
+ * the deployment (the boot handshake can hang on the ACP/Privy side, and the
+ * hung boot starved everything else on the instance). Connection freshness
+ * belongs to the instrumentation boot (once per instance), the operator
+ * status endpoint and the tick cron — never to the buyer's catalog request.
  */
 export async function GET() {
   const cfg = acpConfig();
-  if (realAcpConfigured()) {
-    // Fire-and-forget: coalesced per process (ensureAcpRuntime is idempotent),
-    // never awaited, and its failure cannot fail this response.
-    void ensureAcpRuntime().catch(() => undefined);
-  }
   const status = await acpProviderSnapshot();
   // The addresses come from the installed SDK's own registry — never
   // hard-coded here, so a protocol upgrade flows through automatically.
