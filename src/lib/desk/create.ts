@@ -16,15 +16,18 @@ function str(v: unknown, max = 600): string {
 }
 
 export function deskSubjectLine(inv: DeskInvestigation): string {
+  // The subject block records what the guided form collected; records written
+  // before any field was answered carry no subject object at all.
+  const subject = (inv.subject && typeof inv.subject === "object" ? inv.subject : {}) as Record<string, string>;
   switch (inv.type) {
     case "counterparty_due_diligence":
-      return `${inv.subject.legalName ?? "Unnamed counterparty"} · ${inv.subject.jurisdiction ?? "?"}`;
+      return `${subject.legalName ?? "Unnamed counterparty"} · ${subject.jurisdiction ?? "?"}`;
     case "asset_intelligence":
-      return `${inv.subject.assetName ?? "Unnamed asset"} · ${inv.subject.assetClass ?? "?"}`;
+      return `${subject.assetName ?? "Unnamed asset"} · ${subject.assetClass ?? "?"}`;
     case "trade_supplier_intelligence":
-      return `${inv.subject.supplierName ?? "Unnamed supplier"} · ${inv.subject.jurisdiction ?? "?"}`;
+      return `${subject.supplierName ?? "Unnamed supplier"} · ${subject.jurisdiction ?? "?"}`;
     case "listing_underwriter":
-      return `${inv.subject.tokenSymbol ?? inv.subject.assetName ?? "Unnamed token"} · ${inv.subject.issuerEntity ?? "Issuer not supplied"}`;
+      return `${subject.tokenSymbol ?? subject.assetName ?? "Unnamed token"} · ${subject.issuerEntity ?? "Issuer not supplied"}`;
   }
 }
 

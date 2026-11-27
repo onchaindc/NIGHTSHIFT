@@ -268,7 +268,12 @@ export const DESK_VERDICT_LABEL: Record<DeskVerdict, string> = {
 
 export function deskEvidenceCounts(inv: Pick<DeskInvestigation, "evidence">): DeskReport["counts"] {
   const counts = { verified: 0, verification_failed: 0, unverified: 0, node_asserted: 0, missing: 0, analysis: 0 };
-  for (const e of inv.evidence) {
+  // Records written before the evidence ledger existed have no array at all:
+  // this exact dereference killed the Overview render ("a.evidence is not
+  // iterable"), so an absent ledger counts as an empty one — never a throw.
+  const evidence = Array.isArray(inv.evidence) ? inv.evidence : [];
+  for (const e of evidence) {
+    if (!e || typeof e.provenance !== "string" || !(e.provenance in counts)) continue;
     counts[e.provenance] += 1;
     if (e.provenance === "unverified" && e.class === "node_asserted") counts.node_asserted += 1;
   }

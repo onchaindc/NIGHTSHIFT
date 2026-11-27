@@ -2,6 +2,9 @@
 
 import type { ExecutionEvent, TaskRecord } from "@/lib/engine/types";
 import { humanize } from "@/lib/ui/humanize";
+// money/timeOf live in the shared server-safe formatter (see lib/ui/format):
+// server components must never call a VALUE imported from this client module.
+import { money, timeOf } from "@/lib/ui/format";
 import { Check, CircleAlert, CircleHelp, CirclePause, CircleSlash, LoaderCircle, Circle } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -80,13 +83,13 @@ export function isTestRun(t: TaskRecord) {
   return (t.labels ?? []).includes(AUDIT_LABEL);
 }
 
-export function money(cents: number) {
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-export function timeOf(ts: number) {
-  return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
+// money() and timeOf() moved to @/lib/ui/format — taskParts is a "use client"
+// module, and a server component importing a VALUE from a client module gets
+// an opaque client reference that throws when called during SSR (the Overview
+// activity builder died on exactly that). Client-side consumers keep working
+// through these re-exports; server-side consumers must import the shared
+// module directly.
+export { money, timeOf } from "@/lib/ui/format";
 
 export function clockOf(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
