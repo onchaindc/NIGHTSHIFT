@@ -38,15 +38,18 @@ export function isRedactedTask(task: TaskRecord): boolean {
 export function publicTaskView(task: TaskRecord): TaskRecord {
   return {
     id: task.id,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
+    createdAt: typeof task.createdAt === "number" ? task.createdAt : 0,
+    updatedAt: typeof task.updatedAt === "number" ? task.updatedAt : 0,
     state: task.state,
     goal: "", // objective withheld
     plan: null, // plan steps name targets and capabilities
     events: [], // event timeline carries step results and hashes
     spend: {
-      limitUsdCents: task.spend.limitUsdCents,
-      spentUsdCents: task.spend.spentUsdCents,
+      // Records written before the spend ledger existed carry no spend object
+      // at all — the projection reports zero totals rather than throwing on
+      // the aggregate fields every consumer reads.
+      limitUsdCents: typeof task.spend?.limitUsdCents === "number" ? task.spend.limitUsdCents : 0,
+      spentUsdCents: typeof task.spend?.spentUsdCents === "number" ? task.spend.spentUsdCents : 0,
       entries: [], // per-payment ledger: receiptHash, signalHash, payer, miner
     },
     permissions: {
@@ -63,7 +66,7 @@ export function publicTaskView(task: TaskRecord): TaskRecord {
     },
     result: null, // reports, reasoning, evidence
     error: null, // failure text can name internal steps
-    origin: { source: task.origin.source }, // actor (telegram chat id) dropped
+    origin: { source: task.origin?.source ?? "web" }, // actor (telegram chat id) dropped
     jobType: task.jobType,
     // terminal (request body, offer, payer), watch (monitoring targets) and
     // labels are optional keys: omitted entirely rather than emptied.

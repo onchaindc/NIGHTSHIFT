@@ -5,6 +5,7 @@ import type { AuditEntry } from "@/lib/assurance/types";
 import type { DeskInvestigation, DeskInvestigationSummary, DeskInvestigationType } from "./types";
 import { deskEvidenceCounts, DESK_TYPE_LABEL } from "./types";
 import { deskSubjectLine } from "./create";
+import { deskWorkflow } from "./workflows";
 
 /**
  * Desk investigation persistence. Same swappable backend as tasks, watches
@@ -34,7 +35,8 @@ export async function listDeskInvestigations(): Promise<DeskInvestigation[]> {
   const records = await persistence().readManyNamed<DeskInvestigation>(ids.map((id) => docName(id)));
   return records
     .filter((r): r is DeskInvestigation => Boolean(r && r.id && r.kind === "desk"))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .map(normalizeDeskRecord)
+    .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
 }
 
 export async function listDeskInvestigationsByType(type: DeskInvestigationType): Promise<DeskInvestigation[]> {
@@ -43,7 +45,35 @@ export async function listDeskInvestigationsByType(type: DeskInvestigationType):
 
 export async function getDeskInvestigation(id: string): Promise<DeskInvestigation | null> {
   const record = await persistence().readNamed<DeskInvestigation>(docName(id));
-  return record && record.id && record.kind === "desk" ? record : null;
+  return record && record.id && record.kind === "desk" ? normalizeDeskRecord(record) : null;
+}
+
+/**
+ * Legacy or shape-drifted desk records must never break a read. Records
+ * written before a field existed (an evidence ledger recorded later, a run
+ * list appended later, the audit trail introduced later) are real production
+ * data: the Overview server render died on exactly such a record with
+ * "a.evidence is not iterable". Every read therefore returns a record whose
+ * declared collection fields actually exist — the same contract the task
+ * store has honored since normalizeTaskForDisplay.
+ */
+function normalizeDeskRecord(inv: DeskInvestigation): DeskInvestigation {
+  return {
+    ...inv,
+    type: deskWorkflow(inv.type) ? inv.type : "counterparty_due_diligence",
+    status: inv.status ?? "draft",
+    createdAt: inv.createdAt ?? "",
+    updatedAt: inv.updatedAt ?? inv.createdAt ?? "",
+    subject: inv.subject && typeof inv.subject === "object" ? inv.subject : {},
+    unsupported: Array.isArray(inv.unsupported) ? inv.unsupported : [],
+    evidence: Array.isArray(inv.evidence) ? inv.evidence : [],
+    findings: Array.isArray(inv.findings) ? inv.findings : [],
+    runs: Array.isArray(inv.runs) ? inv.runs : [],
+    report: inv.report ?? null,
+    spendLimitUsdCents: typeof inv.spendLimitUsdCents === "number" ? inv.spendLimitUsdCents : 100,
+    operator: inv.operator ?? { createdBy: "", tenant: "" },
+    audit: Array.isArray(inv.audit) ? inv.audit : [],
+  };
 }
 
 export async function saveDeskInvestigation(inv: DeskInvestigation): Promise<void> {
@@ -76,21 +106,23 @@ export function summarizeDesk(inv: DeskInvestigation): DeskInvestigationSummary 
   return {
     id: inv.id,
     reference: inv.reference,
-    type: inv.type,
-    createdAt: inv.createdAt,
-    status: inv.status,
+    type: deskWorkflow(inv.type) ? inv.type : "counterparty_due_diligence",
+    createdAt: inv.createdAt ?? "",
+    status: inv.status ?? "draft",
     subject: deskSubjectLine(inv),
-    evidenceCount: inv.evidence.length,
+    evidenceCount: (inv.evidence ?? []).length,
     verifiedCount: counts.verified,
     missingCount: counts.missing,
-    findingCount: inv.findings.length || inv.report?.findings.length || 0,
-    runs: inv.runs.length,
+    findingCount: (inv.findings ?? []).length || inv.report?.findings.length || 0,
+    runs: (inv.runs ?? []).length,
     confidence: inv.report?.confidence ?? null,
   };
 }
 
 /** Append an audit entry without letting a caller overwrite the trail. */
 export function auditDesk(inv: DeskInvestigation, actor: string, action: string, detail: string): void {
+  // Records written before the audit trail existed still accept entries.
+  if (!Array.isArray(inv.audit)) inv.audit = [];
   const entry: AuditEntry = { ts: new Date().toISOString(), actor, action, detail };
   inv.audit.push(entry);
   if (inv.audit.length > 200) inv.audit = inv.audit.slice(-200);
