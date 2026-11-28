@@ -322,7 +322,7 @@ describe("reseller — packages are priced from real Capacity listings", () => {
 
     const forged = await createPackage({ ownerWallet: A, name: "Forged bundle", summary: "Caller-supplied prices are not accepted.", components: "Counterparty DD | 1\nVAT identity check | 1", packagePriceUsdCents: 500 });
     expect(forged.ok).toBe(false);
-    if (!forged.ok) expect(forged.error).toContain("capacity:<service-id>");
+    if (!forged.ok) expect(forged.error).toContain("capacity:<service-reference>");
 
     const tooLow = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two verified Capacity listings.", components, packagePriceUsdCents: 250 });
     expect(tooLow.ok).toBe(false);
