@@ -1,5 +1,6 @@
 import { canTransition, type ExecutionEventType, type Evidence, type TaskRecord } from "@/lib/engine/types";
 import { saveTask } from "@/lib/engine/store";
+import { debitCreditsForRun } from "@/lib/wallet/credits";
 import type { ExecutionOutputs } from "@/lib/engine/engine";
 import {
   analyzeCounterparty,
@@ -333,6 +334,7 @@ export async function executeCounterpartyAsk(
           amountUsdCents: approvedCents,
           source: "telegraph",
         });
+        await debitCreditsForRun(task.owner, approvedCents, task.id, `Counterparty intelligence — payment settled but the ask failed (${entity.company}); booked conservatively`);
         await event(
           task,
           "spend_recorded",
@@ -356,6 +358,7 @@ export async function executeCounterpartyAsk(
     receiptHash: outcome.receipt.receipt_hash,
     signalHash: outcome.signalHash,
   });
+  await debitCreditsForRun(task.owner, cents, task.id, `Counterparty intelligence (${outcome.resultShape ? `${outcome.resultShape} via ` : ""}Telegraph)`);
   await event(
     task,
     "spend_recorded",

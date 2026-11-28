@@ -18,6 +18,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
+import { SampleFill } from "@/components/sample-fill";
 import {
   AlertTriangle,
   BadgeCheck,
@@ -139,6 +140,12 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
   const [answer, setAnswer] = useState<PaidAnswer | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+
+  const SAMPLE_REQUEST = { company: "Amazon.com, Inc.", jurisdiction: "United States" };
+  const fillSamples = () => {
+    setCompany(SAMPLE_REQUEST.company);
+    setJurisdiction(SAMPLE_REQUEST.jurisdiction);
+  };
 
   const { wallets } = useWallets();
   const { signTypedData } = useSignTypedData();
@@ -502,7 +509,9 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
       };
     if (probe.kind === "probing")
       return { tone: "working" as const, title: "Pricing the ask…", sub: "An unpaid probe validates the request against the pinned specialist and returns the live price. Nothing is signed." };
-    return { tone: "working" as const, title: "Start with a free price check", sub: "Name the company, check the price, approve the exact offer — only then does your wallet pay." };
+    // Idle is NOT a working state: a spinning loader here made the whole page
+    // look permanently stuck before the user typed anything.
+    return { tone: "idle" as const, title: "Start with a free price check", sub: "Name the company, check the price, approve the exact offer — only then does your wallet pay." };
   })();
 
   return (
@@ -556,7 +565,9 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
               ? "border-amber/40 bg-amber-soft/40"
               : askHeadline.tone === "done"
                 ? "border-teal/30 bg-teal/5"
-                : "border-risk/30 bg-risk/5"
+                : askHeadline.tone === "idle"
+                  ? "border-edge bg-panel-3"
+                  : "border-risk/30 bg-risk/5"
         }`}
       >
         <p className="flex items-center gap-2 text-[14px] font-medium leading-snug text-ink">
@@ -566,6 +577,8 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
             <ShieldCheck size={15} aria-hidden className="shrink-0 text-amber-deep" />
           ) : askHeadline.tone === "done" ? (
             <BadgeCheck size={15} aria-hidden className="shrink-0 text-teal" />
+          ) : askHeadline.tone === "idle" ? (
+            <Search size={15} aria-hidden className="shrink-0 text-ink-faint" />
           ) : (
             <XCircle size={15} aria-hidden className="shrink-0 text-risk" />
           )}
@@ -602,15 +615,18 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
               />
             </div>
           </div>
-          <button
-            type="button"
-            onClick={runProbe}
-            disabled={company.trim().length < 2 || jurisdiction.trim().length < 2 || probe.kind === "probing"}
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            {probe.kind === "probing" ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Search size={14} aria-hidden />}
-            {probe.kind === "probing" ? "Asking the network…" : "Check price"}
-          </button>
+          <div className="flex flex-wrap items-center gap-4">
+            <button
+              type="button"
+              onClick={runProbe}
+              disabled={company.trim().length < 2 || jurisdiction.trim().length < 2 || probe.kind === "probing"}
+              className="btn-primary inline-flex items-center gap-2"
+            >
+              {probe.kind === "probing" ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Search size={14} aria-hidden />}
+              {probe.kind === "probing" ? "Asking the network…" : "Check price"}
+            </button>
+            <SampleFill onFill={fillSamples} />
+          </div>
           <p className="text-[11.5px] leading-relaxed text-ink-faint">
             The specialist matches the <span className="text-ink-soft">registered legal name</span> exactly, so include
             the legal suffix (Amazon.com, Inc. · SHELL PLC · Equinor ASA). Norwegian lookups also accept the 9-digit

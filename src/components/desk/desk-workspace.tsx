@@ -684,10 +684,10 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
                 const paidRan = inv.runs.some((r) => r.mode === "intel");
                 const banner =
                   inv.report && inv.report.findings.length > 0
-                    ? "This is the report — the answer to what you asked. Findings cite their evidence; the activity trail below shows how each answer was priced, bought and checked."
+                    ? "The report — findings cite their evidence; the trail below shows how each answer was priced, bought and checked."
                     : paidRan
-                      ? "This is the report after a paid run — but nothing verified, so there are no findings. The answers returned sit in the activity trail, labelled unverified and never presented as data."
-                      : "This is the free pre-flight — no answer has been purchased yet, so there are no findings to read. What you have: every route checked and priced, what the network cannot answer, and the questions a paid run would settle. The activity trail below is the process, not the answer.";
+                      ? "A paid run returned answers but nothing verified — they sit in the trail below, labelled unverified, never presented as data."
+                      : "The free pre-flight — no answer purchased yet. Here: every route checked and priced, what the network cannot answer, and what a paid run would settle.";
                 return (
                   <ReportDisclosure title="How to read this report" tone="teal">
                     <p className="text-[12px] leading-relaxed text-ink-soft">{banner}</p>

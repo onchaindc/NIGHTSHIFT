@@ -108,9 +108,11 @@ function Fact({ label, value, mono = true }: { label: string; value: React.React
   );
 }
 
-function StatusDot({ done, active }: { done: boolean; active?: boolean }) {
+function StatusDot({ done, active, blocked }: { done: boolean; active?: boolean; blocked?: boolean }) {
   if (done) return <Check size={12} aria-hidden className="text-teal" />;
   if (active) return <LoaderCircle size={12} aria-hidden className="motion-safe:animate-spin text-amber" />;
+  // A refused step never completes — show it as blocked, not as pending work.
+  if (blocked) return <CircleAlert size={12} aria-hidden className="text-amber-deep" />;
   return <CircleDashed size={12} aria-hidden className="text-ink-faint" />;
 }
 
@@ -278,7 +280,11 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
     { label: "Evidence gathered", done: hasEvidence },
     { label: "Assessment recorded", done: Boolean(decision) },
     { label: "Authorization decision", done: Boolean(decision) },
-    { label: "Settlement assurance", done: Boolean(inv.settlement) },
+    {
+      label: "Settlement assurance",
+      done: Boolean(inv.settlement),
+      blocked: !!decision && decision.outcome !== "CLEARED" && !inv.settlement,
+    },
   ];
 
   return (
@@ -872,10 +878,11 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
               {workflow.map((step, i) => (
                 <li key={step.label} className="flex items-center gap-2.5">
                   <span className="grid size-4 place-items-center" aria-hidden>
-                    <StatusDot done={step.done} active={step.active} />
+                    <StatusDot done={step.done} active={step.active} blocked={step.blocked} />
                   </span>
-                  <span className={`text-[12px] ${step.done ? "text-ink" : "text-ink-faint"}`}>
+                  <span className={`text-[12px] ${step.done ? "text-ink" : step.blocked ? "text-amber-deep" : "text-ink-faint"}`}>
                     {i + 1}. {step.label}
+                    {step.blocked ? " — refused while the decision is open" : ""}
                   </span>
                 </li>
               ))}

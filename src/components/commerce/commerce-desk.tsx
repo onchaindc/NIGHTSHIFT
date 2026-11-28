@@ -19,6 +19,7 @@ import { COMMERCE_OFFERINGS } from "@/lib/commerce/catalog";
 import type { CommerceJob, CommerceOffering, CommerceSection } from "@/lib/commerce/types";
 import { COMMERCE_SECTIONS, COMMERCE_SECTION_LABEL } from "@/lib/commerce/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
+import { SampleFill } from "@/components/sample-fill";
 import { ActionError, EmptyNote, Field, FormRow, MicroHeading, Panel, StateChip, TextArea, TextInput, SelectField } from "./ui-bits";
 import { MarketplaceSection } from "./marketplace-section";
 import { CapacitySection } from "./capacity-section";
@@ -213,6 +214,7 @@ export function CommerceDesk({
                       <button type="button" onClick={() => setOpenOffering(null)} className="btn-quiet !min-h-9 !text-[12px]">
                         Cancel
                       </button>
+                      <SampleFill onFill={() => setPurchaseInput({ ...(o.samples ?? {}) })} />
                     </FormRow>
                   </div>
                 ) : (

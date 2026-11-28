@@ -201,24 +201,21 @@ export default async function OverviewPage() {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-3">
               <span className="inline-flex items-center rounded-full border border-edge bg-panel px-3 py-1 text-[11.5px] font-medium text-ink-soft">
-                Telegraph network
+                NIGHTSHIFT / Agent commerce network
               </span>
               <NetworkBadge live={allOk} />
             </div>
-            <h1 className="x-display-hero mt-6 max-w-[20ch] text-balance text-ink">
-              Verified intelligence, <span className="italic text-amber-deep">priced in the open.</span>
+            <h1 className="x-display-hero mt-6 max-w-[24ch] text-balance text-ink">
+              One network. <span className="italic text-amber-deep">Where agents do business.</span>
             </h1>
             <p className="mt-6 max-w-[52ch] text-[16px] leading-relaxed text-pretty text-ink-soft">
-              NIGHTSHIFT runs specialist Minds over the Telegraph network. You see the price before you commit, the
-              answer arrives with a receipt, and high-value settlement can be checked before funds move.
+              Discover specialist agents, source capabilities, publish requirements and coordinate services across an
+              interconnected agent economy.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link href="/minds" className="btn-primary !min-h-11 !px-5">
-                Ask a Mind
+              <Link href="/overview" className="btn-primary !min-h-11 !px-5">
+                Open the network
                 <ArrowRight size={14} aria-hidden />
-              </Link>
-              <Link href="/terminal" className="btn-quiet !min-h-11 !px-5">
-                Open the Terminal
               </Link>
             </div>
 

@@ -7,7 +7,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Copy, Check, Wallet, Plus, LogOut, ArrowDownToLine, ArrowUpFromLine, X, Coins, RefreshCw } from "lucide-react";
 
 import { SpendAllowance } from "@/components/wallet/spend-allowance";
-import { WalletActivity } from "@/components/wallet/wallet-activity";
 
 const SEPOLIA_RPCS = [
   "https://ethereum-sepolia-rpc.publicnode.com",
@@ -15,7 +14,6 @@ const SEPOLIA_RPCS = [
   "https://eth-sepolia.api.onfinality.io/public",
 ];
 const SEPOLIA_CHAIN_ID = 11155111;
-const CIRCLE_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const TELEGRAPH_USDC = "0xcc194e1a843B658526D0D5C431f670028582Ae17";
 
 async function rpc(method: string, params: unknown[]): Promise<string | null> {
@@ -59,7 +57,14 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-type Balances = { eth: string | null; circle: string | null; telegraph: string | null };
+type Balances = { eth: string | null; telegraph: string | null };
+
+/**
+ * What the last faucet action actually did, rendered INLINE in the wallet
+ * card — the confirmation has to appear where the tap happened, not at the
+ * bottom of a long page (the invisible notice is what caused triple mints).
+ */
+type MintFeedback = { tone: "ok" | "warn" | "err"; text: string; txHash?: string | null };
 
 /**
  * THE wallet summary card. The page renders exactly one of these: the
@@ -71,30 +76,43 @@ function WalletCard({
   label,
   address,
   ethBalance,
-  circleUsdc,
   telegraphUsdc,
   syncing,
   lastSynced,
+  syncStalled,
   onDeposit,
   onWithdraw,
   onMint,
   minting,
   onRefresh,
+  mintFeedback,
+  mintCooldownUntil,
 }: {
   label: string;
   address: string;
   ethBalance: string | null;
-  circleUsdc: string | null;
   telegraphUsdc: string | null;
   syncing?: boolean;
   lastSynced?: number | null;
+  syncStalled?: boolean;
   onDeposit?: () => void;
   onWithdraw?: () => void;
   onMint?: () => void;
   minting?: boolean;
   onRefresh?: () => void;
+  mintFeedback?: MintFeedback | null;
+  mintCooldownUntil?: number | null;
 }) {
   const [copied, setCopied] = useState(false);
+  // Per-second countdown for the faucet cooldown label.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!mintCooldownUntil || mintCooldownUntil <= Date.now()) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [mintCooldownUntil]);
+  const coolLeft = mintCooldownUntil ? Math.max(0, Math.ceil((mintCooldownUntil - now) / 1000)) : 0;
   const copy = () => {
     navigator.clipboard.writeText(address).then(() => {
       setCopied(true);
@@ -139,25 +157,22 @@ function WalletCard({
       <div className="mt-5 flex flex-wrap items-baseline gap-x-6 gap-y-3">
         <div>
           <p className="text-[28px] font-semibold tabular leading-none tracking-tight text-ink">
-            {circleUsdc === null ? "…" : circleUsdc}
-          </p>
-          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">USDC (Circle)</p>
-        </div>
-        <div>
-          <p className="text-[18px] font-medium tabular leading-none text-ink">
             {telegraphUsdc === null ? "…" : telegraphUsdc}
           </p>
-          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">Telegraph USDC</p>
+          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+            Telegraph USDC · pays your asks
+          </p>
         </div>
         <div>
           <p className="text-[18px] font-medium tabular leading-none text-ink-soft">
             {ethBalance === null ? "…" : ethBalance}
           </p>
-          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">ETH</p>
+          <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">ETH · gas</p>
         </div>
       </div>
       <p className="mt-2 text-[11px] text-ink-faint">
         Sepolia · auto-syncs every 15s · updated {syncedLabel}
+        {syncStalled ? " · RPC flaky — retrying" : ""}
         {onMint ? " · the test mint is free, no gas needed" : ""}
       </p>
 
@@ -174,11 +189,12 @@ function WalletCard({
           <button
             type="button"
             onClick={onMint}
-            disabled={minting}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[12px] text-teal transition-colors hover:bg-teal/15 disabled:opacity-50"
+            disabled={minting || coolLeft > 0}
+            title={coolLeft > 0 ? "The faucet tops up once a minute" : "Mints 10 Telegraph USDC (the token your asks spend) and adds 10.00 of in-app spend credit"}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[12px] text-teal transition-colors hover:bg-teal/15 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Coins size={13} />
-            {minting ? "Minting…" : "Mint 10 escrow-rail test USDC"}
+            {minting ? "Minting…" : coolLeft > 0 ? `Minted ✓ · faucet ready in ${coolLeft}s` : "Mint 10 Telegraph USDC"}
           </button>
         )}
         {onDeposit && (
@@ -202,6 +218,33 @@ function WalletCard({
           </button>
         )}
       </div>
+
+      {mintFeedback && (
+        <p
+          role="status"
+          aria-live="polite"
+          className={`mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed ${
+            mintFeedback.tone === "ok"
+              ? "border-teal/30 bg-teal/5 text-teal"
+              : mintFeedback.tone === "warn"
+                ? "border-amber/30 bg-amber/5 text-amber"
+                : "border-risk/30 bg-risk/5 text-risk"
+          }`}
+        >
+          {mintFeedback.tone === "err" ? <X size={13} className="shrink-0" aria-hidden /> : <Check size={13} className="shrink-0" aria-hidden />}
+          <span className="min-w-0">{mintFeedback.text}</span>
+          {mintFeedback.txHash && (
+            <a
+              href={`https://sepolia.etherscan.io/tx/${mintFeedback.txHash}`}
+              target="_blank"
+              rel="noreferrer"
+              className="tabular shrink-0 underline underline-offset-2"
+            >
+              tx {mintFeedback.txHash.slice(0, 10)}…
+            </a>
+          )}
+        </p>
+      )}
     </div>
   );
 }
@@ -226,7 +269,7 @@ function SecondaryWalletRow({
         <span className="tabular text-ink">{shortAddr(address)}</span>
       </p>
       <p className="tabular text-[11.5px] text-ink-faint">
-        {balances?.circle ?? "…"} USDC · {balances?.telegraph ?? "…"} Telegraph USDC · {balances?.eth ?? "…"} ETH
+        {balances?.telegraph ?? "…"} Telegraph USDC · {balances?.eth ?? "…"} ETH
       </p>
     </div>
   );
@@ -333,42 +376,42 @@ createPortal(
 );
 }
 
-interface PayerRail {
-  network: string;
-  chain: string;
-  name: string;
-  role: string;
-  balance: { whole: string; atomic: string } | null;
+interface CreditEntryView {
+  ts: number;
+  deltaUsdCents: number;
+  balanceAfterUsdCents: number;
+  label: string;
 }
 
 /**
- * The deployment payer wallet — the one whose funds every autonomous paid
- * run actually spends (Terminal, Minds, Deal Desk; the per-user cap only
- * meters against it). Fed by GET /api/wallet/balance, the same public
- * eth_call reads the verification step uses. A failed read stays "…", never
- * zero, so a flaky RPC never makes a funded wallet look empty. Presented as
- * spending context, not as a second wallet summary card.
+ * THE user's own spend wallet: the in-app credit balance paid runs settle
+ * against, with the history of what it actually paid for. This is the answer
+ * to "which wallet pays?" — yours, not the deployment's.
  */
-function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
-  const [rails, setRails] = useState<PayerRail[] | null>(null);
-  const [payer, setPayer] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+function CreditCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
+  const [balance, setBalance] = useState<number | null>(null);
+  const [entries, setEntries] = useState<CreditEntryView[]>([]);
+  const [failed, setFailed] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [lastSynced, setLastSynced] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     setSyncing(true);
     try {
-      const res = await fetch("/api/wallet/balance", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
-      const body = (await res.json().catch(() => ({}))) as { payer?: string; rails?: PayerRail[]; error?: string };
-      if (!res.ok) {
-        setNote(body.error ?? `The payer wallet could not be read (status ${res.status}).`);
+      const res = await fetch("/api/wallet/credits", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+      if (res.status === 401) {
+        setFailed(false);
+        setBalance(null);
+        setEntries([]);
         return;
       }
-      setPayer(body.payer ?? null);
-      setRails(body.rails ?? []);
-      setNote(null);
-      setLastSynced(Date.now());
+      if (!res.ok) {
+        setFailed(true);
+        return;
+      }
+      const body = (await res.json()) as { balanceUsdCents?: number; entries?: CreditEntryView[] };
+      setBalance(typeof body.balanceUsdCents === "number" ? body.balanceUsdCents : 0);
+      setEntries(Array.isArray(body.entries) ? body.entries.slice(0, 6) : []);
+      setFailed(false);
     } catch {
       /* transient — the next poll retries; the last good values stay */
     } finally {
@@ -378,7 +421,7 @@ function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
 
   useEffect(() => {
     void refresh();
-    const poll = setInterval(() => void refresh(), 20_000);
+    const poll = setInterval(() => void refresh(), 15_000);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {
@@ -387,53 +430,59 @@ function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
     };
   }, [refresh]);
 
-  const syncedAgo = lastSynced ? Math.max(0, Math.round((Date.now() - lastSynced) / 1000)) : null;
-  const syncedLabel =
-    syncedAgo === null ? "syncing…" : syncedAgo < 5 ? "just now" : syncedAgo < 90 ? `${syncedAgo}s ago` : `${Math.round(syncedAgo / 60)}m ago`;
+  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const when = (ts: number) =>
+    new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-amber/30 bg-panel p-6 shadow-sm">
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber/40 to-transparent" />
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">Payer wallet · funds every autonomous paid run</p>
-          <p className="mt-1 tabular text-[12.5px] text-ink-soft">{payer ? shortAddr(payer) : "…"}</p>
+    <div className="rounded-xl border border-teal/30 bg-panel px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="text-[10.5px] font-medium uppercase tracking-wider text-ink-faint">
+            Spend credit · the prepaid balance every ask is paid from
+          </p>
+          <p className="tabular text-[18px] font-semibold leading-none text-ink">
+            {sessionSignedIn ? (balance === null ? "…" : usd(balance)) : "—"}
+          </p>
+          {sessionSignedIn && failed && <span className="text-[11.5px] text-amber">ledger retrying…</span>}
         </div>
         <button
           type="button"
           onClick={() => void refresh()}
-          aria-label="Refresh payer balances"
-          title={`Auto-syncs every 20s · updated ${syncedLabel}`}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
+          aria-label="Refresh spend credit"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
         >
-          <RefreshCw size={13} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
+          <RefreshCw size={12} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
         </button>
       </div>
-
-      {note ? (
-        <p className="mt-4 text-[12.5px] leading-relaxed text-amber">{note}</p>
-      ) : (
-        <dl className="mt-5 grid gap-4 sm:grid-cols-2">
-          {(rails ?? []).map((rail) => (
-            <div key={rail.network} className="rounded-xl border border-edge bg-panel-2 px-4 py-3">
-              <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">
-                {rail.chain} · {rail.name}
-              </dt>
-              <dd className="tabular mt-1 text-[20px] font-semibold leading-none text-ink">
-                {rail.balance === null ? "…" : rail.balance.whole}
-              </dd>
-              <dd className="mt-1.5 text-[10.5px] leading-snug text-ink-faint">{rail.role}</dd>
-            </div>
-          ))}
-          {(rails ?? []).length === 0 && <dd className="text-[12px] text-ink-faint">Reading both payment rails…</dd>}
-        </dl>
-      )}
-
-      <p className="mt-4 text-[11px] leading-relaxed text-ink-faint">
-        Paid asks (Terminal, Minds, Deal Desk) settle from THIS wallet — your own wallet signs in and owns files, it is never
-        debited. Auto-syncs every 20s · updated {syncedLabel}.
-        {!sessionSignedIn && " The balances are live on-chain reads; sign in to relate them to your runs."}
+      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+        {sessionSignedIn
+          ? "Minting adds $10.00 here alongside 10 Telegraph USDC on-chain. Terminal, Minds and Deal Desk draws come from this balance — never from the deployment's wallet. Updates every 15s."
+          : "Sign in with your wallet to hold and spend your own credit."}
       </p>
+
+      {sessionSignedIn && !failed && entries.length > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer select-none text-[11.5px] font-medium text-ink-soft transition-colors hover:text-ink">
+            Credit ledger · last {entries.length}
+          </summary>
+          <ul className="mt-2 divide-y divide-edge/60 border-t border-edge/60">
+            {entries.map((e, i) => (
+              <li key={`${e.ts}:${i}`} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2">
+                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-soft" title={e.label}>
+                  {e.label}
+                </span>
+                <span className="text-[10.5px] text-ink-faint">{when(e.ts)}</span>
+                <span className={`tabular w-16 text-right text-[12px] ${e.deltaUsdCents >= 0 ? "text-teal" : "text-ink"}`}>
+                  {e.deltaUsdCents >= 0 ? "+" : "−"}
+                  {usd(Math.abs(e.deltaUsdCents))}
+                </span>
+                <span className="tabular w-16 text-right text-[10.5px] text-ink-faint">{usd(e.balanceAfterUsdCents)}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
@@ -446,33 +495,39 @@ export default function FundsPage() {
   const [creating, setCreating] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [minting, setMinting] = useState(false);
+  const [mintFeedback, setMintFeedback] = useState<MintFeedback | null>(null);
+  const [mintCooldownUntil, setMintCooldownUntil] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [balances, setBalances] = useState<Record<string, Balances>>({});
   const [showDeposit, setShowDeposit] = useState<string | null>(null);
   const [showWithdraw, setShowWithdraw] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSynced, setLastSynced] = useState<number | null>(null);
+  const [syncStalled, setSyncStalled] = useState(false);
 
   const embedded = wallets.find((w) => w.walletClientType === "privy");
   const external = wallets.find((w) => w.walletClientType !== "privy");
 
   // One sync function for every trigger (mount, wallet change, poll, focus,
   // mint/withdraw callbacks). A failed read stays "…" until the next cycle —
-  // never shown as zero, which is what made funded wallets look empty.
+  // never shown as zero, which is what made funded wallets look empty. When a
+  // whole cycle comes back unreadable the card says so ("RPC flaky") instead
+  // of silently sitting on stale numbers.
   const refreshBalances = useCallback(async () => {
     const addrs = [embedded?.address, external?.address].filter(Boolean) as string[];
     if (addrs.length === 0) return;
     setSyncing(true);
     try {
+      let allNull = true;
       for (const addr of addrs) {
-        const [eth, circle, telegraph] = await Promise.all([
+        const [eth, telegraph] = await Promise.all([
           fetchEthBalance(addr),
-          fetchTokenBalance(addr, CIRCLE_USDC),
           fetchTokenBalance(addr, TELEGRAPH_USDC),
         ]);
-        setBalances((prev) => ({ ...prev, [addr]: { eth, circle, telegraph } }));
+        if (eth !== null || telegraph !== null) allNull = false;
+        setBalances((prev) => ({ ...prev, [addr]: { eth, telegraph } }));
       }
+      setSyncStalled(allNull);
       setLastSynced(Date.now());
     } finally {
       setSyncing(false);
@@ -505,7 +560,6 @@ export default function FundsPage() {
   const handleMint = async () => {
     if (!embedded) return;
     setError(null);
-    setNotice(null);
     setMinting(true);
     try {
       // The faucet mints from the server key, so the new wallet needs no ETH.
@@ -514,18 +568,50 @@ export default function FundsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: embedded.address }),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as {
+        error?: string;
+        hash?: string;
+        amount?: string;
+        creditsGrantedUsdCents?: number;
+        creditBalanceUsdCents?: number;
+      };
+      if (res.status === 429) {
+        setMintFeedback({ tone: "warn", text: data.error ?? "The faucet is cooling down — try again in a minute." });
+        return;
+      }
       if (res.status === 409) {
-        setNotice(data.error ?? "This wallet already holds test USDC.");
+        // Already funded on-chain: say exactly what DID happen (credit top-up),
+        // so the user never has to guess what their tap just did.
+        setMintFeedback({
+          tone: "warn",
+          text: `No new mint — this wallet already holds Telegraph USDC. In-app spend credit topped up +${
+            data.creditsGrantedUsdCents !== undefined ? (data.creditsGrantedUsdCents / 100).toFixed(2) : "10.00"
+          }${data.creditBalanceUsdCents !== undefined ? ` (balance $${(data.creditBalanceUsdCents / 100).toFixed(2)})` : ""}.`,
+        });
         void refreshBalances();
         return;
       }
       if (!res.ok) throw new Error(data.error ?? "Mint failed");
-      setNotice("10 test USDC minted — balances update in a moment.");
+      // The confirmation appears where the tap happened, with the receipt.
+      setMintFeedback({
+        tone: "ok",
+        text: `Minted ${data.amount ?? "10"} Telegraph USDC — the token your asks spend${
+          data.creditsGrantedUsdCents !== undefined
+            ? ` · +$${(data.creditsGrantedUsdCents / 100).toFixed(2)} in-app spend credit`
+            : ""
+        }${
+          data.creditBalanceUsdCents !== undefined ? ` (credit balance $${(data.creditBalanceUsdCents / 100).toFixed(2)})` : ""
+        } — balances refresh in a few seconds.`,
+        txHash: data.hash ?? null,
+      });
+      // Mirror the server's 60s faucet cooldown so an accidental second tap
+      // can't even reach the API.
+      setMintCooldownUntil(Date.now() + 60_000);
+      void refreshBalances();
       setTimeout(refreshBalances, 3000);
       setTimeout(refreshBalances, 8000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Mint failed");
+      setMintFeedback({ tone: "err", text: e instanceof Error ? e.message : "Mint failed" });
     } finally {
       setMinting(false);
     }
@@ -612,22 +698,20 @@ export default function FundsPage() {
         {primary ? (
           <>
             <WalletCard
-              label={
-                primary === embedded
-                  ? "In-app wallet · your identity, never debited by paid runs"
-                  : "Connected wallet · your identity, never debited by paid runs"
-              }
+              label={primary === embedded ? "In-app wallet" : "Connected wallet"}
               address={primary.address}
               ethBalance={balances[primary.address]?.eth ?? null}
-              circleUsdc={balances[primary.address]?.circle ?? null}
               telegraphUsdc={balances[primary.address]?.telegraph ?? null}
               syncing={syncing}
               lastSynced={lastSynced}
+              syncStalled={syncStalled}
               onDeposit={primary === embedded ? () => setShowDeposit(primary.address) : undefined}
               onWithdraw={primary === embedded ? () => setShowWithdraw(primary.address) : undefined}
               onMint={primary === embedded ? handleMint : undefined}
               minting={minting}
               onRefresh={() => void refreshBalances()}
+              mintFeedback={mintFeedback}
+              mintCooldownUntil={mintCooldownUntil}
             />
             {secondary && (
               <SecondaryWalletRow
@@ -669,25 +753,22 @@ export default function FundsPage() {
         )}
       </section>
 
-      {/* Spending: the payer wallet that funds autonomous runs + the enforced
-          per-user allowance. Both keep their existing APIs. */}
-      <section aria-label="Spending controls" className="mt-8 space-y-4">
+      {/* Action feedback renders HERE — top of the page, next to the wallet
+          the action was taken on. Never at the bottom of a long scroll. */}
+      {error && (
+        <p role="alert" className="mt-3 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">
+          {error}
+        </p>
+      )}
+
+      {/* Spending: what pays (your credit) and the enforced allowance. The
+          deployment's own wallet and the transaction history are NOT the
+          user's business here — they were noise this page kept repeating. */}
+      <section aria-label="Spending controls" className="mt-8 space-y-3">
         <h2 className="x-label !mt-0">SPENDING</h2>
-        <PayerCard sessionSignedIn={!!primary} />
+        <CreditCard sessionSignedIn={!!primary} />
         <SpendAllowance />
       </section>
-
-      {/* Transactions and receipts: one component, both real ledgers. */}
-      <section aria-label="Wallet activity" className="mt-8">
-        <WalletActivity />
-      </section>
-
-      {error && (
-        <p className="mt-6 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">{error}</p>
-      )}
-      {notice && (
-        <p className="mt-4 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-[12.5px] text-teal">{notice}</p>
-      )}
 
       {showDeposit &&
         createPortal(

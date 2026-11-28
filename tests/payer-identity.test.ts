@@ -61,12 +61,27 @@ describe("payer wallet identity", () => {
     expect(other.kind).toBe("user");
   });
 
-  it("paidRunGate lets the payer wallet through as operator, strangers face the cap", async () => {
+  it("paidRunGate lets the payer wallet through as operator; a funded stranger passes, an empty one is refused", async () => {
     const payerGate = await paidRunGate(walletRequest(payerAccount.address), "test runs");
     expect(payerGate.kind).toBe("allow");
     if (payerGate.kind === "allow") expect(payerGate.operator).toBe(true);
-    const otherGate = await paidRunGate(walletRequest(otherAccount.address), "test runs");
-    expect(otherGate.kind).toBe("allow");
-    if (otherGate.kind === "allow") expect(otherGate.operator).toBe(false);
+
+    // Paid runs now settle from the user's OWN in-app spend credit: a wallet
+    // with credit passes (as a capped user), a wallet without any is refused
+    // with the funding instruction.
+    const { grantCredits } = await import("@/lib/wallet/credits");
+    await grantCredits(otherAccount.address, 100, "test seed");
+    const fundedGate = await paidRunGate(walletRequest(otherAccount.address), "test runs");
+    expect(fundedGate.kind).toBe("allow");
+    if (fundedGate.kind === "allow") expect(fundedGate.operator).toBe(false);
+
+    const emptyKey = generatePrivateKey();
+    const emptyAccount = privateKeyToAccount(emptyKey);
+    const emptyGate = await paidRunGate(walletRequest(emptyAccount.address), "test runs");
+    expect(emptyGate.kind).toBe("deny");
+    if (emptyGate.kind === "deny") {
+      expect(emptyGate.status).toBe(403);
+      expect(emptyGate.error).toMatch(/in-app spend credit/i);
+    }
   });
 });

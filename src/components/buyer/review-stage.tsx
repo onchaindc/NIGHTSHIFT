@@ -63,7 +63,7 @@ export function ReviewStage({
       <header className="rounded-xl border border-edge bg-panel px-4 py-4 sm:px-5">
         <p className="x-label !mt-0">Review · {offering.name}</p>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-soft">
-          Check the request, the price and the wallet before anything signs. Nothing moves without your explicit confirmations.
+          Review, then sign — nothing moves without your explicit confirmation.
         </p>
       </header>
 
@@ -154,17 +154,17 @@ export function ReviewStage({
         <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">What your wallet will be asked to confirm</p>
         <ol className="mt-2 space-y-2">
           <Confirmation index={1} now title="Create the job">
-            One transaction on the ACP contract (Base) that opens your job and carries the structured requirement. Gas only — no USDC moves.
+            Gas only — opens the job. No USDC moves.
           </Confirmation>
           <Confirmation index={2} when="payment" title="Approve the USDC allowance">
-            Grants the escrow permission to take {price} USDC from your wallet. An approval, not a transfer — it moves nothing by itself. Skipped when the permission already covers the price.
+            Lets the escrow take {price} USDC — an approval, not a transfer; moves nothing by itself.
           </Confirmation>
           <Confirmation index={3} when="payment" title="Fund the escrow">
-            {price} USDC moves from your wallet into the ACP escrow for THIS job. This is the payment — the provider then runs the investigation.
+            {price} USDC into the escrow for THIS job — this is the payment.
           </Confirmation>
         </ol>
         <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-faint">
-          Later, when the report is delivered, releasing the escrow is YOUR on-chain action — the money only settles when you accept the deliverable.
+          Releasing the escrow is your action — money settles only when you accept the deliverable.
         </p>
       </div>
 
@@ -187,7 +187,7 @@ export function ReviewStage({
       </div>
       {(blocked || !networkOk || !walletAddress) && busy === null && (
         <p className="text-[11.5px] text-ink-faint">
-          Job creation stays disabled until the wallet is on Base and the blocked checks clear. {!networkOk ? "Switch the network above." : !walletAddress ? "Connect the buyer wallet." : "Resolve the blocked preflight items."}
+          Create stays disabled until the wallet is on Base and the blocked checks clear. {!networkOk ? "Switch the network above." : !walletAddress ? "Connect the buyer wallet." : "Resolve the blocked preflight items."}
         </p>
       )}
     </section>

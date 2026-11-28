@@ -38,6 +38,7 @@ import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import RunFlow from "@/components/minds/run-flow";
 import type { TaskRecord } from "@/lib/engine/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
+import { SampleFill } from "@/components/sample-fill";
 import {
   deskHrefWithTask,
   deskSessionMode,
@@ -134,6 +135,21 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
     (session === "user" && !!sessionAddress && !!snap?.owner && snap.owner.toLowerCase() === sessionAddress);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+  // The approval gate IS the payment confirmation. Planning can take tens of
+  // seconds and the reader may have scrolled away meanwhile — when the task
+  // lands at the gate (or the report lands), bring the panel back to them.
+  // The first observed state never scrolls: returning to a finished task via
+  // its URL must not yank the reader past the form on page load.
+  const lastSeenState = useRef<string | null>(null);
+  useEffect(() => {
+    const st = snap?.state ?? null;
+    if (!st || lastSeenState.current === st) return;
+    const prev = lastSeenState.current;
+    lastSeenState.current = st;
+    if (prev === null) return;
+    if (st === "awaiting_approval") resultRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    else if (st === "completed") resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [snap?.state]);
   // Approval resumes in the background (after()), so the first poll or two can
   // still show awaiting_approval. Without this grace the client would stop
   // polling and show the gate again immediately after the user approved it.
@@ -249,6 +265,34 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
   // what let one asset inherit another's issuer fields after a removal.
   const updateRow = (id: string, patch: Partial<Omit<AssetRow, "id">>) => {
     setRows((rs) => updateAssetRow(rs, id, patch));
+  };
+
+  /** The worked example the wand fills: two declared assets, market-cap weighting. */
+  const fillSamples = () => {
+    setIndexName("Diversified large-cap basket");
+    setScheme("market_cap");
+    setCustomWeights("");
+    setNotes("Worked example: verify the declared supply and price of each constituent before the reconstitution is computed.");
+    setRows([
+      createAssetRow({
+        symbol: "USDC",
+        company: "Circle Internet Financial",
+        jurisdiction: "United States",
+        chain: "ethereum",
+        declaredSupply: "1000000000",
+        declaredPrice: "1.00",
+        declaredVolume: "4200000",
+      }),
+      createAssetRow({
+        symbol: "WBTC",
+        company: "Wrapped Bitcoin",
+        jurisdiction: "United States",
+        chain: "ethereum",
+        declaredSupply: "190000",
+        declaredPrice: "64000",
+        declaredVolume: "12000",
+      }),
+    ]);
   };
 
   const buildDefinition = useCallback(() => {
@@ -407,10 +451,8 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       <p className="x-tag mt-4">MINDS · INDEX RECONSTITUTION DESK</p>
       <h1 className="x-display-1 mt-3 text-ink">Index Reconstitution Desk</h1>
       <p className="mt-4 max-w-[62ch] text-[14px] leading-relaxed text-ink-soft">
-        Declare an index universe and its methodology; the desk investigates every asset across six
-        verified dimensions — issuer registry, price, total supply, pool liquidity, holders and
-        regulatory filings — and returns a deterministic constituent and weighting proposal with
-        per-asset evidence, declared-vs-verified provenance and the missing-dimension ledger.
+        Declare a universe and a weighting rule; the desk probes six verified dimensions per asset and
+        returns a reproducible constituent proposal with evidence and stated gaps.
       </p>
 
       {/* how it works */}
@@ -441,7 +483,10 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       {/* 1 · define */}
       <section className="mt-8 overflow-hidden rounded-xl border border-edge bg-panel">
         <div className="border-b border-edge px-4 py-3 sm:px-5">
-          <p className="x-label">1 · Define the index</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="x-label">1 · Define the index</p>
+            <SampleFill onFill={fillSamples} />
+          </div>
         </div>
         <div className="space-y-5 px-4 py-4 sm:px-5">
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
@@ -664,8 +709,7 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
             </p>
           )}
           <p className="text-[11.5px] leading-relaxed text-ink-faint">
-            The pre-flight probes are free. Intel mode plans one paid ask per asset per verified dimension and
-            stops at the approval gate; each ask runs once, drift-checked and budget-guarded.
+            Probes are free. Paid asks wait at the approval gate — nothing runs until you approve.
           </p>
         </div>
       </section>

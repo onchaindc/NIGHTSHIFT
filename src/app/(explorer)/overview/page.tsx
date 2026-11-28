@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
-import { ArrowRight, CircleAlert } from "lucide-react";
+import { ArrowRight, BellRing, CheckCircle2, CircleAlert, FileText, History, Loader, Plus, ShoppingBag, Terminal } from "lucide-react";
 
 import { callerIdentity } from "@/lib/api/auth";
 import { investigationsForCaller, tasksForCaller } from "@/lib/api/public";
@@ -37,8 +37,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * The Overview destination — NIGHTSHIFT's operational command centre, in the
- * order an operator reads a room: the snapshot numbers, the work in motion,
- * the outcomes that just landed, the network that does the work.
+ * order a user acts on a room: the snapshot numbers, the work in motion, the
+ * quick actions, the outcomes that just landed, the network that does the
+ * work. Actions before outcomes on every screen size.
  *
  * DATA AVAILABILITY IS NEVER FAKED. Each store read is bounded and its
  * outcome is carried separately from its content: a FAILED read (deadline,
@@ -82,22 +83,50 @@ function FailureNote({ what }: { what: string }) {
   );
 }
 
+const SNAPSHOT_ICONS: Record<string, typeof Loader> = {
+  active: Loader,
+  awaiting: BellRing,
+  buyer: ShoppingBag,
+  completed: CheckCircle2,
+};
+
 function SnapshotStrip({ stats, failedNames }: { stats: SnapshotStat[]; failedNames: Set<string> }) {
   return (
     <section aria-label="Operational snapshot" className="mt-4">
       <h2 className="x-label">OPERATIONAL SNAPSHOT</h2>
-      <div className="mt-2 grid grid-cols-2 overflow-hidden rounded-xl border border-edge bg-panel sm:grid-cols-4 sm:divide-x sm:divide-edge">
-        {stats.map((s) => (
-          <Link key={s.key} href={s.href} className="group px-4 py-3 transition-colors hover:bg-panel-3 max-sm:odd:border-r max-sm:odd:border-edge max-sm:[&:nth-child(-n+2)]:border-b max-sm:[&:nth-child(-n+2)]:border-edge">
-            <p className={`tabular text-[22px] font-semibold leading-none ${s.count === null ? "text-ink-faint" : "text-ink"}`}>
-              {s.count === null ? "n/a" : s.count}
-            </p>
-            <p className="mt-1.5 text-[11.5px] font-medium text-ink-soft">{s.label}</p>
-            <p className={`mt-0.5 text-[10px] leading-tight ${s.why === "failed" ? "text-risk" : "text-ink-faint"}`}>
-              {s.why === "failed" ? "store unreadable" : s.why === "wallet-scoped" ? "wallet-scoped source" : s.key === "buyer" ? "open jobs" : "records"}
-            </p>
-          </Link>
-        ))}
+      <div className="relative mt-2 overflow-hidden rounded-2xl border border-edge bg-panel shadow-sm">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal/40 to-transparent" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 sm:divide-x sm:divide-edge">
+          {stats.map((s) => {
+            const Icon = SNAPSHOT_ICONS[s.key] ?? Loader;
+            const hot = s.count !== null && s.count > 0;
+            return (
+              <Link
+                key={s.key}
+                href={s.href}
+                className="group px-4 py-3.5 transition-colors hover:bg-panel-3 max-sm:odd:border-r max-sm:odd:border-edge max-sm:[&:nth-child(-n+2)]:border-b max-sm:[&:nth-child(-n+2)]:border-edge"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className={`tabular text-[26px] font-semibold leading-none tracking-tight ${s.count === null ? "text-ink-faint" : "text-ink"}`}>
+                    {s.count === null ? "n/a" : s.count}
+                  </p>
+                  <Icon
+                    size={15}
+                    strokeWidth={1.8}
+                    aria-hidden
+                    className={`mt-0.5 shrink-0 transition-colors ${
+                      hot ? (s.key === "awaiting" ? "text-amber" : "text-teal") : "text-ink-faint"
+                    }`}
+                  />
+                </div>
+                <p className="mt-2 text-[11.5px] font-medium text-ink-soft">{s.label}</p>
+                <p className={`mt-0.5 text-[10px] leading-tight ${s.why === "failed" ? "text-risk" : "text-ink-faint"}`}>
+                  {s.why === "failed" ? "store unreadable" : s.why === "wallet-scoped" ? "wallet-scoped source" : s.key === "buyer" ? "open jobs" : "records"}
+                </p>
+              </Link>
+            );
+          })}
+        </div>
       </div>
       {failedNames.size > 0 && (
         <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
@@ -196,25 +225,42 @@ function NetworkSection({ items }: { items: NetworkItem[] }) {
   );
 }
 
+function quickActionIcon(a: QuickAction): typeof ArrowRight {
+  if (a.href === "/desk/new") return Plus;
+  if (a.href.startsWith("/desk/")) return FileText;
+  if (a.href === "/history") return History;
+  if (a.href === "/console") return Terminal;
+  if (a.href.startsWith("/buyer")) return ShoppingBag;
+  return ArrowRight;
+}
+
 function QuickAccessSection({ actions }: { actions: QuickAction[] }) {
   if (actions.length === 0) return null;
   return (
     <section aria-label="Quick access" className="mt-6">
       <SectionHeader label="QUICK ACCESS" />
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        {actions.map((a) => (
-          <Link
-            key={a.href + a.label}
-            href={a.href}
-            className="group flex items-center justify-between gap-3 rounded-lg border border-edge bg-panel px-3 py-2 transition-colors hover:border-edge-strong"
-          >
-            <span className="min-w-0">
-              <span className="block truncate text-[12.5px] font-medium text-ink">{a.label}</span>
-              <span className="mt-px block truncate text-[10.5px] text-ink-faint">{a.detail}</span>
-            </span>
-            <ArrowRight size={13} aria-hidden className="shrink-0 text-ink-faint transition-transform group-hover:translate-x-0.5" />
-          </Link>
-        ))}
+        {actions.map((a) => {
+          const Icon = quickActionIcon(a);
+          return (
+            <Link
+              key={a.href + a.label}
+              href={a.href}
+              className="group flex items-center justify-between gap-3 rounded-xl border border-edge bg-panel px-3.5 py-2.5 transition-colors hover:border-teal/50 hover:bg-panel-3"
+            >
+              <span className="flex min-w-0 items-center gap-2.5">
+                <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-panel-2 text-ink-faint transition-colors group-hover:bg-teal/10 group-hover:text-teal">
+                  <Icon size={13} strokeWidth={1.8} aria-hidden />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[12.5px] font-medium text-ink">{a.label}</span>
+                  <span className="mt-px block truncate text-[10.5px] text-ink-faint">{a.detail}</span>
+                </span>
+              </span>
+              <ArrowRight size={13} aria-hidden className="shrink-0 text-ink-faint transition-transform group-hover:translate-x-0.5" />
+            </Link>
+          );
+        })}
       </div>
     </section>
   );
@@ -304,10 +350,13 @@ export default async function OverviewPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-7 sm:px-6 sm:py-9">
-      {/* Compact operational header: state line instead of a headline. */}
-      <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h1 className="x-label !text-[11px]">OVERVIEW</h1>
-        <p className={`text-[11.5px] ${failedNames.size > 0 ? "text-risk" : "text-ink-faint"}`} role={failedNames.size > 0 ? "status" : undefined}>
+      {/* Header with presence: a real title, the honest state line beside it. */}
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+        <div>
+          <p className="x-label !text-[11px]">OVERVIEW</p>
+          <h1 className="x-display-1 mt-2 text-balance text-ink">The operational picture.</h1>
+        </div>
+        <p className={`pb-1.5 text-[11.5px] ${failedNames.size > 0 ? "text-risk" : "text-ink-faint"}`} role={failedNames.size > 0 ? "status" : undefined}>
           {failedNames.size === 0
             ? signedIn
               ? "All record stores readable"
@@ -340,6 +389,10 @@ export default async function OverviewPage() {
           <WorkSection rows={[]} failed />
         ))}
 
+      {/* Actions before outcomes: the quick tiles sit directly under the work
+          list, so the two things a user acts on are the first two screens. */}
+      {quickAccess.ok ? <QuickAccessSection actions={quickAccess.value} /> : <FailureNote what="quick access" />}
+
       {signedIn &&
         (recent.ok && !recentSourcesFailed ? (
           <RecentSection rows={recent.value} failed={false} />
@@ -355,8 +408,6 @@ export default async function OverviewPage() {
       )}
 
       {network.ok ? <NetworkSection items={network.value} /> : <FailureNote what="network status" />}
-
-      {quickAccess.ok ? <QuickAccessSection actions={quickAccess.value} /> : <FailureNote what="quick access" />}
     </div>
   );
 }

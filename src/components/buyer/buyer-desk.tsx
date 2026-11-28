@@ -106,6 +106,18 @@ export function BuyerDesk() {
   const [pageError, setPageError] = useState<TxErrorView | null>(null);
   const [actionError, setActionError] = useState<TxErrorView | null>(null);
 
+  /** Stage panels replace each other in place. Without an anchor scroll the
+   *  new panel can open above the viewport (phone, long storefront above) and
+   *  the tap looks like it did nothing — the exact "why did nothing happen"
+   *  confusion on the payment confirmation. */
+  const flowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (stage !== "storefront") flowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [stage]);
+  useEffect(() => {
+    if (payStep) flowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [payStep]);
+
   const [walletChainId, setWalletChainId] = useState<number | null>(null);
   const [switching, setSwitching] = useState(false);
   const [gasWei, setGasWei] = useState<bigint | null>(null);
@@ -563,7 +575,7 @@ export function BuyerDesk() {
             <div className="rounded-xl border border-edge bg-panel px-4 py-4 sm:px-5">
               <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Your buyer wallet</p>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
-                You can browse the services now; configuring a request asks you to sign in — one signature proves the wallet is yours. It is not a transaction; no funds move, no gas.
+                Browse freely. Configuring a request asks you to sign in — one signature proving the wallet is yours, not a transaction.
               </p>
               <div className="mt-2.5">
                 <WalletSignIn onSession={setSession} />
@@ -572,6 +584,8 @@ export function BuyerDesk() {
           )}
         </>
       )}
+
+      <div ref={flowRef} className="scroll-mt-20" aria-hidden />
 
       {stage === "configure" && selected && (
         <>
@@ -697,7 +711,7 @@ export function BuyerDesk() {
           {rail && !networkOk && (
             <div className="mt-2.5 space-y-2 rounded-lg border border-amber/40 bg-amber-soft/40 px-3 py-2.5">
               <p className="text-[12px] leading-relaxed text-amber-deep">
-                Your wallet is on {walletChainId === null ? "an unknown network" : `chain ${walletChainId}`}. NIGHTSHIFT transactions only sign on Base (8453) — switching is requested explicitly and signing stays blocked until the wallet is on Base.
+                Your wallet is on {walletChainId === null ? "an unknown network" : `chain ${walletChainId}`}. Transactions only sign on Base (8453) — switch to continue.
               </p>
               <button type="button" onClick={() => void switchToBase()} disabled={switching} className="btn-signal !min-h-8 !text-[12px]">
                 {switching ? <LoaderCircle size={12} className="animate-spin" aria-hidden /> : <ShieldCheck size={12} aria-hidden />}
@@ -708,10 +722,12 @@ export function BuyerDesk() {
         </div>
       )}
 
-      {/* Honesty footer */}
-      <section className="rounded-xl border border-edge bg-panel-2 px-4 py-4 sm:px-5">
-        <p className="text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">How the money moves</p>
-        <ul className="mt-1.5 space-y-1 text-[11.5px] leading-relaxed text-ink-soft">
+      {/* Honesty footer — kept, collapsed: it is reference, not action copy. */}
+      <details className="rounded-xl border border-edge bg-panel-2 px-4 py-3 sm:px-5">
+        <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-soft transition-colors hover:text-ink">
+          How the money moves <span className="text-[10.5px] font-normal text-ink-faint">· the four rules</span>
+        </summary>
+        <ul className="mt-2 space-y-1 text-[11.5px] leading-relaxed text-ink-soft">
           <li className="flex gap-1.5">
             <Check size={12} aria-hidden className="mt-0.5 shrink-0 text-teal" /> Your wallet signs every payment; NIGHTSHIFT never touches your funds and its
             signer stays on its own server.
@@ -729,7 +745,7 @@ export function BuyerDesk() {
             approval gate (each service&apos;s execution policy says exactly what that means); a failed run is messaged to the job room, never silently dropped.
           </li>
         </ul>
-      </section>
+      </details>
         </>
       )}
     </div>
