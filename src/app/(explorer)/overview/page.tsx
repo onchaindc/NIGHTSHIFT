@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
-import { ArrowRight, BellRing, CheckCircle2, CircleAlert, FileText, History, Loader, Plus, ShoppingBag, Terminal } from "lucide-react";
+import { ArrowRight, BellRing, CheckCircle2, CircleAlert, Coins, FileText, History, Loader, Plus, ShoppingBag, Terminal } from "lucide-react";
 
 import { callerIdentity } from "@/lib/api/auth";
 import { investigationsForCaller, tasksForCaller } from "@/lib/api/public";
@@ -11,18 +11,23 @@ import { listInvestigations } from "@/lib/assurance/store";
 import { listTasks } from "@/lib/engine/store";
 import { buildBuyerJobView, listBuyerJobs } from "@/lib/acp/buyer";
 import { listCommerceJobs } from "@/lib/commerce/store";
+import { money } from "@/lib/ui/format";
 import {
+  buildAwaitingBreakdown,
   buildNetworkStatus,
   buildQuickAccess,
   buildRecentActivity,
   buildSnapshot,
+  buildSpendSummary,
   buildWorkInProgress,
   runSection,
   runSectionAsync,
   type ActivityRow,
+  type AwaitingBreakdown,
   type NetworkItem,
   type QuickAction,
   type SnapshotStat,
+  type SpendSummary,
   type WorkRow,
 } from "@/lib/overview/sections";
 import { WalletSignIn } from "@/components/wallet-sign-in";
@@ -137,10 +142,30 @@ function SnapshotStrip({ stats, failedNames }: { stats: SnapshotStat[]; failedNa
   );
 }
 
-function WorkSection({ rows, failed }: { rows: WorkRow[]; failed: boolean }) {
+function WorkSection({
+  rows,
+  failed,
+  breakdown,
+}: {
+  rows: WorkRow[];
+  failed: boolean;
+  breakdown: AwaitingBreakdown | null;
+}) {
+  // The stat's "Awaiting you" spelled out: a number that says 9 must be
+  // findable in the list beneath it, or the page is lying twice.
+  const parts: string[] = [];
+  if (breakdown) {
+    if (breakdown.runs > 0) parts.push(`${breakdown.runs} run${breakdown.runs === 1 ? "" : "s"} on the approval gate`);
+    if (breakdown.decisions > 0)
+      parts.push(`${breakdown.decisions} file decision${breakdown.decisions === 1 ? "" : "s"} to review`);
+    if (breakdown.buyer > 0) parts.push(`${breakdown.buyer} buyer action${breakdown.buyer === 1 ? "" : "s"}`);
+  }
   return (
     <section aria-label="Work in progress" id="work" className="mt-6 scroll-mt-16">
       <SectionHeader label="WORK IN PROGRESS" count={failed ? undefined : rows.length} />
+      {!failed && parts.length > 0 && (
+        <p className="mt-1.5 text-[11.5px] leading-snug text-ink-soft">Awaiting you: {parts.join(" · ")}.</p>
+      )}
       {failed ? (
         <FailureNote what="work-in-progress sources" />
       ) : rows.length === 0 ? (
@@ -199,6 +224,36 @@ function RecentSection({ rows, failed }: { rows: ActivityRow[]; failed: boolean 
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+function SpendCard({ summary, unreadable }: { summary: SpendSummary | null; unreadable: boolean }) {
+  return (
+    <section aria-label="Recorded spend" className="mt-6">
+      <SectionHeader label="RECORDED SPEND" />
+      <div className="mt-2 rounded-xl border border-edge bg-panel px-4 py-3.5">
+        {unreadable || !summary ? (
+          <p className="text-[12px] leading-relaxed text-ink-faint">
+            The run store could not be read just now — spend is shown as unavailable, not as zero.
+          </p>
+        ) : (
+          <>
+            <p className="tabular flex items-center gap-2 text-[24px] font-semibold leading-none tracking-tight text-ink">
+              <Coins size={15} strokeWidth={1.8} aria-hidden className="text-ink-faint" />
+              {money(summary.spentUsdCents)}
+            </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+              Across {summary.runs} run{summary.runs === 1 ? "" : "s"} that recorded spend, as billed by the engine —
+              no estimate. The full ledger lives in{" "}
+              <Link href="/activity" className="font-medium text-ink-soft underline underline-offset-2 hover:no-underline">
+                activity
+              </Link>
+              .
+            </p>
+          </>
+        )}
+      </div>
     </section>
   );
 }
@@ -332,6 +387,10 @@ export default async function OverviewPage() {
   const recent = runSection(() => buildRecentActivity(input));
   const network = runSection(() => buildNetworkStatus());
   const quickAccess = runSection(() => buildQuickAccess({ signedIn, operator, desk }));
+  // The awaiting breakdown is only rendered beside the list it explains; a
+  // failed run store keeps both the stat and this line honest (never 0).
+  const breakdown = tasks !== null ? runSection(() => buildAwaitingBreakdown(input)) : null;
+  const spend = tasks !== null ? runSection(() => buildSpendSummary(input)) : null;
 
   const workSourcesFailed =
     desk === null || tasks === null || assurance === null || (input.buyerScoped && buyerViews === null);
@@ -349,7 +408,7 @@ export default async function OverviewPage() {
       ((buyerViews ?? []).length === 0 && (input.commerceJobs ?? []).length === 0));
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-7 sm:px-6 sm:py-9">
+    <div className="mx-auto max-w-6xl px-4 py-7 sm:px-6 sm:py-9">
       {/* Header with presence: a real title, the honest state line beside it. */}
       <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div>
@@ -382,32 +441,41 @@ export default async function OverviewPage() {
         </div>
       )}
 
-      {signedIn &&
-        (work.ok && !workSourcesFailed ? (
-          <WorkSection rows={work.value} failed={false} />
-        ) : (
-          <WorkSection rows={[]} failed />
-        ))}
+      {/* Two-sided on desktop: actions left (work, quick access), record and
+          context right (spend, outcomes, network). Single column on small
+          screens keeps the same order. */}
+      <div className="mt-2 grid gap-8 lg:grid-cols-[minmax(0,1fr)_312px] lg:gap-10">
+        <div className="min-w-0">
+          {signedIn &&
+            (work.ok && !workSourcesFailed ? (
+              <WorkSection rows={work.value} failed={false} breakdown={breakdown && breakdown.ok ? breakdown.value : null} />
+            ) : (
+              <WorkSection rows={[]} failed breakdown={null} />
+            ))}
 
-      {/* Actions before outcomes: the quick tiles sit directly under the work
-          list, so the two things a user acts on are the first two screens. */}
-      {quickAccess.ok ? <QuickAccessSection actions={quickAccess.value} /> : <FailureNote what="quick access" />}
+          {/* Actions before outcomes: the quick tiles sit directly under the work
+              list, so the two things a user acts on are the first two screens. */}
+          {quickAccess.ok ? <QuickAccessSection actions={quickAccess.value} /> : <FailureNote what="quick access" />}
 
-      {signedIn &&
-        (recent.ok && !recentSourcesFailed ? (
-          <RecentSection rows={recent.value} failed={false} />
-        ) : (
-          <RecentSection rows={[]} failed />
-        ))}
+          {signedIn && nothingAtAll && (
+            <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
+              No files or runs are on record for this wallet yet. When you open an investigation or run an ask, it shows
+              up here — and only what actually happened is ever shown.
+            </p>
+          )}
+        </div>
 
-      {signedIn && nothingAtAll && (
-        <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
-          No files or runs are on record for this wallet yet. When you open an investigation or run an ask, it shows
-          up here — and only what actually happened is ever shown.
-        </p>
-      )}
-
-      {network.ok ? <NetworkSection items={network.value} /> : <FailureNote what="network status" />}
+        <aside className="min-w-0 lg:sticky lg:top-20 lg:self-start">
+          {signedIn && <SpendCard summary={spend && spend.ok ? spend.value : null} unreadable={tasks === null} />}
+          {signedIn &&
+            (recent.ok && !recentSourcesFailed ? (
+              <RecentSection rows={recent.value} failed={false} />
+            ) : (
+              <RecentSection rows={[]} failed />
+            ))}
+          {network.ok ? <NetworkSection items={network.value} /> : <FailureNote what="network status" />}
+        </aside>
+      </div>
     </div>
   );
 }

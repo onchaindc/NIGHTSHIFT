@@ -95,6 +95,51 @@ export interface SnapshotStat {
   href: string;
 }
 
+export interface AwaitingBreakdown {
+  /** Engine runs sitting on the approval gate. */
+  runs: number;
+  /** Assurance files with an open HOLD/ESCALATE decision. */
+  decisions: number;
+  /** Buyer jobs whose phase needs a wallet action. */
+  buyer: number;
+  total: number;
+}
+
+/**
+ * What "Awaiting you" is made of. The snapshot stat and the work list both
+ * derive from this builder, so the number can never disagree with the list —
+ * the live Overview once claimed 9 items awaited while listing 2, because
+ * the list dropped awaiting runs that carried no goal text.
+ */
+export function buildAwaitingBreakdown(input: OverviewInput): AwaitingBreakdown {
+  const runs = (input.tasks ?? []).filter((t) => t.state === "awaiting_approval").length;
+  const decisions = (input.assurance ?? []).filter(
+    (a) => a.decision?.outcome === "HOLD" || a.decision?.outcome === "ESCALATE",
+  ).length;
+  const buyer = input.buyerScoped ? (input.buyerViews ?? []).filter((v) => v.action !== "none").length : 0;
+  return { runs, decisions, buyer, total: runs + decisions + buyer };
+}
+
+export interface SpendSummary {
+  /** Runs that recorded nonzero spend. */
+  runs: number;
+  spentUsdCents: number;
+}
+
+/** Recorded engine spend over the tasks the caller can see — real sums only. */
+export function buildSpendSummary(input: OverviewInput): SpendSummary {
+  let spentUsdCents = 0;
+  let runs = 0;
+  for (const t of input.tasks ?? []) {
+    const spent = t.spend?.spentUsdCents;
+    if (typeof spent === "number" && spent > 0) {
+      spentUsdCents += spent;
+      runs += 1;
+    }
+  }
+  return { runs, spentUsdCents };
+}
+
 const statReady = (sources: unknown[]): boolean => sources.every((s) => s !== null);
 
 export function buildSnapshot(input: OverviewInput): SnapshotStat[] {
@@ -112,17 +157,13 @@ export function buildSnapshot(input: OverviewInput): SnapshotStat[] {
       (input.buyerScoped ? (buyerJobs as BuyerJobView[]).filter((v) => BUYER_OPEN.has(v.phase)).length : 0)
     : null;
 
-  // Awaiting you: the approval gate, HOLD/ESCALATE decisions, buyer actions.
+  // Awaiting you: the approval gate, HOLD/ESCALATE decisions, buyer actions —
+  // one shared breakdown so the stat and the work list cannot drift apart.
   const awaitingSources: unknown[] = [input.tasks, input.assurance];
   if (input.buyerScoped) awaitingSources.push(buyerJobs);
   const awaitingReady = statReady(awaitingSources);
-  const awaiting = awaitingReady
-    ? (input.tasks as TaskRecord[]).filter((t) => t.state === "awaiting_approval").length +
-      (input.assurance as Investigation[]).filter(
-        (a) => a.decision?.outcome === "HOLD" || a.decision?.outcome === "ESCALATE",
-      ).length +
-      (input.buyerScoped ? (buyerJobs as BuyerJobView[]).filter((v) => v.action !== "none").length : 0)
-    : null;
+  const awaitingBreakdown = awaitingReady ? buildAwaitingBreakdown(input) : null;
+  const awaiting = awaitingBreakdown ? awaitingBreakdown.total : null;
 
   // Completed: everything that reached an outcome.
   const completedSources: unknown[] = [input.tasks, input.desk, input.assurance];
@@ -176,7 +217,12 @@ export function buildWorkInProgress(input: OverviewInput, now: number): WorkRow[
   const rows: WorkRow[] = [];
 
   for (const t of input.tasks ?? []) {
-    if (t.state === "awaiting_approval" && t.goal) {
+    if (t.state === "awaiting_approval") {
+      // Every run on the approval gate is listed, goal text or not: the
+      // snapshot counts it, so dropping it here would lie by omission (the
+      // live page claimed "9 awaiting" while the list showed only the two
+      // HOLD files). activityTitle falls back to the recorded intent when
+      // the goal is empty.
       rows.push({
         href: `/activity/${t.id}`,
         kindLabel: "Run",

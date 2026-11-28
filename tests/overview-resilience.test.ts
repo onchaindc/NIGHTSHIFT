@@ -33,10 +33,12 @@ import { audit, getInvestigation, saveInvestigation, summarize } from "@/lib/ass
 import { investigationsForCaller, publicTaskView, tasksForCaller } from "@/lib/api/public";
 import { readBounded, readOutcome } from "@/lib/api/bounded-read";
 import {
+  buildAwaitingBreakdown,
   buildNetworkStatus,
   buildQuickAccess,
   buildRecentActivity,
   buildSnapshot,
+  buildSpendSummary,
   buildWorkInProgress,
   runSection,
   runSectionAsync,
@@ -368,6 +370,39 @@ describe("section builders on production-shaped records", () => {
     // Sorted newest-first.
     const times = rows.map((r) => r.updatedTs);
     expect([...times].sort((a, b) => b - a)).toEqual(times);
+  });
+
+  it("the awaiting stat and the work list agree — a goal-less awaiting run is listed, not counted silently", () => {
+    // The live Overview once showed "9 awaiting you" while the list carried
+    // only two rows: the list dropped awaiting runs with an empty goal while
+    // the stat counted every one of them.
+    const input = populatedInput({
+      tasks: [legacyTask({ id: "ov-t-no-goal", state: "awaiting_approval", goal: "" })],
+      desk: [],
+      assurance: [],
+      buyerViews: [],
+    });
+    const rows = buildWorkInProgress(input, NOW);
+    const awaitingRows = rows.filter((r) => r.stateLabel === "Awaiting approval");
+    expect(awaitingRows).toHaveLength(1);
+    expect(awaitingRows[0].awaiting).toBe(true);
+    expect(awaitingRows[0].title.length).toBeGreaterThan(0);
+    const stats = buildSnapshot(input);
+    expect(stats.find((s) => s.key === "awaiting")!.count).toBe(1);
+    expect(buildAwaitingBreakdown(input).total).toBe(1);
+  });
+
+  it("spend summary sums only recorded nonzero spend across visible runs", () => {
+    const input = populatedInput({
+      tasks: [
+        legacyTask({ id: "ov-t-spend-1", state: "completed", spend: { limitUsdCents: 400, spentUsdCents: 300, entries: [] } }),
+        legacyTask({ id: "ov-t-spend-2", state: "completed", spend: { limitUsdCents: 400, spentUsdCents: 0, entries: [] } }),
+        legacyTask({ id: "ov-t-spend-3", state: "failed" }),
+      ],
+    });
+    const summary = buildSpendSummary(input);
+    expect(summary.runs).toBe(1);
+    expect(summary.spentUsdCents).toBe(300);
   });
 
   it("recent activity: decisions, answers, failures, commerce — honest labels, newest first", () => {
