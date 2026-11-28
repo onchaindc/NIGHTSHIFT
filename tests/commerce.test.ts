@@ -173,6 +173,9 @@ describe("marketplace — publish, match, offer, accept", () => {
       expect(accepted.value.workflow!.steps[0].kind).toBe("coordination");
       expect(accepted.value.workflow!.ownerWallet).toBe(A);
     }
+    const lateOffer = await offerOnRequirement({ requirementId: requirement.id, providerWallet: C, message: "I can also do this", priceUsdCents: 100, offeringRef: "nightshift/counterparty-due-diligence" });
+    expect(lateOffer.ok).toBe(false);
+    if (!lateOffer.ok) expect(lateOffer.status).toBe(409);
     const wrongProvider = await submitRequirementDelivery({ requirementId: requirement.id, providerWallet: C, note: "Completed screening." });
     expect(wrongProvider.ok).toBe(false);
     if (!wrongProvider.ok) expect(wrongProvider.status).toBe(403);
