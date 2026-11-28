@@ -126,6 +126,14 @@ export function collectEntityViews(assurances: Investigation[], desks: DeskInves
     const key = entityKeyForDesk(inv);
     if (!key) continue;
     const report = inv.report;
+    // Runtime data can hold a desk report whose assessment has not been
+    // produced yet (e.g. a file parked at awaiting_approval): the type
+    // promises assessment, but the store must not be trusted with an
+    // unguarded read. No assessment + confidence yet -> no signature yet.
+    const reportSignature =
+      report && report.assessment && report.assessment.verdict !== undefined && report.confidence !== undefined
+        ? `${report.assessment.verdict}|${report.confidence}`
+        : null;
     views.push({
       key,
       label: entityLabel(inv, "desk"),
@@ -133,7 +141,7 @@ export function collectEntityViews(assurances: Investigation[], desks: DeskInves
       investigationId: inv.id,
       reference: inv.reference ?? "",
       decision: null,
-      reportSignature: report ? `${report.assessment.verdict}|${report.confidence}` : null,
+      reportSignature,
       evidence: evidenceViews(inv, "desk"),
     });
   }

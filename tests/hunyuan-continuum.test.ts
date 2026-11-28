@@ -13,6 +13,7 @@ import {
 import { setHunyuanTransportForTests } from "@/lib/hunyuan/client";
 import { getInvestigation, saveInvestigation } from "@/lib/assurance/store";
 import { saveDeskInvestigation } from "@/lib/desk/store";
+import type { DeskInvestigation } from "@/lib/desk/types";
 import { POST as tickRoute, } from "@/app/api/hunyuan/continuum/tick/route";
 import { GET as ledgerRoute } from "@/app/api/hunyuan/continuum/route";
 import type { Investigation } from "@/lib/assurance/types";
@@ -215,6 +216,53 @@ describe("deterministic detection", () => {
     const result = await runContinuumTick({ now: NOW });
     expect(result.baselinesEstablished).toBeGreaterThanOrEqual(1);
     expect(result.scannedEntities).toBeGreaterThan(0);
+  });
+
+  it("does not crash when a desk file carries a report without an assessment yet (awaiting_approval shape)", async () => {
+    const subjectName = `Continuum Partial Report ${nextId()}`;
+    // Runtime shape seen in production: a desk file parked at
+    // awaiting_approval can hold a report object whose assessment (and
+    // confidence) have not been produced yet, even though the DeskReport
+    // type promises them. The tick must treat this as "no signature yet",
+    // not crash.
+    const partialReport = { generatedAt: new Date(NOW).toISOString() } as unknown as DeskInvestigation["report"];
+    await saveDeskInvestigation({
+      id: nextId(),
+      reference: "NS-CP-CONTTEST",
+      kind: "desk",
+      type: "counterparty_due_diligence",
+      createdAt: new Date(NOW).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+      status: "collecting",
+      dataMode: "live",
+      owner: null,
+      subject: { legalName: subjectName, jurisdiction: "UK" },
+      unsupported: [],
+      evidence: [
+        {
+          id: "ev-desk-p1",
+          provenance: "unverified",
+          class: "analysis",
+          capability: "counterparty-intelligence:registry",
+          label: "Registry",
+          title: "Registry probe",
+          detail: "free-mode analysis, no purchased signal",
+          facts: { status: "active" },
+          source: { kind: "telegraph", ref: "sig", label: "registry", observedAt: new Date(NOW - DAY).toISOString() },
+        },
+      ],
+      findings: [],
+      report: partialReport,
+      runs: [],
+      spendLimitUsdCents: 100,
+      operator: { createdBy: "test", tenant: "test" },
+      audit: [],
+    });
+    const result = await runContinuumTick({ now: NOW });
+    expect(result.scannedEntities).toBeGreaterThan(0);
+    // A second pass must be a clean dedup, not a crash or a phantom change.
+    const repeat = await runContinuumTick({ now: NOW + 60_000 });
+    expect(repeat.newEvents).toBe(0);
   });
 });
 
