@@ -685,20 +685,46 @@ export async function cancelWorkflow(id: unknown, ownerWallet: string): Promise<
 /* Reseller — packages of purchased services, priced above their parts */
 /* ------------------------------------------------------------------ */
 
-function parseComponents(text: string): { ok: true; components: PackageComponent[] } | { ok: false; error: string } {
+/**
+ * Components must resolve to real, currently listed Capacity services.
+ * The server supplies the label and price; callers cannot invent either.
+ * Input format: one capacity service id per line, prefixed with "capacity:".
+ */
+async function parseComponents(text: string): Promise<{ ok: true; components: PackageComponent[] } | { ok: false; error: string }> {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 12);
-  if (lines.length === 0) return { ok: false, error: "a package needs at least one component — one per line: Label | price in USD cents" };
+  if (lines.length === 0) return { ok: false, error: "a package needs at least one component — add capacity:<service-id> from the Capacity directory, one per line" };
+  const seen = new Set<string>();
   const components: PackageComponent[] = [];
   for (const [i, line] of lines.entries()) {
-    const [label, priceRaw] = line.split("|").map((p) => p.trim());
-    if (!label) return { ok: false, error: `component ${i + 1} needs a label before the "|" separator` };
-    const price = parseCents(priceRaw);
-    if (price === null) return { ok: false, error: `component ${i + 1}: "${priceRaw ?? ""}" is not a positive whole number of USD cents` };
-    components.push({ label: label.slice(0, 160), source: "purchase", ref: null, unitPriceUsdCents: price });
+    const match = /^capacity:([a-f0-9-]{36})$/i.exec(line);
+    if (!match) return { ok: false, error: `component ${i + 1} must reference a real Capacity listing as capacity:<service-id>; labels and prices are loaded from the listing` };
+    const id = match[1];
+    if (seen.has(id)) return { ok: false, error: `component ${i + 1} duplicates a service already in this package` };
+    seen.add(id);
+    const service = await getService(id);
+    if (!service || service.status !== "listed" || service.availability !== "available") {
+      return { ok: false, error: `component ${i + 1} does not reference a currently listed, available Capacity service` };
+    }
+    components.push({ label: service.name, source: "capacity", ref: service.id, unitPriceUsdCents: service.priceUsdCents });
   }
   return { ok: true, components };
 }
 
+/** Refresh source records before repricing so margin never relies on stale prices. */
+async function refreshPackageComponents(components: PackageComponent[]): Promise<{ ok: true; components: PackageComponent[] } | { ok: false; error: string }> {
+  const refreshed: PackageComponent[] = [];
+  for (const [i, component] of components.entries()) {
+    if (component.source !== "capacity" || !component.ref) {
+      return { ok: false, error: "this package contains legacy components without a verifiable Capacity source; create a new package from current listings before repricing" };
+    }
+    const service = await getService(component.ref);
+    if (!service || service.status !== "listed" || service.availability !== "available") {
+      return { ok: false, error: `component ${i + 1} is no longer a listed, available Capacity service; restore the listing before repricing` };
+    }
+    refreshed.push({ label: service.name, source: "capacity", ref: service.id, unitPriceUsdCents: service.priceUsdCents });
+  }
+  return { ok: true, components: refreshed };
+}
 export function packageMargin(components: PackageComponent[], packagePriceUsdCents: number): number {
   return packagePriceUsdCents - components.reduce((sum, c) => sum + c.unitPriceUsdCents, 0);
 }
@@ -710,7 +736,7 @@ export async function createPackage(input: { ownerWallet: string; name: unknown;
   if (!name) return { ok: false, error: "a package name is required", status: 400 };
   if (!summary) return { ok: false, error: "say what the package delivers — the summary is required", status: 400 };
   if (price === null) return { ok: false, error: "package price must be a positive whole number of USD cents", status: 400 };
-  const parsed = parseComponents(str(input.components, 4000));
+  const parsed = await parseComponents(str(input.components, 4000));
   if (!parsed.ok) return { ok: false, error: parsed.error, status: 400 };
   const margin = packageMargin(parsed.components, price);
   if (margin <= 0) {
@@ -754,8 +780,11 @@ export async function updatePackage(input: { id: unknown; ownerWallet: string; p
   if (input.packagePriceUsdCents !== undefined) {
     const price = parseCents(input.packagePriceUsdCents);
     if (price === null) return { ok: false, error: "package price must be a positive whole number of USD cents", status: 400 };
-    const margin = packageMargin(pkg.components, price);
-    if (margin <= 0) return { ok: false, error: "the price must stay above the components' standalone sum", status: 400 };
+    const refreshed = await refreshPackageComponents(pkg.components);
+    if (!refreshed.ok) return { ok: false, error: refreshed.error, status: 409 };
+    const margin = packageMargin(refreshed.components, price);
+    if (margin <= 0) return { ok: false, error: "the price must stay above the current standalone prices of its Capacity components", status: 400 };
+    pkg.components = refreshed.components;
     pkg.packagePriceUsdCents = price;
     pkg.marginUsdCents = margin;
   }
