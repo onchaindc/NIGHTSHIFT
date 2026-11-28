@@ -20,7 +20,7 @@ NIGHTSHIFT currently brings four investigation workflows together in the Deal De
 | Asset Intelligence | Investigate digital-asset, mining, and energy-related assets. |
 | Trade & Supplier Intelligence | Examine suppliers, trade records, documents, and logistics-related information. |
 
-The workspace also includes the network Explorer, Terminal, Minds integrations, activity records, developer information, and a Virtuals ACP provider surface.
+The workspace also includes the network Explorer, Terminal, Minds integrations, activity records, developer information, Tencent-powered enterprise intelligence workflows, Virtuals Agent Commerce capabilities, and native OpenClaw/Hermes access through Telegraph MCP.
 
 The product is designed around a simple distinction: discovering an answer is not the same as establishing that the answer is reliable. NIGHTSHIFT retains the source material and verification outcome so users can see what is known, what failed verification, what remains unconfirmed, and what is analysis.
 
@@ -30,7 +30,10 @@ The product is designed around a simple distinction: discovering an answer is no
 - **Terminal** — inspect a specialist service's live offer, approve the exact terms, execute an x402 request, and inspect its receipt and signal.
 - **Deal Desk** — open structured investigations, collect evidence, review discrepancies, and produce an assessment with explicit limitations and next actions.
 - **Minds** — expose investigation workflows to Minds through an API-connected tool pattern, with optional report delivery through the supported Builder API configuration.
+- **Enterprise Intelligence** — run structured Decision Assurance reviews and monitor entities and investigations for material evidence changes, contradictions, and stale information.
+- **Agent Commerce** — use the Intent Marketplace, Capacity Exchange, Agent Supply Chain, and Agent Reseller workflows in the Buyer Desk.
 - **ACP** — publish the Deal Desk workflows as Virtuals Agent Commerce Protocol services and track incoming jobs and deliverables.
+- **Telegraph MCP** — connect OpenClaw and Hermes agents to network discovery, investigations, intelligence requests, evidence retrieval, and task verification.
 - **Activity** — inspect task and investigation records according to the caller's access level.
 - **Developers** — inspect the integration surface and API guidance.
 
@@ -119,6 +122,48 @@ ACP settlement is tracked separately from Telegraph x402 payments. The two payme
 
 The code includes a mock transport for controlled simulation and a real adapter based on `@virtuals-protocol/acp-node-v2`. Real mode is gated by `ACP_ENABLED=true` and the provider wallet / signer configuration. A configured code path is not the same as a verified live connection: check the ACP status surface and deployment diagnostics before treating the provider as operational. Do not fund or run a paid ACP job until the real connection, wallet permissions, and spend controls have been verified.
 
+## Enterprise intelligence: Tencent Hunyuan
+
+NIGHTSHIFT includes two enterprise intelligence workflows:
+
+- **Decision Assurance** assembles an investigation's evidence ledger and relevant history into a structured review covering facts, inferences, unknowns, conflicts, missing evidence, risks, confidence, and recommended verification steps. Findings are checked against the recorded evidence: unsupported citations are rejected rather than presented as sourced claims. Reviews are persisted with the investigation and an audit entry.
+- **Continuous Intelligence** tracks evidence and investigation changes over time. Deterministic detection identifies new evidence, changed fields, strong-source contradictions, stale evidence, and report or decision changes. SHA-256 content fingerprints deduplicate repeated evidence, while events retain entity, materiality, evidence, and investigation references. When configured, Hunyuan can provide an assessment of detected events; deterministic event tracking remains distinct from model-generated assessment.
+
+The Hunyuan client is server-side and uses an OpenAI-compatible TokenHub endpoint. Configure `HUNYUAN_API_KEY` and, optionally, `HUNYUAN_MODEL` and `HUNYUAN_BASE_URL`. Keep credentials server-side.
+
+## Virtuals Agent Commerce
+
+The Buyer Desk includes four connected Agent Commerce workflows:
+
+- **Intent Marketplace** — publish a structured requirement, match it against provider capabilities and service offerings, review offers, and accept a provider.
+- **Agent Capacity Exchange** — publish and manage service capacity with capability keys, availability, pricing, SLA, and delivery terms.
+- **Agent Supply Chain** — compose ordered multi-agent steps into reusable or custom workflows. Deal Desk steps use the existing investigation and approval flow.
+- **Agent Reseller** — package services into higher-level offerings, with a positive-margin constraint on package pricing.
+
+These Buyer Desk workflows are distinct from the existing Virtuals ACP provider integration described below. Their internal-credit demonstration offers do not represent published ACP listings, on-chain escrow, or an on-chain payment. The ACP provider continues to expose the existing Deal Desk services through its separate job lifecycle.
+
+## OpenClaw / Hermes Telegraph MCP
+
+NIGHTSHIFT exposes a stateless Streamable HTTP MCP server at `/api/mcp`. The server reuses existing NIGHTSHIFT APIs and services rather than introducing a separate task, payment, or evidence store. It provides nine tools:
+
+1. `telegraph_list_intents`
+2. `telegraph_list_miners`
+3. `nightshift_list_minds`
+4. `nightshift_get_mind_coverage`
+5. `nightshift_create_free_investigation`
+6. `nightshift_request_intelligence`
+7. `nightshift_get_task`
+8. `nightshift_get_task_evidence`
+9. `nightshift_verify_task`
+
+OpenClaw and Hermes can use the included Agent Skill at `skills/nightshift-telegraph/SKILL.md`. Configure the MCP client with the NIGHTSHIFT endpoint and an operator bearer token through the client's secure environment/configuration. Do not place tokens in skill files, prompts, or logs. Paid intelligence requests remain approval-gated; the MCP surface does not provide an automatic payment-approval tool.
+
+## Independent task verification
+
+The task verifier independently evaluates task evidence rather than trusting a provider's `verification.verified` field. It checks signal hashes and node records, answer-to-signal correspondence, Mind facts, chain receipts, and ledger reconciliation. Contradictions can produce `failed`; missing, unresolved, or analysis-only evidence cannot be promoted to `verified` and may produce `unverified`. The report preserves gaps and the basis for its verdict.
+
+This task-level report complements the evidence provenance model above: evidence verification evaluates individual evidence items, while task verification evaluates whether the overall task outcome is supported by its records.
+
 ## Architecture
 
 NIGHTSHIFT is a Next.js application with a shared server-side task and investigation engine.
@@ -131,6 +176,8 @@ NIGHTSHIFT is a Next.js application with a shared server-side task and investiga
 | `src/lib/terminal` | x402 probe, approval, execution, and signal-verification flow. |
 | `src/lib/mind` | Mind objective parsing, deterministic plans, and report integration. |
 | `src/lib/acp` | ACP provider boundary, lifecycle handling, mock transport, and real SDK adapter. |
+| `src/lib/mcp` | Streamable HTTP MCP tools and independent task verification. |
+| `src/lib/hunyuan` | Server-side Hunyuan client, Decision Assurance, and Continuous Intelligence. |
 | `src/lib/storage` | Shared persistence interface and storage implementations. |
 
 The storage layer uses Postgres in deployed environments and a file-backed implementation for local development. The Postgres adapter supports pooled connections for serverless deployments. Database migrations are tracked by the application.
