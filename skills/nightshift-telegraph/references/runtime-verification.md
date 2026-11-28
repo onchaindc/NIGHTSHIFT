@@ -1,5 +1,78 @@
 # Runtime verification record — OpenClaw and Hermes sessions
 
+## Round 2 — post-push deployment attempt and same-commit build (2026-11-28, later)
+
+Branch `feat/openclaw-hermes-integration` was pushed through `7a80f28`
+(verification record commit) with `b89f20f` (deploy-trigger chore). Vercel
+built and served the fresh preview:
+
+- Deployment URL:
+  `https://nightshift-git-feat-openclaw-hermes-5fbec3-onchaindcs-projects.vercel.app`
+  (commit `7a80f28`, Vercel build status success via the GitHub commit status).
+
+**The fresh preview is gated by Vercel Authentication (team SSO).** Every
+external caller is refused before reaching the app:
+
+- `curl /api/status` → "Protected by Vercel Authentication";
+  `/api/mcp` → 302 redirect to `vercel.com/sso-api?...`.
+- OpenClaw `mcp probe` against the deployed URL → `authentication refused
+  (401)` from Vercel Authentication (not from the app).
+- Hermes `mcp test nightshift` against the deployed URL → connection failed:
+  the endpoint returned `text/html` (the SSO login redirect), not an MCP
+  response.
+- An anonymous in-app check cannot exist yet: the app itself is never reached.
+
+This is a deployment-platform gate, not an application defect: the same commit
+serves the full MCP endpoint when the wall is absent (below). Clearing it
+requires a team-side action on the Vercel dashboard (disable Deployment
+Protection for previews, or issue a protection-bypass secret) or a Vercel
+token with that team scope; both are outside this repository.
+
+**The complete checklist therefore ran against a production build of the exact
+pushed commit (`7a80f28`, `npm run build && NIGHTSHIFT_API_TOKEN=<secret>
+npm start`, file store) — the same code the deployment serves:**
+
+1. MCP: initialize handshake OK; `tools/list` returns exactly the nine tools.
+2. Live discovery: `telegraph_list_intents` = 136 intents;
+   `telegraph_list_miners` = 60 miners (truncated=true) — live node,
+   no credentials.
+3. Free investigation (real run): `state=completed`, `spentUsdCents=0`;
+   evidence retrievable (1 item, `counterparty_finding`); independent
+   `nightshift_verify_task` verdict `unverified`, 0 unresolved gaps (honest:
+   free evidence is analysis-only).
+4. Paid intelligence (operator bearer): `state=awaiting_approval`,
+   `spentUsdCents=0`, no payment signed, no paid step executed.
+5. Decision Assurance gates: anonymous `GET`/`POST`
+   `/api/hunyuan/decision-assurance` → **401** (both, with gate explanations).
+6. `GET /api/hunyuan/status`: `provider=tencent-hunyuan`,
+   `configured=false`, `missing=["HUNYUAN_API_KEY"]` — truthful; no simulated
+   inference.
+7. Continuous Intelligence: first continuum tick over a real desk file →
+   baseline established (0 events by design); after the file's free run
+   synced 21 evidence items, the next tick persisted **22 events**; the
+   following tick added **0** (content-fingerprint dedup). Ledger
+   (`GET /api/hunyuan/continuum`) shows events with ts, entity, kind,
+   materiality, fingerprint, investigationIds (scope/id/reference),
+   evidenceIds and `providerAssessment: null` (provider unconfigured —
+   declared, not hidden). Anonymous ledger read → 401. Status counters show
+   `events=22` with `lastEventAt`.
+
+**Real runtime sessions against that build (same commit):**
+
+- OpenClaw 2026.11.11: probe → 9 tools; agent turn executed
+  `telegraph_list_intents` + `telegraph_list_miners` live (payload exceeded
+  the model output budget; the agent reported the truncation honestly —
+  counts confirmed by the direct client above); free investigation
+  `completed`, $0, verdict `unverified`, 0 gaps; paid request
+  `awaiting_approval`, $0, "No payment was signed and no paid step executed".
+- Hermes Agent 0.23.4: `hermes mcp test nightshift` → Connected (1195 ms),
+  9 tools, Authorization masked; live counts 136 intents / 60 miners
+  (truncated from 2,203); free run `completed`, $0, `unverified`, 0 gaps
+  (reported the missing registry fields honestly); paid request
+  `awaiting_approval`, no payment signed, no paid step executed.
+
+## Round 1 — local production build (2026-11-28, earlier)
+
 Recorded 2026-11-28. The runtime tests ran against a PRODUCTION BUILD of this
 branch (`npm run build && NIGHTSHIFT_API_TOKEN=<local secret> npm start`,
 section 4 of `runtime-setup.md`) because the Vercel preview deployment of
@@ -77,7 +150,9 @@ actually returned — including the limitations.
   (audit-fix behaviour).
 - Live-intent payloads are large; in agent turns the result must be narrowed
   (count/title) to fit the model budget.
-- The Vercel preview for `4404d04` (where the earlier deployment
-  verification round passed) expired; these runtime tests used the local
-  production build. Re-run against a fresh preview before merging if that
-  deployment matters for the record.
+- The fresh preview for `7a80f28` is live and healthy but gated by Vercel
+  Authentication (team SSO): external agents receive 401/HTML before the app
+  (Round 2 records the exact refusals). Until deployment protection is
+  disabled or a bypass secret is issued, agent-facing verification must use a
+  build of the same commit — the deployed round against the public URL is the
+  one remaining step, blocked on a team-side Vercel action.
