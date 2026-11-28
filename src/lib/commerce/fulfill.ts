@@ -386,6 +386,19 @@ export async function updateService(input: { id: unknown; providerWallet: string
   if (service.providerWallet !== input.providerWallet.toLowerCase()) {
     return { ok: false, error: "only the provider can update this listing", status: 403 };
   }
+  const changesCommercialTerms = input.priceUsdCents !== undefined || input.availability !== undefined;
+  if (changesCommercialTerms) {
+    const dependent = (await listPackages()).filter(
+      (pkg) => pkg.status === "listed" && pkg.components.some((component) => component.source === "capacity" && component.ref === service.id),
+    );
+    if (dependent.length > 0) {
+      return {
+        ok: false,
+        error: "this service is included in a listed reseller package; retire or rebuild the dependent package before changing its price or availability",
+        status: 409,
+      };
+    }
+  }
   if (input.priceUsdCents !== undefined) {
     const price = parseCents(input.priceUsdCents);
     if (price === null) return { ok: false, error: "price must be a positive whole number of USD cents", status: 400 };
@@ -412,6 +425,12 @@ export async function retireService(id: unknown, providerWallet: string): Promis
   if (!service) return { ok: false, error: "no such service listing", status: 404 };
   if (service.providerWallet !== providerWallet.toLowerCase()) {
     return { ok: false, error: "only the provider can retire this listing", status: 403 };
+  }
+  const dependent = (await listPackages()).filter(
+    (pkg) => pkg.status === "listed" && pkg.components.some((component) => component.source === "capacity" && component.ref === service.id),
+  );
+  if (dependent.length > 0) {
+    return { ok: false, error: "this service is included in a listed reseller package; retire or rebuild the dependent package before retiring the service", status: 409 };
   }
   service.status = "retired";
   service.availability = "paused";
