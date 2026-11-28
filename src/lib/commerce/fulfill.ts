@@ -181,6 +181,8 @@ export async function createRequirement(ownerWallet: string, input: RequirementI
     matchedOfferingIds: [],
     offers: [],
     workflowId: null,
+    acceptedOfferId: null,
+    delivery: null,
     notes: [],
     createdAt: now,
     updatedAt: now,
@@ -266,8 +268,10 @@ export async function acceptOffer(input: {
   if (offer.status !== "pending") return { ok: false, error: "this offer is no longer pending", status: 400 };
 
   for (const o of requirement.offers) o.status = o.id === offer.id ? "accepted" : o.status === "pending" ? "declined" : o.status;
-  requirement.status = "matched";
-  note(requirement, `Offer accepted (${offer.priceUsdCents}¢) — coordination workflow opened.`);
+  requirement.status = "in_progress";
+  requirement.acceptedOfferId = offer.id;
+  requirement.delivery = null;
+  note(requirement, `Offer accepted (${offer.priceUsdCents}¢) — waiting for provider delivery.`);
 
   const now = NOW();
   const workflow: CommerceWorkflow = {
@@ -286,6 +290,7 @@ export async function acceptOffer(input: {
         subject: null,
         serviceId: offer.serviceId,
         offeringRef: offer.offeringRef,
+        requirementId: requirement.id,
         investigationId: null,
         taskId: null,
         status: "pending",
@@ -301,6 +306,99 @@ export async function acceptOffer(input: {
   requirement.workflowId = workflow.id;
   await saveRequirement(requirement);
   return { ok: true, value: { requirement, workflow } };
+}
+
+
+/** Provider submits a concrete delivery record for the accepted offer. */
+export async function submitRequirementDelivery(input: {
+  requirementId: unknown;
+  providerWallet: string;
+  note: unknown;
+  artifactUrl?: unknown;
+}): Promise<CommerceResult<MarketplaceRequirement>> {
+  const requirement = await getRequirement(str(input.requirementId, 80));
+  if (!requirement) return { ok: false, error: "no such requirement on the board", status: 404 };
+  const accepted = requirement.offers.find((offer) => offer.id === requirement.acceptedOfferId && offer.status === "accepted");
+  if (!accepted || accepted.providerWallet !== input.providerWallet.toLowerCase()) {
+    return { ok: false, error: "only the provider whose offer was accepted can submit delivery", status: 403 };
+  }
+  if (requirement.status === "closed" || requirement.status === "delivered") {
+    return { ok: false, error: "this requirement is already closed or delivered", status: 409 };
+  }
+  const noteText = str(input.note, 4000);
+  if (!noteText) return { ok: false, error: "a delivery note describing the completed work is required", status: 400 };
+  const rawUrl = str(input.artifactUrl, 1000);
+  let artifactUrl: string | null = null;
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("unsupported protocol");
+      artifactUrl = parsed.toString();
+    } catch {
+      return { ok: false, error: "delivery artifact must be a valid http(s) URL", status: 400 };
+    }
+  }
+  requirement.delivery = {
+    providerWallet: input.providerWallet.toLowerCase(),
+    note: noteText,
+    artifactUrl,
+    status: "submitted",
+    submittedAt: NOW(),
+    reviewedAt: null,
+    reviewerNote: null,
+  };
+  requirement.status = "in_progress";
+  note(requirement, "Provider submitted delivery for owner review.");
+  await saveRequirement(requirement);
+  return { ok: true, value: requirement };
+}
+
+/** The buyer accepts or rejects the provider's submitted delivery. */
+export async function reviewRequirementDelivery(input: {
+  requirementId: unknown;
+  ownerWallet: string;
+  decision: unknown;
+  note?: unknown;
+}): Promise<CommerceResult<MarketplaceRequirement>> {
+  const requirement = await getRequirement(str(input.requirementId, 80));
+  if (!requirement) return { ok: false, error: "no such requirement on the board", status: 404 };
+  if (requirement.ownerWallet !== input.ownerWallet.toLowerCase()) {
+    return { ok: false, error: "only the requirement owner can review delivery", status: 403 };
+  }
+  if (!requirement.delivery || requirement.delivery.status !== "submitted") {
+    return { ok: false, error: "there is no submitted delivery awaiting review", status: 409 };
+  }
+  const decision = str(input.decision, 20);
+  if (decision !== "accept" && decision !== "reject") {
+    return { ok: false, error: "decision must be accept or reject", status: 400 };
+  }
+  requirement.delivery.status = decision === "accept" ? "accepted" : "rejected";
+  requirement.delivery.reviewedAt = NOW();
+  requirement.delivery.reviewerNote = str(input.note, 2000) || null;
+  requirement.status = decision === "accept" ? "delivered" : "in_progress";
+  note(requirement, decision === "accept" ? "Buyer accepted provider delivery." : "Buyer rejected provider delivery; provider may resubmit.");
+  await saveRequirement(requirement);
+
+  if (requirement.workflowId) {
+    const workflow = await getWorkflow(requirement.workflowId);
+    if (workflow) {
+      const step = workflow.steps.find((candidate) => candidate.requirementId === requirement.id);
+      if (step) {
+        if (decision === "accept") {
+          step.status = "done";
+          step.completedAt = NOW();
+          step.result = `Buyer accepted delivery for ${requirement.reference}.`;
+          if (workflow.steps.every((candidate) => candidate.status === "done")) workflow.status = "completed";
+        } else {
+          step.status = "pending";
+          step.completedAt = null;
+          step.result = "Buyer rejected the submitted delivery; provider may resubmit.";
+        }
+        await saveWorkflow(workflow);
+      }
+    }
+  }
+  return { ok: true, value: requirement };
 }
 
 export async function closeRequirement(requirementId: unknown, ownerWallet: string): Promise<CommerceResult<MarketplaceRequirement>> {
@@ -612,9 +710,18 @@ export async function runWorkflowStep(input: { id: unknown; stepId: unknown; own
 
   if (step.kind === "coordination") {
     const ref = step.serviceId ?? step.offeringRef ?? "(no assignment)";
-    step.status = "done";
-    step.completedAt = NOW();
-    step.result = `Assignment recorded against ${ref}${step.offeringRef ? " (published offering)" : ""}. The provider delivery is tracked on the requirement.`;
+    if (step.requirementId) {
+      const requirement = await getRequirement(step.requirementId);
+      if (!requirement || requirement.status !== "delivered") {
+        return { ok: false, error: "provider delivery has not yet been accepted by the requirement owner", status: 409 };
+      }
+      step.status = "done";
+      step.completedAt = NOW();
+      step.result = `Delivery accepted for ${requirement.reference}; assignment ${ref} is complete.`;
+    } else {
+      step.status = "in_progress";
+      step.result = `Assignment recorded against ${ref}${step.offeringRef ? " (published offering)" : ""}. Waiting for the provider to submit delivery evidence.`;
+    }
     await saveWorkflow(wf);
     return { ok: true, value: wf };
   }
