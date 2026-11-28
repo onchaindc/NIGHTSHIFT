@@ -256,7 +256,7 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
                   <TextInput value={deliveryFor === r.id ? deliveryUrl : ""} onChange={(e) => { setDeliveryFor(r.id); setDeliveryUrl(e.target.value); }} placeholder="https://…" />
                 </Field>
                 <FormRow>
-                  <button type="button" disabled={busy !== null || deliveryNote.trim() === ""} onClick={() => void submitDelivery(r.id)} className="btn-primary !min-h-8 !text-[11.5px]">
+                  <button type="button" disabled={busy !== null || deliveryFor !== r.id || deliveryNote.trim() === ""} onClick={() => void submitDelivery(r.id)} className="btn-primary !min-h-8 !text-[11.5px]">
                     {busy === \`delivery:\${r.id}\` ? "Submitting…" : "Submit for buyer review"}
                   </button>
                 </FormRow>
