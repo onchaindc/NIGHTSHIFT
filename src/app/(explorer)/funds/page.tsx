@@ -62,6 +62,13 @@ function shortAddr(addr: string) {
 type Balances = { eth: string | null; circle: string | null; telegraph: string | null };
 
 /**
+ * What the last faucet action actually did, rendered INLINE in the wallet
+ * card — the confirmation has to appear where the tap happened, not at the
+ * bottom of a long page (the invisible notice is what caused triple mints).
+ */
+type MintFeedback = { tone: "ok" | "warn" | "err"; text: string; txHash?: string | null };
+
+/**
  * THE wallet summary card. The page renders exactly one of these: the
  * wallet that signs in and owns files (the in-app wallet when it exists,
  * otherwise the connected one). Any second wallet collapses into a compact
@@ -80,6 +87,8 @@ function WalletCard({
   onMint,
   minting,
   onRefresh,
+  mintFeedback,
+  mintCooldownUntil,
 }: {
   label: string;
   address: string;
@@ -93,8 +102,19 @@ function WalletCard({
   onMint?: () => void;
   minting?: boolean;
   onRefresh?: () => void;
+  mintFeedback?: MintFeedback | null;
+  mintCooldownUntil?: number | null;
 }) {
   const [copied, setCopied] = useState(false);
+  // Per-second countdown for the faucet cooldown label.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!mintCooldownUntil || mintCooldownUntil <= Date.now()) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [mintCooldownUntil]);
+  const coolLeft = mintCooldownUntil ? Math.max(0, Math.ceil((mintCooldownUntil - now) / 1000)) : 0;
   const copy = () => {
     navigator.clipboard.writeText(address).then(() => {
       setCopied(true);
@@ -174,11 +194,12 @@ function WalletCard({
           <button
             type="button"
             onClick={onMint}
-            disabled={minting}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[12px] text-teal transition-colors hover:bg-teal/15 disabled:opacity-50"
+            disabled={minting || coolLeft > 0}
+            title={coolLeft > 0 ? "The faucet tops up once a minute" : "Mints 10 test USDC and adds 10.00 of in-app spend credit"}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[12px] text-teal transition-colors hover:bg-teal/15 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Coins size={13} />
-            {minting ? "Minting…" : "Mint 10 test USDC + spend credit"}
+            {minting ? "Minting…" : coolLeft > 0 ? `Minted ✓ · faucet ready in ${coolLeft}s` : "Mint 10 test USDC"}
           </button>
         )}
         {onDeposit && (
@@ -202,6 +223,33 @@ function WalletCard({
           </button>
         )}
       </div>
+
+      {mintFeedback && (
+        <p
+          role="status"
+          aria-live="polite"
+          className={`mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed ${
+            mintFeedback.tone === "ok"
+              ? "border-teal/30 bg-teal/5 text-teal"
+              : mintFeedback.tone === "warn"
+                ? "border-amber/30 bg-amber/5 text-amber"
+                : "border-risk/30 bg-risk/5 text-risk"
+          }`}
+        >
+          {mintFeedback.tone === "err" ? <X size={13} className="shrink-0" aria-hidden /> : <Check size={13} className="shrink-0" aria-hidden />}
+          <span className="min-w-0">{mintFeedback.text}</span>
+          {mintFeedback.txHash && (
+            <a
+              href={`https://sepolia.etherscan.io/tx/${mintFeedback.txHash}`}
+              target="_blank"
+              rel="noreferrer"
+              className="tabular shrink-0 underline underline-offset-2"
+            >
+              tx {mintFeedback.txHash.slice(0, 10)}…
+            </a>
+          )}
+        </p>
+      )}
     </div>
   );
 }
@@ -392,56 +440,53 @@ function CreditCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
     new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-teal/30 bg-panel p-6 shadow-sm">
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal/40 to-transparent" />
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+    <div className="rounded-xl border border-teal/30 bg-panel px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="text-[10.5px] font-medium uppercase tracking-wider text-ink-faint">
             In-app spend credit · YOUR wallet pays for every run
           </p>
-          <p className="mt-1 text-[12.5px] text-ink-soft">
-            {sessionSignedIn
-              ? "Paid asks (Terminal, Minds, Deal Desk) settle from this balance — never from the deployment's wallet."
-              : "Sign in with your wallet to hold and spend your own credit."}
+          <p className="tabular text-[18px] font-semibold leading-none text-ink">
+            {sessionSignedIn ? (balance === null ? "…" : usd(balance)) : "—"}
           </p>
+          {sessionSignedIn && failed && <span className="text-[11.5px] text-amber">ledger retrying…</span>}
         </div>
         <button
           type="button"
           onClick={() => void refresh()}
           aria-label="Refresh spend credit"
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
         >
-          <RefreshCw size={13} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
+          <RefreshCw size={12} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
         </button>
       </div>
-
-      <p className="mt-5 text-[28px] font-semibold tabular leading-none tracking-tight text-ink">
-        {sessionSignedIn ? (balance === null ? "…" : usd(balance)) : "—"}
-      </p>
-      <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-        Funded by the faucet mint below (10.00 of credit alongside the 10 on-chain test USDC). A run's daily cap on
-        faucet-funded spending still applies. {sessionSignedIn ? "Balances update every 15s." : ""}
+      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+        {sessionSignedIn
+          ? "Pays every run (Terminal, Minds, Deal Desk) from your own balance — never from the deployment's wallet. Balances update every 15s."
+          : "Sign in with your wallet to hold and spend your own credit."}
       </p>
 
-      {sessionSignedIn && failed && (
-        <p className="mt-3 text-[12px] text-amber">The credit ledger could not be read — retrying.</p>
-      )}
       {sessionSignedIn && !failed && entries.length > 0 && (
-        <ul className="mt-4 divide-y divide-edge/60 border-t border-edge/60">
-          {entries.map((e, i) => (
-            <li key={`${e.ts}:${i}`} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2">
-              <span className="min-w-0 flex-1 truncate text-[12px] text-ink-soft" title={e.label}>
-                {e.label}
-              </span>
-              <span className="text-[10.5px] text-ink-faint">{when(e.ts)}</span>
-              <span className={`tabular w-16 text-right text-[12px] ${e.deltaUsdCents >= 0 ? "text-teal" : "text-ink"}`}>
-                {e.deltaUsdCents >= 0 ? "+" : "−"}
-                {usd(Math.abs(e.deltaUsdCents))}
-              </span>
-              <span className="tabular w-16 text-right text-[10.5px] text-ink-faint">{usd(e.balanceAfterUsdCents)}</span>
-            </li>
-          ))}
-        </ul>
+        <details className="mt-2">
+          <summary className="cursor-pointer select-none text-[11.5px] font-medium text-ink-soft transition-colors hover:text-ink">
+            Credit ledger · last {entries.length}
+          </summary>
+          <ul className="mt-2 divide-y divide-edge/60 border-t border-edge/60">
+            {entries.map((e, i) => (
+              <li key={`${e.ts}:${i}`} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2">
+                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-soft" title={e.label}>
+                  {e.label}
+                </span>
+                <span className="text-[10.5px] text-ink-faint">{when(e.ts)}</span>
+                <span className={`tabular w-16 text-right text-[12px] ${e.deltaUsdCents >= 0 ? "text-teal" : "text-ink"}`}>
+                  {e.deltaUsdCents >= 0 ? "+" : "−"}
+                  {usd(Math.abs(e.deltaUsdCents))}
+                </span>
+                <span className="tabular w-16 text-right text-[10.5px] text-ink-faint">{usd(e.balanceAfterUsdCents)}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );
@@ -505,29 +550,41 @@ function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
   const syncedLabel =
     syncedAgo === null ? "syncing…" : syncedAgo < 5 ? "just now" : syncedAgo < 90 ? `${syncedAgo}s ago` : `${Math.round(syncedAgo / 60)}m ago`;
 
+  // One-line summary for the collapsed state: live balances, no chrome.
+  const railsInline =
+    (rails ?? [])
+      .filter((rail) => rail.balance !== null)
+      .map((rail) => `${rail.balance!.whole} ${rail.name}`)
+      .join(" · ") || null;
+
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-amber/30 bg-panel p-6 shadow-sm">
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber/40 to-transparent" />
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">Deployment settlement rail · free modes & operator runs</p>
-          <p className="mt-1 tabular text-[12.5px] text-ink-soft">{payer ? shortAddr(payer) : "…"}</p>
-        </div>
+    <details className="rounded-xl border border-edge bg-panel px-4 py-3">
+      <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-x-3 gap-y-1 list-none [&::-webkit-details-marker]:hidden">
+        <span className="text-[10.5px] font-medium uppercase tracking-wider text-ink-faint">
+          Deployment settlement rail · free modes & operator runs
+        </span>
+        <span className="tabular text-[11.5px] text-ink-soft">
+          {note ? "read failed — open for detail" : (railsInline ?? "reading…")}
+        </span>
+      </summary>
+
+      <p className="mt-2.5 tabular text-[12.5px] text-ink-soft">{payer ? shortAddr(payer) : "…"}</p>
+      <div className="mt-2 flex items-center gap-2">
         <button
           type="button"
           onClick={() => void refresh()}
           aria-label="Refresh payer balances"
-          title={`Auto-syncs every 20s · updated ${syncedLabel}`}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
+          className="grid h-7 w-7 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
         >
-          <RefreshCw size={13} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
+          <RefreshCw size={12} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
         </button>
+        <span className="text-[11px] text-ink-faint">auto-syncs every 20s · updated {syncedLabel}</span>
       </div>
 
       {note ? (
-        <p className="mt-4 text-[12.5px] leading-relaxed text-amber">{note}</p>
+        <p className="mt-2.5 text-[12.5px] leading-relaxed text-amber">{note}</p>
       ) : (
-        <dl className="mt-5 grid gap-4 sm:grid-cols-2">
+        <dl className="mt-3 grid gap-3 sm:grid-cols-2">
           {(rails ?? []).map((rail) => (
             <div key={rail.network} className="rounded-xl border border-edge bg-panel-2 px-4 py-3">
               <dt className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">
@@ -543,12 +600,11 @@ function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
         </dl>
       )}
 
-      <p className="mt-4 text-[11px] leading-relaxed text-ink-faint">
-        Your paid runs settle from YOUR in-app spend credit above — not from this wallet. This deployment rail remains
-        what free modes and the operator session consume on-chain. Auto-syncs every 20s · updated {syncedLabel}.
-        {!sessionSignedIn && " The balances are live on-chain reads; sign in to relate them to your runs."}
+      <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
+        Free modes and the operator session consume this wallet; your paid runs settle from your own in-app credit
+        above. {!sessionSignedIn && "Balances are live on-chain reads; sign in to relate them to your runs."}
       </p>
-    </div>
+    </details>
   );
 }
 
@@ -560,8 +616,9 @@ export default function FundsPage() {
   const [creating, setCreating] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [minting, setMinting] = useState(false);
+  const [mintFeedback, setMintFeedback] = useState<MintFeedback | null>(null);
+  const [mintCooldownUntil, setMintCooldownUntil] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [balances, setBalances] = useState<Record<string, Balances>>({});
   const [showDeposit, setShowDeposit] = useState<string | null>(null);
   const [showWithdraw, setShowWithdraw] = useState<string | null>(null);
@@ -619,7 +676,6 @@ export default function FundsPage() {
   const handleMint = async () => {
     if (!embedded) return;
     setError(null);
-    setNotice(null);
     setMinting(true);
     try {
       // The faucet mints from the server key, so the new wallet needs no ETH.
@@ -628,18 +684,50 @@ export default function FundsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: embedded.address }),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as {
+        error?: string;
+        hash?: string;
+        amount?: string;
+        creditsGrantedUsdCents?: number;
+        creditBalanceUsdCents?: number;
+      };
+      if (res.status === 429) {
+        setMintFeedback({ tone: "warn", text: data.error ?? "The faucet is cooling down — try again in a minute." });
+        return;
+      }
       if (res.status === 409) {
-        setNotice(data.error ?? "This wallet already holds test USDC — spend credit topped up instead.");
+        // Already funded on-chain: say exactly what DID happen (credit top-up),
+        // so the user never has to guess what their tap just did.
+        setMintFeedback({
+          tone: "warn",
+          text: `No new mint — this wallet already holds test USDC. In-app spend credit topped up +${
+            data.creditsGrantedUsdCents !== undefined ? (data.creditsGrantedUsdCents / 100).toFixed(2) : "10.00"
+          }${data.creditBalanceUsdCents !== undefined ? ` (balance $${(data.creditBalanceUsdCents / 100).toFixed(2)})` : ""}.`,
+        });
         void refreshBalances();
         return;
       }
       if (!res.ok) throw new Error(data.error ?? "Mint failed");
-      setNotice("10 test USDC minted and 10.00 of in-app spend credit added — balances update in a moment.");
+      // The confirmation appears where the tap happened, with the receipt.
+      setMintFeedback({
+        tone: "ok",
+        text: `Minted ${data.amount ?? "10"} test USDC${
+          data.creditsGrantedUsdCents !== undefined
+            ? ` · +$${(data.creditsGrantedUsdCents / 100).toFixed(2)} in-app spend credit`
+            : ""
+        }${
+          data.creditBalanceUsdCents !== undefined ? ` (credit balance $${(data.creditBalanceUsdCents / 100).toFixed(2)})` : ""
+        } — balances refresh in a few seconds.`,
+        txHash: data.hash ?? null,
+      });
+      // Mirror the server's 60s faucet cooldown so an accidental second tap
+      // can't even reach the API.
+      setMintCooldownUntil(Date.now() + 60_000);
+      void refreshBalances();
       setTimeout(refreshBalances, 3000);
       setTimeout(refreshBalances, 8000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Mint failed");
+      setMintFeedback({ tone: "err", text: e instanceof Error ? e.message : "Mint failed" });
     } finally {
       setMinting(false);
     }
@@ -742,6 +830,8 @@ export default function FundsPage() {
               onMint={primary === embedded ? handleMint : undefined}
               minting={minting}
               onRefresh={() => void refreshBalances()}
+              mintFeedback={mintFeedback}
+              mintCooldownUntil={mintCooldownUntil}
             />
             {secondary && (
               <SecondaryWalletRow
@@ -783,26 +873,27 @@ export default function FundsPage() {
         )}
       </section>
 
-      {/* Spending: the payer wallet that funds autonomous runs + the enforced
-          per-user allowance. Both keep their existing APIs. */}
-      <section aria-label="Spending controls" className="mt-8 space-y-4">
-        <h2 className="x-label !mt-0">SPENDING</h2>
+      {/* Action feedback renders HERE — top of the page, next to the wallet
+          the action was taken on. Never at the bottom of a long scroll. */}
+      {error && (
+        <p role="alert" className="mt-3 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">
+          {error}
+        </p>
+      )}
+
+      {/* Spending: what pays (your credit), your enforced allowance, then the
+          deployment rail collapsed to one line. All APIs unchanged. */}
+      <section aria-label="Spending controls" className="mt-8 space-y-3">
+        <h2 className="x-label !mt-0">SPENDING & RECEIPTS</h2>
         <CreditCard sessionSignedIn={!!primary} />
-        <PayerCard sessionSignedIn={!!primary} />
         <SpendAllowance />
+        <PayerCard sessionSignedIn={!!primary} />
       </section>
 
       {/* Transactions and receipts: one component, both real ledgers. */}
       <section aria-label="Wallet activity" className="mt-8">
         <WalletActivity />
       </section>
-
-      {error && (
-        <p className="mt-6 rounded-lg border border-risk/30 bg-risk/5 px-3 py-2 text-[12.5px] text-risk">{error}</p>
-      )}
-      {notice && (
-        <p className="mt-4 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-[12.5px] text-teal">{notice}</p>
-      )}
 
       {showDeposit &&
         createPortal(
