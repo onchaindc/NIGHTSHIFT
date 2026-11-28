@@ -110,7 +110,7 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
     inputs: [
       { name: "name", label: "Package name", kind: "text", required: true, help: "e.g. \"Supplier onboarding package\"." },
       { name: "summary", label: "What the package delivers", kind: "textarea", required: true },
-      { name: "components", label: "Components", kind: "textarea", required: true, help: "One per line: Component label | standalone price in USD cents. e.g. \"Counterparty DD | 200\"." },
+      { name: "components", label: "Capacity service IDs", kind: "textarea", required: true, help: "One per line: capacity:<service-id>. Choose currently listed, available services from the Capacity directory. NIGHTSHIFT loads each component name and price from its source listing; typed prices are not accepted." },
       { name: "packagePriceUsdCents", label: "Your package price in USD cents", kind: "number", required: true, help: "Must be above the sum of the components — the reseller margin is what makes it a business." },
     ],
     deliverable: "A listed reseller package on the marketplace board with its margin computed and validated.",
