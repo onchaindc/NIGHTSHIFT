@@ -8,9 +8,10 @@ import { renderToStaticMarkup } from "react-dom/server";
  *  · exactly ONE wallet summary card, no matter how many wallets exist —
  *    the duplicate presentation (embedded card + external card + payer card,
  *    each repeating balances) is what this page used to be;
- *  · organized sections: summary, spending controls, transactions, receipts;
- *  · the transaction/receipt views read the two REAL ledgers and say so
- *    honestly when a fetch fails.
+ *  · one token story: Telegraph USDC is the token asks spend, ETH is gas;
+ *    the irrelevant Circle USDC read and the deployment rail are gone;
+ *  · the long transaction history is OFF this page entirely (user call:
+ *    noise) — the page is summary + spending, short on mobile.
  */
 
 const privy = vi.hoisted(() => ({
@@ -46,21 +47,23 @@ describe("Wallet page — exactly one summary card", () => {
     privy.wallets = [EMBEDDED];
     const html = renderToStaticMarkup(<FundsPage />);
     expect(html).toContain('aria-label="Wallet summary"');
-    // The big USDC readout appears exactly once — no duplicate balance cards.
-    expect(html.split("USDC (Circle)").length - 1).toBe(1);
+    // The big Telegraph USDC readout appears exactly once — no duplicate
+    // balance cards — and the irrelevant Circle USDC read is gone.
+    expect(html.split("Telegraph USDC · pays your asks").length - 1).toBe(1);
+    expect(html).not.toContain("USDC (Circle)");
     expect(html).toContain("In-app wallet");
   });
 
   it("collapses a second wallet into a compact row, never a second card", () => {
     privy.wallets = [EMBEDDED, EXTERNAL];
     const html = renderToStaticMarkup(<FundsPage />);
-    expect(html.split("USDC (Circle)").length - 1).toBe(1);
+    expect(html.split("Telegraph USDC · pays your asks").length - 1).toBe(1);
     expect(html).toContain("Also connected");
     expect(html).toContain("external wallet");
-    // The user's own spend credit is the first-class spending card; the
-    // deployment rail is spending context, not a wallet summary card.
-    expect(html).toContain("In-app spend credit · YOUR wallet pays for every run");
-    expect(html).toContain("Deployment settlement rail");
+    // The user's spend credit is the first-class spending strip, in plain words.
+    expect(html).toContain("Spend credit · the prepaid balance every ask is paid from");
+    // The deployment's own wallet is not the user's business — rail removed.
+    expect(html).not.toContain("Deployment settlement rail");
   });
 
   it("with no wallet at all, offers create/connect in one honest panel", () => {
@@ -74,24 +77,12 @@ describe("Wallet page — exactly one summary card", () => {
 });
 
 describe("Wallet page — organized sections backed by the real ledgers", () => {
-  it("carries summary, spending, transactions and receipts sections", () => {
+  it("carries the summary and spending sections; the long history is gone", () => {
     privy.wallets = [EMBEDDED];
     const html = renderToStaticMarkup(<FundsPage />);
     expect(html).toContain('aria-label="Spending controls"');
-    expect(html).toContain('aria-label="Wallet activity"');
-    expect(html).toContain('aria-label="Spend history"');
-    expect(html).toContain('aria-label="Receipts"');
-  });
-
-  it("the activity view reads the spend ledger AND the buyer escrow ledger, and never fakes rows", () => {
-    const activity = src("src/components/wallet/wallet-activity.tsx");
-    expect(activity).toContain('"/api/tasks"');
-    expect(activity).toContain('"/api/acp/buyer/jobs"');
-    // A failed load is an alert, never an empty-looking history.
-    expect(activity).toContain("role=\"alert\"");
-    expect(activity).toContain("could not be read");
-    // Escrow tx links stay on the explorer, never invented values.
-    expect(activity).toContain("basescan.org/tx/");
+    // The transaction/receipt history no longer stacks on the wallet page.
+    expect(html).not.toContain('aria-label="Wallet activity"');
   });
 
   it("the spending panel reads the enforced standing endpoint, not invented numbers", () => {
