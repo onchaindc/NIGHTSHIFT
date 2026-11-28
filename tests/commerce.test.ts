@@ -335,21 +335,27 @@ describe("reseller — packages are priced from real Capacity listings", () => {
     expect(listed.value.components.map((c) => c.unitPriceUsdCents)).toEqual([200, 100]);
     expect(listed.value.components.every((c) => c.ref)).toBe(true);
 
-    await updateService({ id: first.value.id, providerWallet: B, priceUsdCents: 300 });
-    const staleMargin = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 400 });
-    expect(staleMargin.ok).toBe(false);
-    if (!staleMargin.ok) expect(staleMargin.error).toContain("current standalone prices");
+    const blockedReprice = await updateService({ id: first.value.id, providerWallet: B, priceUsdCents: 300 });
+    expect(blockedReprice.ok).toBe(false);
+    if (!blockedReprice.ok) expect(blockedReprice.status).toBe(409);
+    const blockedRetire = await retireService(first.value.id, B);
+    expect(blockedRetire.ok).toBe(false);
+    if (!blockedRetire.ok) expect(blockedRetire.status).toBe(409);
 
     const belowAgain = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 350 });
     expect(belowAgain.ok).toBe(false);
     const above = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 500 });
     expect(above.ok).toBe(true);
-    if (above.ok) expect(above.value.marginUsdCents).toBe(100);
+    if (above.ok) expect(above.value.marginUsdCents).toBe(200);
 
     const strangerRetire = await retirePackage(listed.value.id, B);
     expect(strangerRetire.ok).toBe(false);
     if (!strangerRetire.ok) expect(strangerRetire.status).toBe(403);
     expect((await getPackage(listed.value.id))!.status).toBe("listed");
+    const retired = await retirePackage(listed.value.id, A);
+    expect(retired.ok).toBe(true);
+    const providerCanNowReprice = await updateService({ id: first.value.id, providerWallet: B, priceUsdCents: 300 });
+    expect(providerCanNowReprice.ok).toBe(true);
   });
 });
 describe("the internal purchase rail fulfills the four offerings", () => {
