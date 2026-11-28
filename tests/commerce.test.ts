@@ -318,7 +318,7 @@ describe("reseller — packages are priced from real Capacity listings", () => {
     const second = await createService(C, { name: "VAT identity check", category: "trade_supplier", summary: "VAT registration verification.", priceUsdCents: 100 });
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
-    const components = `capacity:${first.value.id}\ncapacity:${second.value.id}`;
+    const components = `capacity:${first.value.reference}\ncapacity:${second.value.reference}`;
 
     const forged = await createPackage({ ownerWallet: A, name: "Forged bundle", summary: "Caller-supplied prices are not accepted.", components: "Counterparty DD | 1\nVAT identity check | 1", packagePriceUsdCents: 500 });
     expect(forged.ok).toBe(false);
@@ -420,7 +420,7 @@ describe("the internal purchase rail fulfills the four offerings", () => {
     const refused = await fulfillCommercePurchase({
       offeringId: "commerce_reseller",
       buyerWallet: D,
-      input: { name: "Bad bundle", summary: "Priced below its parts.", components: `capacity:${componentService.value.id}`, packagePriceUsdCents: 150 },
+      input: { name: "Bad bundle", summary: "Priced below its parts.", components: `capacity:${componentService.value.reference}`, packagePriceUsdCents: 150 },
     });
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error).toContain("worth more than its parts");
