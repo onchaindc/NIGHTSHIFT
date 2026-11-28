@@ -337,11 +337,8 @@ describe("reseller — packages are priced from real Capacity listings", () => {
 
     await updateService({ id: first.value.id, providerWallet: B, priceUsdCents: 300 });
     const staleMargin = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 400 });
-    expect(staleMargin.ok).toBe(true);
-    if (staleMargin.ok) {
-      expect(staleMargin.value.components.map((c) => c.unitPriceUsdCents)).toEqual([300, 100]);
-      expect(staleMargin.value.marginUsdCents).toBe(0);
-    }
+    expect(staleMargin.ok).toBe(false);
+    if (!staleMargin.ok) expect(staleMargin.error).toContain("current standalone prices");
 
     const belowAgain = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 350 });
     expect(belowAgain.ok).toBe(false);
