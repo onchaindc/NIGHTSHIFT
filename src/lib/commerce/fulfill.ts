@@ -711,16 +711,18 @@ export async function cancelWorkflow(id: unknown, ownerWallet: string): Promise<
  */
 async function parseComponents(text: string): Promise<{ ok: true; components: PackageComponent[] } | { ok: false; error: string }> {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 12);
-  if (lines.length === 0) return { ok: false, error: "a package needs at least one component — add capacity:<service-id> from the Capacity directory, one per line" };
+  if (lines.length === 0) return { ok: false, error: "a package needs at least one component — add capacity:<service-reference> from the Capacity directory, one per line" };
   const seen = new Set<string>();
   const components: PackageComponent[] = [];
   for (const [i, line] of lines.entries()) {
-    const match = /^capacity:([a-f0-9-]{36})$/i.exec(line);
-    if (!match) return { ok: false, error: `component ${i + 1} must reference a real Capacity listing as capacity:<service-id>; labels and prices are loaded from the listing` };
-    const id = match[1];
-    if (seen.has(id)) return { ok: false, error: `component ${i + 1} duplicates a service already in this package` };
-    seen.add(id);
-    const service = await getService(id);
+    const match = /^capacity:([a-z0-9-]{8,80})$/i.exec(line);
+    if (!match) return { ok: false, error: `component ${i + 1} must reference a real Capacity listing as capacity:<service-reference>; labels and prices are loaded from the listing` };
+    const key = match[1];
+    const service = /^NS-CAP-/i.test(key)
+      ? (await listServices()).find((candidate) => candidate.reference.toLowerCase() === key.toLowerCase()) ?? null
+      : await getService(key);
+    if (service && seen.has(service.id)) return { ok: false, error: `component ${i + 1} duplicates a service already in this package` };
+    if (service) seen.add(service.id);
     if (!service || service.status !== "listed" || service.availability !== "available") {
       return { ok: false, error: `component ${i + 1} does not reference a currently listed, available Capacity service` };
     }
