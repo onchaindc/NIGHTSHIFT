@@ -312,26 +312,42 @@ describe("workflows — desk steps ride the real engine, free pre-flights only",
   });
 });
 
-describe("reseller — a package must be worth more than its parts", () => {
-  const COMPONENTS = "Counterparty DD | 200\nVAT identity check | 100";
+describe("reseller — packages are priced from real Capacity listings", () => {
+  it("rejects invented component prices and enforces margin against live source prices", async () => {
+    const first = await createService(B, { name: "Counterparty DD", category: "counterparty", summary: "Registry and sanctions review.", priceUsdCents: 200 });
+    const second = await createService(C, { name: "VAT identity check", category: "trade_supplier", summary: "VAT registration verification.", priceUsdCents: 100 });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    const components = `capacity:${first.value.id}\ncapacity:${second.value.id}`;
 
-  it("refuses a package priced below its components' sum, lists one above it", async () => {
-    const tooLow = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two checks in one purchase.", components: COMPONENTS, packagePriceUsdCents: 250 });
+    const forged = await createPackage({ ownerWallet: A, name: "Forged bundle", summary: "Caller-supplied prices are not accepted.", components: "Counterparty DD | 1\nVAT identity check | 1", packagePriceUsdCents: 500 });
+    expect(forged.ok).toBe(false);
+    if (!forged.ok) expect(forged.error).toContain("capacity:<service-id>");
+
+    const tooLow = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two verified Capacity listings.", components, packagePriceUsdCents: 250 });
     expect(tooLow.ok).toBe(false);
-    if (!tooLow.ok) expect(tooLow.error).toContain("worth more than its parts");
+    if (!tooLow.ok) expect(tooLow.error).toContain("standalone sum");
 
-    const listed = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two checks in one purchase.", components: COMPONENTS, packagePriceUsdCents: 400 });
+    const listed = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two verified Capacity listings.", components, packagePriceUsdCents: 400 });
     expect(listed.ok).toBe(true);
     if (!listed.ok) return;
     expect(listed.value.marginUsdCents).toBe(100);
-    expect(listed.value.status).toBe("listed");
-    expect(listed.value.components).toHaveLength(2);
+    expect(listed.value.components.map((c) => c.unitPriceUsdCents)).toEqual([200, 100]);
+    expect(listed.value.components.every((c) => c.ref)).toBe(true);
 
-    const belowAgain = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 300 });
+    await updateService({ id: first.value.id, providerWallet: B, priceUsdCents: 300 });
+    const staleMargin = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 400 });
+    expect(staleMargin.ok).toBe(true);
+    if (staleMargin.ok) {
+      expect(staleMargin.value.components.map((c) => c.unitPriceUsdCents)).toEqual([300, 100]);
+      expect(staleMargin.value.marginUsdCents).toBe(0);
+    }
+
+    const belowAgain = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 350 });
     expect(belowAgain.ok).toBe(false);
     const above = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 500 });
     expect(above.ok).toBe(true);
-    if (above.ok) expect(above.value.marginUsdCents).toBe(200);
+    if (above.ok) expect(above.value.marginUsdCents).toBe(100);
 
     const strangerRetire = await retirePackage(listed.value.id, B);
     expect(strangerRetire.ok).toBe(false);
@@ -339,7 +355,6 @@ describe("reseller — a package must be worth more than its parts", () => {
     expect((await getPackage(listed.value.id))!.status).toBe("listed");
   });
 });
-
 describe("the internal purchase rail fulfills the four offerings", () => {
   it("fulfills a marketplace purchase into a live, matched requirement — settled internally", async () => {
     const result = await fulfillCommercePurchase({
