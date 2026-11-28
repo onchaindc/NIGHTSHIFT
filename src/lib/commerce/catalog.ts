@@ -113,7 +113,7 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
       { name: "components", label: "Capacity service IDs", kind: "textarea", required: true, help: "One per line: capacity:<service-reference>. Copy the NS-CAP reference shown on a currently listed, available service in the Capacity directory. NIGHTSHIFT loads each component name and price from its source listing; typed prices are not accepted." },
       { name: "packagePriceUsdCents", label: "Your package price in USD cents", kind: "number", required: true, help: "Must be above the sum of the components — the reseller margin is what makes it a business." },
     ],
-    deliverable: "A listed reseller package on the marketplace board with its margin computed and validated.",
+    deliverable: "A listed package built from live Capacity listings, with its indicative price spread computed and validated. No purchase or settlement is implied.",
     samples: {
       name: "Supplier onboarding package",
       summary: "Registry, sanctions and trade-document verification for one new supplier, delivered as one package.",
