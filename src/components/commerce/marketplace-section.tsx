@@ -41,6 +41,9 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
   const [offerServiceId, setOfferServiceId] = useState("");
   const [offerMessage, setOfferMessage] = useState("");
   const [offerPrice, setOfferPrice] = useState("");
+  const [deliveryFor, setDeliveryFor] = useState<string | null>(null);
+  const [deliveryNote, setDeliveryNote] = useState("");
+  const [deliveryUrl, setDeliveryUrl] = useState("");
   const [form, setForm] = useState({ title: "", category: "counterparty", detail: "", budgetUsdCents: "", deadline: "" });
 
   const load = useCallback(async () => {
@@ -123,6 +126,22 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
       setOfferPrice("");
       setOfferServiceId("");
     }
+  }
+
+  async function submitDelivery(requirementId: string) {
+    const ok = await act(
+      { action: "submitDelivery", requirementId, note: deliveryNote, artifactUrl: deliveryUrl },
+      `delivery:${requirementId}`,
+    );
+    if (ok) {
+      setDeliveryFor(null);
+      setDeliveryNote("");
+      setDeliveryUrl("");
+    }
+  }
+
+  async function reviewDelivery(requirementId: string, decision: "accept" | "reject") {
+    await act({ action: "reviewDelivery", requirementId, decision }, `review:${requirementId}`);
   }
 
   const requirements = board?.requirements ?? [];
@@ -213,6 +232,46 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
                   </div>
                 ))}
               </div>
+            )}
+
+            {r.delivery && (
+              <div className="space-y-1.5 rounded-lg border border-edge bg-panel-2 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <MicroHeading>Provider delivery</MicroHeading>
+                  <StateChip tone={r.delivery.status === "accepted" ? "teal" : r.delivery.status === "submitted" ? "amber" : "faint"}>{r.delivery.status}</StateChip>
+                </div>
+                <p className="whitespace-pre-line text-[12px] leading-relaxed text-ink-soft">{r.delivery.note}</p>
+                {r.delivery.artifactUrl && <a href={r.delivery.artifactUrl} target="_blank" rel="noreferrer" className="break-all text-[11.5px] text-teal underline">Open delivery artifact</a>}
+                {r.delivery.reviewerNote && <p className="text-[11px] text-ink-faint">Review note: {r.delivery.reviewerNote}</p>}
+              </div>
+            )}
+
+            {buyerAddress && r.offers.some((o) => o.status === "accepted" && o.providerWallet === buyerAddress) && r.status !== "delivered" && r.status !== "closed" && r.delivery?.status !== "submitted" && (
+              <div className="space-y-2 rounded-lg border border-edge bg-panel-2 px-3 py-3">
+                <MicroHeading>Submit delivery</MicroHeading>
+                <Field label="Delivery summary" help="Visible on the public board. Describe the completed work and what the buyer should verify.">
+                  <TextArea value={deliveryFor === r.id ? deliveryNote : ""} onChange={(e) => { setDeliveryFor(r.id); setDeliveryNote(e.target.value); }} />
+                </Field>
+                <Field label="Artifact URL (optional)" help="Link to a report, evidence bundle or deliverable.">
+                  <TextInput value={deliveryFor === r.id ? deliveryUrl : ""} onChange={(e) => { setDeliveryFor(r.id); setDeliveryUrl(e.target.value); }} placeholder="https://…" />
+                </Field>
+                <FormRow>
+                  <button type="button" disabled={busy !== null || deliveryFor !== r.id || deliveryNote.trim() === ""} onClick={() => void submitDelivery(r.id)} className="btn-primary !min-h-8 !text-[11.5px]">
+                    {busy === `delivery:${r.id}` ? "Submitting…" : "Submit for buyer review"}
+                  </button>
+                </FormRow>
+              </div>
+            )}
+
+            {isOwner && r.delivery?.status === "submitted" && (
+              <FormRow>
+                <button type="button" disabled={busy !== null} onClick={() => void reviewDelivery(r.id, "accept")} className="btn-primary !min-h-8 !text-[11.5px]">
+                  {busy === `review:${r.id}` ? "Reviewing…" : "Accept delivery"}
+                </button>
+                <button type="button" disabled={busy !== null} onClick={() => void reviewDelivery(r.id, "reject")} className="btn-quiet !min-h-8 !text-[11.5px]">
+                  Request changes
+                </button>
+              </FormRow>
             )}
 
             {buyerAddress && !isOwner && r.status !== "closed" && (

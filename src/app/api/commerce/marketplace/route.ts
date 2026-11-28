@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { userAddressFromRequest } from "@/lib/api/auth";
-import { acceptOffer, closeRequirement, createRequirement, offerOnRequirement } from "@/lib/commerce/fulfill";
+import { acceptOffer, closeRequirement, createRequirement, offerOnRequirement, reviewRequirementDelivery, submitRequirementDelivery } from "@/lib/commerce/fulfill";
 import { listPackages, listRequirements } from "@/lib/commerce/store";
 import type { MarketplaceRequirement, ResellerPackage } from "@/lib/commerce/types";
 
@@ -94,11 +94,33 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (action === "submitDelivery") {
+    const result = await submitRequirementDelivery({
+      requirementId: body.requirementId,
+      providerWallet: address,
+      note: body.note,
+      artifactUrl: body.artifactUrl,
+    });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json({ requirement: publicRequirement(result.value, address) });
+  }
+
+  if (action === "reviewDelivery") {
+    const result = await reviewRequirementDelivery({
+      requirementId: body.requirementId,
+      ownerWallet: address,
+      decision: body.decision,
+      note: body.note,
+    });
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json({ requirement: publicRequirement(result.value, address) });
+  }
+
   if (action === "close") {
     const result = await closeRequirement(body.requirementId, address);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ requirement: publicRequirement(result.value, address) });
   }
 
-  return NextResponse.json({ error: 'action must be "publish", "offer", "accept" or "close"' }, { status: 400 });
+  return NextResponse.json({ error: 'action must be "publish", "offer", "accept", "submitDelivery", "reviewDelivery" or "close"' }, { status: 400 });
 }

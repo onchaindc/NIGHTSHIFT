@@ -31,6 +31,7 @@ import {
   getService,
   getWorkflow,
   listServices,
+  listPackages,
   newCommerceId,
   newCommerceReference,
   saveCommerceJob,
@@ -111,7 +112,7 @@ export function matchRequirement(
   const deskType = requirement.category === "other" ? null : CATEGORY_TO_DESK_TYPE[requirement.category];
 
   const scored = services
-    .filter((s) => s.status === "listed")
+    .filter((s) => s.status === "listed" && s.availability === "available")
     .map((s) => {
       let score = 0;
       if (s.category === requirement.category) score += 3;
@@ -180,6 +181,8 @@ export async function createRequirement(ownerWallet: string, input: RequirementI
     matchedOfferingIds: [],
     offers: [],
     workflowId: null,
+    acceptedOfferId: null,
+    delivery: null,
     notes: [],
     createdAt: now,
     updatedAt: now,
@@ -202,7 +205,7 @@ export async function offerOnRequirement(input: {
 }): Promise<CommerceResult<MarketplaceRequirement>> {
   const requirement = await getRequirement(str(input.requirementId, 80));
   if (!requirement) return { ok: false, error: "no such requirement on the board", status: 404 };
-  if (requirement.status === "closed") return { ok: false, error: "this requirement is closed", status: 400 };
+  if (requirement.status !== "open" && requirement.status !== "matched") return { ok: false, error: "this requirement is no longer accepting offers", status: 409 };
   if (requirement.ownerWallet === input.providerWallet.toLowerCase()) {
     return { ok: false, error: "you cannot offer on your own requirement", status: 400 };
   }
@@ -215,7 +218,7 @@ export async function offerOnRequirement(input: {
   const offeringRef = str(input.offeringRef, 120) || null;
   if (serviceId) {
     const service = await getService(serviceId);
-    if (!service || service.status !== "listed") return { ok: false, error: "the referenced service is not listed", status: 400 };
+    if (!service || service.status !== "listed" || service.availability !== "available") return { ok: false, error: "the referenced service is not currently available", status: 400 };
     if (service.providerWallet !== input.providerWallet.toLowerCase()) {
       return { ok: false, error: "you can only offer your own service listings", status: 403 };
     }
@@ -260,13 +263,18 @@ export async function acceptOffer(input: {
   if (requirement.ownerWallet !== input.ownerWallet.toLowerCase()) {
     return { ok: false, error: "only the requirement owner can accept an offer", status: 403 };
   }
+  if (requirement.status !== "open" && requirement.status !== "matched") {
+    return { ok: false, error: "this requirement is no longer accepting offer decisions", status: 409 };
+  }
   const offer = requirement.offers.find((o) => o.id === str(input.offerId, 80));
   if (!offer) return { ok: false, error: "no such offer on this requirement", status: 404 };
   if (offer.status !== "pending") return { ok: false, error: "this offer is no longer pending", status: 400 };
 
   for (const o of requirement.offers) o.status = o.id === offer.id ? "accepted" : o.status === "pending" ? "declined" : o.status;
-  requirement.status = "matched";
-  note(requirement, `Offer accepted (${offer.priceUsdCents}¢) — coordination workflow opened.`);
+  requirement.status = "in_progress";
+  requirement.acceptedOfferId = offer.id;
+  requirement.delivery = null;
+  note(requirement, `Offer accepted (${offer.priceUsdCents}¢) — waiting for provider delivery.`);
 
   const now = NOW();
   const workflow: CommerceWorkflow = {
@@ -285,6 +293,7 @@ export async function acceptOffer(input: {
         subject: null,
         serviceId: offer.serviceId,
         offeringRef: offer.offeringRef,
+        requirementId: requirement.id,
         investigationId: null,
         taskId: null,
         status: "pending",
@@ -300,6 +309,105 @@ export async function acceptOffer(input: {
   requirement.workflowId = workflow.id;
   await saveRequirement(requirement);
   return { ok: true, value: { requirement, workflow } };
+}
+
+
+/** Provider submits a concrete delivery record for the accepted offer. */
+export async function submitRequirementDelivery(input: {
+  requirementId: unknown;
+  providerWallet: string;
+  note: unknown;
+  artifactUrl?: unknown;
+}): Promise<CommerceResult<MarketplaceRequirement>> {
+  const requirement = await getRequirement(str(input.requirementId, 80));
+  if (!requirement) return { ok: false, error: "no such requirement on the board", status: 404 };
+  const accepted = requirement.offers.find((offer) => offer.id === requirement.acceptedOfferId && offer.status === "accepted");
+  if (!accepted || accepted.providerWallet !== input.providerWallet.toLowerCase()) {
+    return { ok: false, error: "only the provider whose offer was accepted can submit delivery", status: 403 };
+  }
+  if (requirement.status === "closed" || requirement.status === "delivered") {
+    return { ok: false, error: "this requirement is already closed or delivered", status: 409 };
+  }
+  if (requirement.delivery?.status === "submitted") {
+    return { ok: false, error: "the current delivery is awaiting buyer review", status: 409 };
+  }
+  const noteText = str(input.note, 4000);
+  if (!noteText) return { ok: false, error: "a delivery note describing the completed work is required", status: 400 };
+  const rawUrl = str(input.artifactUrl, 1000);
+  let artifactUrl: string | null = null;
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("unsupported protocol");
+      artifactUrl = parsed.toString();
+    } catch {
+      return { ok: false, error: "delivery artifact must be a valid http(s) URL", status: 400 };
+    }
+  }
+  requirement.delivery = {
+    providerWallet: input.providerWallet.toLowerCase(),
+    note: noteText,
+    artifactUrl,
+    status: "submitted",
+    submittedAt: NOW(),
+    reviewedAt: null,
+    reviewerNote: null,
+  };
+  requirement.status = "in_progress";
+  note(requirement, "Provider submitted delivery for owner review.");
+  await saveRequirement(requirement);
+  return { ok: true, value: requirement };
+}
+
+/** The buyer accepts or rejects the provider's submitted delivery. */
+export async function reviewRequirementDelivery(input: {
+  requirementId: unknown;
+  ownerWallet: string;
+  decision: unknown;
+  note?: unknown;
+}): Promise<CommerceResult<MarketplaceRequirement>> {
+  const requirement = await getRequirement(str(input.requirementId, 80));
+  if (!requirement) return { ok: false, error: "no such requirement on the board", status: 404 };
+  if (requirement.ownerWallet !== input.ownerWallet.toLowerCase()) {
+    return { ok: false, error: "only the requirement owner can review delivery", status: 403 };
+  }
+  if (requirement.status === "closed") {
+    return { ok: false, error: "this requirement has been closed", status: 409 };
+  }
+  if (!requirement.delivery || requirement.delivery.status !== "submitted") {
+    return { ok: false, error: "there is no submitted delivery awaiting review", status: 409 };
+  }
+  const decision = str(input.decision, 20);
+  if (decision !== "accept" && decision !== "reject") {
+    return { ok: false, error: "decision must be accept or reject", status: 400 };
+  }
+  requirement.delivery.status = decision === "accept" ? "accepted" : "rejected";
+  requirement.delivery.reviewedAt = NOW();
+  requirement.delivery.reviewerNote = str(input.note, 2000) || null;
+  requirement.status = decision === "accept" ? "delivered" : "in_progress";
+  note(requirement, decision === "accept" ? "Buyer accepted provider delivery." : "Buyer rejected provider delivery; provider may resubmit.");
+  await saveRequirement(requirement);
+
+  if (requirement.workflowId) {
+    const workflow = await getWorkflow(requirement.workflowId);
+    if (workflow) {
+      const step = workflow.steps.find((candidate) => candidate.requirementId === requirement.id);
+      if (step) {
+        if (decision === "accept") {
+          step.status = "done";
+          step.completedAt = NOW();
+          step.result = `Buyer accepted delivery for ${requirement.reference}.`;
+          if (workflow.steps.every((candidate) => candidate.status === "done")) workflow.status = "completed";
+        } else {
+          step.status = "pending";
+          step.completedAt = null;
+          step.result = "Buyer rejected the submitted delivery; provider may resubmit.";
+        }
+        await saveWorkflow(workflow);
+      }
+    }
+  }
+  return { ok: true, value: requirement };
 }
 
 export async function closeRequirement(requirementId: unknown, ownerWallet: string): Promise<CommerceResult<MarketplaceRequirement>> {
@@ -386,6 +494,19 @@ export async function updateService(input: { id: unknown; providerWallet: string
   if (service.providerWallet !== input.providerWallet.toLowerCase()) {
     return { ok: false, error: "only the provider can update this listing", status: 403 };
   }
+  const changesCommercialTerms = input.priceUsdCents !== undefined || input.availability !== undefined;
+  if (changesCommercialTerms) {
+    const dependent = (await listPackages()).filter(
+      (pkg) => pkg.status === "listed" && pkg.components.some((component) => component.source === "capacity" && component.ref === service.id),
+    );
+    if (dependent.length > 0) {
+      return {
+        ok: false,
+        error: "this service is included in a listed reseller package; retire or rebuild the dependent package before changing its price or availability",
+        status: 409,
+      };
+    }
+  }
   if (input.priceUsdCents !== undefined) {
     const price = parseCents(input.priceUsdCents);
     if (price === null) return { ok: false, error: "price must be a positive whole number of USD cents", status: 400 };
@@ -412,6 +533,12 @@ export async function retireService(id: unknown, providerWallet: string): Promis
   if (!service) return { ok: false, error: "no such service listing", status: 404 };
   if (service.providerWallet !== providerWallet.toLowerCase()) {
     return { ok: false, error: "only the provider can retire this listing", status: 403 };
+  }
+  const dependent = (await listPackages()).filter(
+    (pkg) => pkg.status === "listed" && pkg.components.some((component) => component.source === "capacity" && component.ref === service.id),
+  );
+  if (dependent.length > 0) {
+    return { ok: false, error: "this service is included in a listed reseller package; retire or rebuild the dependent package before retiring the service", status: 409 };
   }
   service.status = "retired";
   service.availability = "paused";
@@ -592,9 +719,18 @@ export async function runWorkflowStep(input: { id: unknown; stepId: unknown; own
 
   if (step.kind === "coordination") {
     const ref = step.serviceId ?? step.offeringRef ?? "(no assignment)";
-    step.status = "done";
-    step.completedAt = NOW();
-    step.result = `Assignment recorded against ${ref}${step.offeringRef ? " (published offering)" : ""}. The provider delivery is tracked on the requirement.`;
+    if (step.requirementId) {
+      const requirement = await getRequirement(step.requirementId);
+      if (!requirement || requirement.status !== "delivered") {
+        return { ok: false, error: "provider delivery has not yet been accepted by the requirement owner", status: 409 };
+      }
+      step.status = "done";
+      step.completedAt = NOW();
+      step.result = `Delivery accepted for ${requirement.reference}; assignment ${ref} is complete.`;
+    } else {
+      step.status = "pending";
+      step.result = `Assignment recorded against ${ref}${step.offeringRef ? " (published offering)" : ""}. Waiting for the provider to submit delivery evidence.`;
+    }
     await saveWorkflow(wf);
     return { ok: true, value: wf };
   }
@@ -685,20 +821,47 @@ export async function cancelWorkflow(id: unknown, ownerWallet: string): Promise<
 /* Reseller — packages of purchased services, priced above their parts */
 /* ------------------------------------------------------------------ */
 
-function parseComponents(text: string): { ok: true; components: PackageComponent[] } | { ok: false; error: string } {
+/**
+ * Components must resolve to real, currently listed Capacity services.
+ * The server supplies the label and price; callers cannot invent either.
+ * Input format: one capacity service id per line, prefixed with "capacity:".
+ */
+async function parseComponents(text: string): Promise<{ ok: true; components: PackageComponent[] } | { ok: false; error: string }> {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 12);
-  if (lines.length === 0) return { ok: false, error: "a package needs at least one component — one per line: Label | price in USD cents" };
+  if (lines.length === 0) return { ok: false, error: "a package needs at least one component — add capacity:<service-reference> from the Capacity directory, one per line" };
+  const seen = new Set<string>();
+  const services = await listServices();
   const components: PackageComponent[] = [];
   for (const [i, line] of lines.entries()) {
-    const [label, priceRaw] = line.split("|").map((p) => p.trim());
-    if (!label) return { ok: false, error: `component ${i + 1} needs a label before the "|" separator` };
-    const price = parseCents(priceRaw);
-    if (price === null) return { ok: false, error: `component ${i + 1}: "${priceRaw ?? ""}" is not a positive whole number of USD cents` };
-    components.push({ label: label.slice(0, 160), source: "purchase", ref: null, unitPriceUsdCents: price });
+    const match = /^capacity:(NS-CAP-[A-F0-9]{8})$/i.exec(line);
+    if (!match) return { ok: false, error: `component ${i + 1} must reference a real Capacity listing as capacity:<service-reference>; labels and prices are loaded from the listing` };
+    const key = match[1];
+    const service = services.find((candidate) => candidate.reference.toLowerCase() === key.toLowerCase()) ?? null;
+    if (service && seen.has(service.id)) return { ok: false, error: `component ${i + 1} duplicates a service already in this package` };
+    if (service) seen.add(service.id);
+    if (!service || service.status !== "listed" || service.availability !== "available") {
+      return { ok: false, error: `component ${i + 1} does not reference a currently listed, available Capacity service` };
+    }
+    components.push({ label: service.name, source: "capacity", ref: service.id, unitPriceUsdCents: service.priceUsdCents });
   }
   return { ok: true, components };
 }
 
+/** Refresh source records before repricing so margin never relies on stale prices. */
+async function refreshPackageComponents(components: PackageComponent[]): Promise<{ ok: true; components: PackageComponent[] } | { ok: false; error: string }> {
+  const refreshed: PackageComponent[] = [];
+  for (const [i, component] of components.entries()) {
+    if (component.source !== "capacity" || !component.ref) {
+      return { ok: false, error: "this package contains legacy components without a verifiable Capacity source; create a new package from current listings before repricing" };
+    }
+    const service = await getService(component.ref);
+    if (!service || service.status !== "listed" || service.availability !== "available") {
+      return { ok: false, error: `component ${i + 1} is no longer a listed, available Capacity service; restore the listing before repricing` };
+    }
+    refreshed.push({ label: service.name, source: "capacity", ref: service.id, unitPriceUsdCents: service.priceUsdCents });
+  }
+  return { ok: true, components: refreshed };
+}
 export function packageMargin(components: PackageComponent[], packagePriceUsdCents: number): number {
   return packagePriceUsdCents - components.reduce((sum, c) => sum + c.unitPriceUsdCents, 0);
 }
@@ -710,7 +873,7 @@ export async function createPackage(input: { ownerWallet: string; name: unknown;
   if (!name) return { ok: false, error: "a package name is required", status: 400 };
   if (!summary) return { ok: false, error: "say what the package delivers — the summary is required", status: 400 };
   if (price === null) return { ok: false, error: "package price must be a positive whole number of USD cents", status: 400 };
-  const parsed = parseComponents(str(input.components, 4000));
+  const parsed = await parseComponents(str(input.components, 4000));
   if (!parsed.ok) return { ok: false, error: parsed.error, status: 400 };
   const margin = packageMargin(parsed.components, price);
   if (margin <= 0) {
@@ -754,8 +917,11 @@ export async function updatePackage(input: { id: unknown; ownerWallet: string; p
   if (input.packagePriceUsdCents !== undefined) {
     const price = parseCents(input.packagePriceUsdCents);
     if (price === null) return { ok: false, error: "package price must be a positive whole number of USD cents", status: 400 };
-    const margin = packageMargin(pkg.components, price);
-    if (margin <= 0) return { ok: false, error: "the price must stay above the components' standalone sum", status: 400 };
+    const refreshed = await refreshPackageComponents(pkg.components);
+    if (!refreshed.ok) return { ok: false, error: refreshed.error, status: 409 };
+    const margin = packageMargin(refreshed.components, price);
+    if (margin <= 0) return { ok: false, error: "the price must stay above the current standalone prices of its Capacity components", status: 400 };
+    pkg.components = refreshed.components;
     pkg.packagePriceUsdCents = price;
     pkg.marginUsdCents = margin;
   }

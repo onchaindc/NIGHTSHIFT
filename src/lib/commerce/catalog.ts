@@ -105,19 +105,19 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
     section: "reseller",
     name: "Reseller — package builder",
     description:
-      "Package purchased specialist services into one higher-value offering with your own price. The margin is computed from the components' standalone prices and must be positive — a package is worth more than its parts or it does not list.",
+      "Package registered specialist services into one higher-value offering with your own price. Component names and prices are loaded from live Capacity listings, and the margin must remain positive against those source prices.",
     priceUsdCents: INTRO_PRICE_USD_CENTS,
     inputs: [
       { name: "name", label: "Package name", kind: "text", required: true, help: "e.g. \"Supplier onboarding package\"." },
       { name: "summary", label: "What the package delivers", kind: "textarea", required: true },
-      { name: "components", label: "Components", kind: "textarea", required: true, help: "One per line: Component label | standalone price in USD cents. e.g. \"Counterparty DD | 200\"." },
+      { name: "components", label: "Capacity service IDs", kind: "textarea", required: true, help: "One per line: capacity:<service-reference>. Copy the NS-CAP reference shown on a currently listed, available service in the Capacity directory. NIGHTSHIFT loads each component name and price from its source listing; typed prices are not accepted." },
       { name: "packagePriceUsdCents", label: "Your package price in USD cents", kind: "number", required: true, help: "Must be above the sum of the components — the reseller margin is what makes it a business." },
     ],
-    deliverable: "A listed reseller package on the marketplace board with its margin computed and validated.",
+    deliverable: "A listed package built from live Capacity listings, with its indicative price spread computed and validated. No purchase or settlement is implied.",
     samples: {
       name: "Supplier onboarding package",
       summary: "Registry, sanctions and trade-document verification for one new supplier, delivered as one package.",
-      components: "Counterparty DD | 200\nTrade & supplier intelligence | 150",
+      components: "",
       packagePriceUsdCents: "400",
     },
   },

@@ -38,6 +38,8 @@ import {
   createWorkflow,
   fulfillCommercePurchase,
   offerOnRequirement,
+  reviewRequirementDelivery,
+  submitRequirementDelivery,
   retirePackage,
   retireService,
   runWorkflowStep,
@@ -164,12 +166,46 @@ describe("marketplace — publish, match, offer, accept", () => {
     const accepted = await acceptOffer({ requirementId: requirement.id, offerId: offer.ok ? offer.value.offers[0].id : "", ownerWallet: A });
     expect(accepted.ok).toBe(true);
     if (accepted.ok) {
-      expect(accepted.value.requirement.status).toBe("matched");
+      expect(accepted.value.requirement.status).toBe("in_progress");
+      expect(accepted.value.requirement.acceptedOfferId).toBe(accepted.value.requirement.offers[0].id);
       expect(accepted.value.requirement.offers[0].status).toBe("accepted");
       expect(accepted.value.workflow).not.toBeNull();
       expect(accepted.value.workflow!.steps[0].kind).toBe("coordination");
       expect(accepted.value.workflow!.ownerWallet).toBe(A);
     }
+    const lateOffer = await offerOnRequirement({ requirementId: requirement.id, providerWallet: C, message: "I can also do this", priceUsdCents: 100, offeringRef: "nightshift/counterparty-due-diligence" });
+    expect(lateOffer.ok).toBe(false);
+    if (!lateOffer.ok) expect(lateOffer.status).toBe(409);
+    const wrongProvider = await submitRequirementDelivery({ requirementId: requirement.id, providerWallet: C, note: "Completed screening." });
+    expect(wrongProvider.ok).toBe(false);
+    if (!wrongProvider.ok) expect(wrongProvider.status).toBe(403);
+    const submitted = await submitRequirementDelivery({
+      requirementId: requirement.id,
+      providerWallet: B,
+      note: "Screening completed. Findings and source citations are in the report.",
+      artifactUrl: "https://example.com/report/NS-MP-test",
+    });
+    expect(submitted.ok).toBe(true);
+    if (submitted.ok) {
+      expect(submitted.value.delivery?.status).toBe("submitted");
+      expect(submitted.value.status).toBe("in_progress");
+    }
+    const strangerReview = await reviewRequirementDelivery({ requirementId: requirement.id, ownerWallet: C, decision: "accept" });
+    expect(strangerReview.ok).toBe(false);
+    if (!strangerReview.ok) expect(strangerReview.status).toBe(403);
+    const rejected = await reviewRequirementDelivery({ requirementId: requirement.id, ownerWallet: A, decision: "reject", note: "Please include source dates." });
+    expect(rejected.ok).toBe(true);
+    if (rejected.ok) expect(rejected.value.delivery?.status).toBe("rejected");
+    const resubmitted = await submitRequirementDelivery({ requirementId: requirement.id, providerWallet: B, note: "Updated report includes source dates." });
+    expect(resubmitted.ok).toBe(true);
+    const delivered = await reviewRequirementDelivery({ requirementId: requirement.id, ownerWallet: A, decision: "accept" });
+    expect(delivered.ok).toBe(true);
+    if (delivered.ok) {
+      expect(delivered.value.status).toBe("delivered");
+      expect(delivered.value.delivery?.status).toBe("accepted");
+    }
+    const linkedWorkflow = accepted.ok && accepted.value.workflow ? await getWorkflow(accepted.value.workflow.id) : null;
+    expect(linkedWorkflow?.steps[0].status).toBe("done");
     const again = await acceptOffer({ requirementId: requirement.id, offerId: (await getRequirement(requirement.id))!.offers[0].id, ownerWallet: A });
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error).toContain("no longer pending");
@@ -312,22 +348,37 @@ describe("workflows — desk steps ride the real engine, free pre-flights only",
   });
 });
 
-describe("reseller — a package must be worth more than its parts", () => {
-  const COMPONENTS = "Counterparty DD | 200\nVAT identity check | 100";
+describe("reseller — packages are priced from real Capacity listings", () => {
+  it("rejects invented component prices and enforces margin against live source prices", async () => {
+    const first = await createService(B, { name: "Counterparty DD", category: "counterparty", summary: "Registry and sanctions review.", priceUsdCents: 200 });
+    const second = await createService(C, { name: "VAT identity check", category: "trade_supplier", summary: "VAT registration verification.", priceUsdCents: 100 });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    const components = `capacity:${first.value.reference}\ncapacity:${second.value.reference}`;
 
-  it("refuses a package priced below its components' sum, lists one above it", async () => {
-    const tooLow = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two checks in one purchase.", components: COMPONENTS, packagePriceUsdCents: 250 });
+    const forged = await createPackage({ ownerWallet: A, name: "Forged bundle", summary: "Caller-supplied prices are not accepted.", components: "Counterparty DD | 1\nVAT identity check | 1", packagePriceUsdCents: 500 });
+    expect(forged.ok).toBe(false);
+    if (!forged.ok) expect(forged.error).toContain("capacity:<service-reference>");
+
+    const tooLow = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two verified Capacity listings.", components, packagePriceUsdCents: 250 });
     expect(tooLow.ok).toBe(false);
-    if (!tooLow.ok) expect(tooLow.error).toContain("worth more than its parts");
+    if (!tooLow.ok) expect(tooLow.error).toContain("standalone sum");
 
-    const listed = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two checks in one purchase.", components: COMPONENTS, packagePriceUsdCents: 400 });
+    const listed = await createPackage({ ownerWallet: A, name: "Supplier starter", summary: "Two verified Capacity listings.", components, packagePriceUsdCents: 400 });
     expect(listed.ok).toBe(true);
     if (!listed.ok) return;
     expect(listed.value.marginUsdCents).toBe(100);
-    expect(listed.value.status).toBe("listed");
-    expect(listed.value.components).toHaveLength(2);
+    expect(listed.value.components.map((c) => c.unitPriceUsdCents)).toEqual([200, 100]);
+    expect(listed.value.components.every((c) => c.ref)).toBe(true);
 
-    const belowAgain = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 300 });
+    const blockedReprice = await updateService({ id: first.value.id, providerWallet: B, priceUsdCents: 300 });
+    expect(blockedReprice.ok).toBe(false);
+    if (!blockedReprice.ok) expect(blockedReprice.status).toBe(409);
+    const blockedRetire = await retireService(first.value.id, B);
+    expect(blockedRetire.ok).toBe(false);
+    if (!blockedRetire.ok) expect(blockedRetire.status).toBe(409);
+
+    const belowAgain = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 350 });
     expect(belowAgain.ok).toBe(false);
     const above = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 500 });
     expect(above.ok).toBe(true);
@@ -337,9 +388,12 @@ describe("reseller — a package must be worth more than its parts", () => {
     expect(strangerRetire.ok).toBe(false);
     if (!strangerRetire.ok) expect(strangerRetire.status).toBe(403);
     expect((await getPackage(listed.value.id))!.status).toBe("listed");
+    const retired = await retirePackage(listed.value.id, A);
+    expect(retired.ok).toBe(true);
+    const providerCanNowReprice = await updateService({ id: first.value.id, providerWallet: B, priceUsdCents: 300 });
+    expect(providerCanNowReprice.ok).toBe(true);
   });
 });
-
 describe("the internal purchase rail fulfills the four offerings", () => {
   it("fulfills a marketplace purchase into a live, matched requirement — settled internally", async () => {
     const result = await fulfillCommercePurchase({
@@ -391,10 +445,18 @@ describe("the internal purchase rail fulfills the four offerings", () => {
   });
 
   it("records a refused purchase as a failed job with its reason — never silently dropped", async () => {
+    const componentService = await createService(A, {
+      name: "Counterparty DD",
+      category: "counterparty",
+      summary: "Registry and sanctions review.",
+      priceUsdCents: 200,
+    });
+    expect(componentService.ok).toBe(true);
+    if (!componentService.ok) return;
     const refused = await fulfillCommercePurchase({
       offeringId: "commerce_reseller",
       buyerWallet: D,
-      input: { name: "Bad bundle", summary: "Priced below its parts.", components: "Counterparty DD | 200", packagePriceUsdCents: 150 },
+      input: { name: "Bad bundle", summary: "Priced below its parts.", components: `capacity:${componentService.value.reference}`, packagePriceUsdCents: 150 },
     });
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error).toContain("worth more than its parts");

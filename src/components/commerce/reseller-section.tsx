@@ -1,18 +1,17 @@
 "use client";
 
 /**
- * Reseller — package purchased specialist services into one higher-value
- * offering. The margin over the components' standalone prices is computed
- * live in the form and enforced server-side: a package that is not worth more
- * than its parts does not list.
+ * Reseller — package specialist Capacity listings into one higher-value
+ * offering. Component prices come from live source listings; the displayed
+ * spread is indicative and is not a settled purchase margin.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { formatUsdc, usdcBaseUnits } from "@/lib/acp/buyer-browser";
-import type { ResellerPackage } from "@/lib/commerce/types";
-import { ActionError, EmptyNote, Field, FormRow, MicroHeading, Panel, StateChip, TextArea, TextInput } from "./ui-bits";
+import type { CapacityService, ResellerPackage } from "@/lib/commerce/types";
+import { ActionError, EmptyNote, Field, FormRow, MicroHeading, Panel, SelectField, StateChip, TextArea, TextInput } from "./ui-bits";
 
 const STATUS_TONE: Record<string, "teal" | "faint"> = {
   listed: "teal",
@@ -22,6 +21,8 @@ const STATUS_TONE: Record<string, "teal" | "faint"> = {
 
 export function ResellerSection({ buyerAddress }: { buyerAddress: string | null }) {
   const [packages, setPackages] = useState<ResellerPackage[] | null>(null);
+  const [capacityServices, setCapacityServices] = useState<CapacityService[]>([]);
+  const [selectedServiceRef, setSelectedServiceRef] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -44,6 +45,30 @@ export function ResellerSection({ buyerAddress }: { buyerAddress: string | null 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/commerce/capacity", { cache: "no-store" });
+        if (!res.ok) return;
+        const body = (await res.json()) as { services?: CapacityService[] };
+        setCapacityServices((body.services ?? []).filter((service) => service.status === "listed" && service.availability === "available"));
+      } catch {
+        /* unresolved references fail closed server-side */
+      }
+    })();
+  }, []);
+
+  function addComponent() {
+    if (!selectedServiceRef) return;
+    const line = "capacity:" + selectedServiceRef;
+    setForm((current) => {
+      const existing = current.components.split("\n").map((value) => value.trim()).filter(Boolean);
+      if (existing.some((value) => value.toLowerCase() === line.toLowerCase())) return current;
+      return { ...current, components: [...existing, line].join("\n") };
+    });
+    setSelectedServiceRef("");
+  }
 
   async function act(payload: Record<string, unknown>, label: string) {
     setBusy(label);
@@ -77,26 +102,27 @@ export function ResellerSection({ buyerAddress }: { buyerAddress: string | null 
     }
   }
 
-  // Live margin preview from the components textarea — the same arithmetic the
-  // server enforces, shown before the write so the refusal is never a surprise.
+  // The preview uses current Capacity listing prices; it is an indicative spread,
+  // not proof of a purchase, payment or realized reseller margin.
   const preview = useMemo(() => {
-    const lines = form.components.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = form.components.split("\n").map((line) => line.trim()).filter(Boolean);
     let sum = 0;
     let valid = lines.length > 0;
     for (const line of lines) {
-      const price = Number(line.split("|")[1]?.trim());
-      if (!line.split("|")[0]?.trim() || !Number.isFinite(price) || price <= 0) valid = false;
-      else sum += price;
+      const match = /^capacity:(NS-CAP-[A-F0-9]{8})$/i.exec(line);
+      const service = match ? capacityServices.find((item) => item.reference.toLowerCase() === match[1].toLowerCase()) : null;
+      if (!service || service.status !== "listed" || service.availability !== "available") valid = false;
+      else sum += service.priceUsdCents;
     }
     const pkgPrice = Number(form.packagePriceUsdCents);
     const margin = valid && Number.isFinite(pkgPrice) && pkgPrice > 0 ? pkgPrice - sum : null;
     return { valid, sum, margin, ok: margin !== null && margin > 0 };
-  }, [form.components, form.packagePriceUsdCents]);
+  }, [form.components, form.packagePriceUsdCents, capacityServices]);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <MicroHeading>Your packages — each one must be worth more than its parts</MicroHeading>
+        <MicroHeading>Your packages — source-backed component pricing</MicroHeading>
         {buyerAddress && (
           <button type="button" onClick={() => setFormOpen((v) => !v)} className="btn-primary !min-h-9 !text-[12px]">
             {formOpen ? "Close" : "Build a package"}
@@ -104,17 +130,31 @@ export function ResellerSection({ buyerAddress }: { buyerAddress: string | null 
         )}
       </div>
       {!buyerAddress && <EmptyNote>Sign in with your wallet above to build and list reseller packages.</EmptyNote>}
+      <EmptyNote>Component prices are current Capacity listing prices, not completed purchases. The spread is indicative only; this rail does not transfer funds, provide escrow or prove realized profit.</EmptyNote>
 
       {formOpen && buyerAddress && (
         <Panel className="space-y-3">
-          <MicroHeading>New package — components on separate lines: Label | price in USD cents</MicroHeading>
+          <MicroHeading>New package — assemble from live Capacity listings</MicroHeading>
           <Field label="Package name">
             <TextInput value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} maxLength={200} />
           </Field>
           <Field label="What the package delivers">
             <TextArea value={form.summary} onChange={(e) => setForm((p) => ({ ...p, summary: e.target.value }))} />
           </Field>
-          <Field label="Components" help="e.g. “Counterparty DD | 200” — the standalone price each component sells for on its own.">
+          <Field label="Add a Capacity service" help="Only currently listed and available services can be added. Names and prices are resolved by NIGHTSHIFT from the source listing.">
+            <div className="flex flex-wrap gap-2">
+              <div className="min-w-0 flex-1">
+                <SelectField value={selectedServiceRef} onChange={(e) => setSelectedServiceRef(e.target.value)}>
+                  <option value="">Select a source service…</option>
+                  {capacityServices.map((service) => (
+                    <option key={service.id} value={service.reference}>{service.reference} · {service.name} · {formatUsdc(usdcBaseUnits(service.priceUsdCents))}</option>
+                  ))}
+                </SelectField>
+              </div>
+              <button type="button" disabled={!selectedServiceRef} onClick={addComponent} className="btn-quiet !min-h-9 !text-[11.5px]">Add component</button>
+            </div>
+          </Field>
+          <Field label="Package components" help="These references resolve against live Capacity listings. Remove a line to remove that component.">
             <TextArea value={form.components} onChange={(e) => setForm((p) => ({ ...p, components: e.target.value }))} />
           </Field>
           <Field label="Your package price (USD cents)">
@@ -123,8 +163,8 @@ export function ResellerSection({ buyerAddress }: { buyerAddress: string | null 
           {form.components.trim() !== "" && form.packagePriceUsdCents !== "" && (
             <p className={`text-[12px] leading-relaxed ${preview.ok ? "text-teal" : "text-amber-deep"}`}>
               {preview.valid && preview.margin !== null
-                ? `Components sum ${preview.sum}¢ → your margin ${preview.margin}¢${preview.ok ? " — this package can list." : " — below the parts, it will not list."}`
-                : "Check the component lines: each needs a label and a positive price in USD cents."}
+                ? `Source listings sum ${preview.sum}¢ → indicative spread ${preview.margin}¢${preview.ok ? " — this package can list." : " — package price must exceed source prices."}`
+                : "Choose valid NS-CAP references from available Capacity listings; typed labels and prices are not accepted."}
             </p>
           )}
           <FormRow>
@@ -147,7 +187,7 @@ export function ResellerSection({ buyerAddress }: { buyerAddress: string | null 
             <StateChip tone={STATUS_TONE[p.status] ?? "faint"}>{p.status}</StateChip>
             <span className="tabular text-[11px] text-ink-faint">{p.reference}</span>
             <span className="tabular ml-auto text-[12px] font-semibold text-teal">
-              {formatUsdc(usdcBaseUnits(p.packagePriceUsdCents))} · margin {formatUsdc(usdcBaseUnits(p.marginUsdCents))}
+              {formatUsdc(usdcBaseUnits(p.packagePriceUsdCents))} · indicative spread {formatUsdc(usdcBaseUnits(p.marginUsdCents))}
             </span>
           </div>
           <h3 className="text-[14px] font-semibold leading-snug text-ink">{p.name}</h3>

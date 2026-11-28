@@ -19,16 +19,9 @@ function publicPackage(pkg: ResellerPackage, caller: string | null) {
 
 /**
  * GET /api/commerce/reseller — the caller's own packages (wallet session).
- * Packages are visible to everyone on the marketplace board; this returns the
- * owner's full view including drafts and retired packages.
- *
- * POST — action-based, wallet session required:
- *   { action: "create", name, summary, components, packagePriceUsdCents }
- *   { action: "update", id, packagePriceUsdCents?, summary? }   — owner only
- *   { action: "retire", id }                                     — owner only
- *
- * A package must be worth MORE than its parts: the margin over the components'
- * standalone sum is computed and enforced at every write.
+ * Component prices are resolved from live Capacity listings. The positive
+ * spread is indicative only: this rail does not purchase services, move funds
+ * or provide escrow, so it is not settled profit.
  */
 export async function GET(req: NextRequest) {
   const address = sessionAddress(req);
