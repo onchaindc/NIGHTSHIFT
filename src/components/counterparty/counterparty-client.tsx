@@ -204,6 +204,10 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
 
   const runPay = useCallback(async () => {
     if (probe.kind !== "challenge") return;
+    if (!approvedBox) {
+      setFailure({ heading: "Approval required", detail: "Tick the approval box for the displayed request and exact payment offer before signing." });
+      return;
+    }
     const offer = probe.offer;
     setFailure(null);
     if (!signerWallet) {
@@ -404,7 +408,7 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
       setPaying(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [probe, signerWallet, signTypedData, signMessage, guarantees]);
+  }, [probe, approvedBox, signerWallet, signTypedData, signMessage, guarantees]);
 
   /* ---- analyze (verify + read the committed payload) ------------------ */
 
@@ -668,6 +672,10 @@ export default function CounterpartyClient({ guarantees }: { guarantees: Counter
                 <span className="text-[15px] font-semibold tabular text-ink">${probe.offer.priceUsd.toFixed(2)}</span>
               </div>
               <dl className="grid gap-x-6 gap-y-1 text-[12px] sm:grid-cols-[130px_1fr]">
+                <dt className="text-ink-faint">Company</dt>
+                <dd className="break-words text-ink">{probe.offer.request.company}</dd>
+                <dt className="text-ink-faint">Jurisdiction</dt>
+                <dd className="break-words text-ink">{probe.offer.request.jurisdiction ?? "Not specified"}</dd>
                 <dt className="text-ink-faint">Provider</dt>
                 <dd className="text-ink">{guarantees.miner} <span className="text-ink-faint">(pinned)</span></dd>
                 <dt className="text-ink-faint">Network</dt>
