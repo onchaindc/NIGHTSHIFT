@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { callerIdentity } from "@/lib/api/auth";
 import { inspectInvestigation } from "@/lib/assurance/inspect";
+import { applyAssessment } from "@/lib/assurance/reassess";
 import { audit, getInvestigation, saveInvestigation } from "@/lib/assurance/store";
 
 export const runtime = "nodejs";
@@ -47,8 +48,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       `${result.evidence.length} live Solana read(s) recorded for payer, recipient and mint; no payment involved.`,
     );
     if (inv.status === "draft") inv.status = "collecting";
+    // The recorded decision must reflect this inspection immediately — a HOLD
+    // that still lists checks the fresh reads just satisfied reads as broken.
+    const { assessment } = await applyAssessment(inv, identity.kind === "user" ? identity.address : "operator");
     await saveInvestigation(inv);
-    return NextResponse.json({ investigation: inv, notes: result.notes });
+    return NextResponse.json({ investigation: inv, notes: result.notes, outcome: assessment.decision.outcome });
   } catch (err) {
     return NextResponse.json(
       { error: `Solana inspection failed: ${err instanceof Error ? err.message : String(err)}. No evidence was recorded.` },

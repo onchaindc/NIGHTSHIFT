@@ -115,6 +115,23 @@ function StatusDot({ done, active, blocked }: { done: boolean; active?: boolean;
   return <CircleDashed size={12} aria-hidden className="text-ink-faint" />;
 }
 
+/** Criteria the free Solana inspection can satisfy on its own. */
+const SOLANA_CHECKS = new Set(["payer_wallet", "recipient_wallet", "funding", "asset"]);
+
+/** What a MISSING criterion needs, in the reader's words. */
+const CRITERIA_HINT: Record<string, string> = {
+  payer_wallet: "Clear it with the free Solana inspection.",
+  recipient_wallet: "Clear it with the free Solana inspection.",
+  funding: "Clear it with the free Solana inspection.",
+  asset: "Clear it with the free Solana inspection.",
+  identity: "Needs a paid registry answer — request paid intelligence.",
+  registry_status: "Needs a paid registry answer — request paid intelligence.",
+  sanctions: "Needs a paid screening answer — request paid intelligence.",
+  documents: "Needs a paid filings answer — request paid intelligence.",
+  ownership: "Needs a paid ownership answer — request paid intelligence.",
+  provenance: "Re-run paid intelligence so answers are node-verified.",
+};
+
 export function AssuranceWorkspace({ investigationId }: { investigationId: string }) {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [session, setSession] = useState<SessionState>({ mode: "loading" });
@@ -238,6 +255,27 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
 
   const runWatchdog = useRunWatchdog(runTask);
 
+  // Confirmations come to the reader — never the reverse. When a paid plan
+  // lands on the approval gate, or a decision refreshes after evidence lands,
+  // the page brings that panel into view. The first observation never scrolls:
+  // opening a file must not yank the reader.
+  const approvalRef = useRef<HTMLDivElement>(null);
+  const decisionRef = useRef<HTMLDivElement>(null);
+  const prevAwaitingRef = useRef<boolean | null>(null);
+  const prevDecisionAtRef = useRef<string | null>(null);
+  useEffect(() => {
+    const isAwaiting = !!payload?.runs.some((r) => r.canApprove);
+    const prev = prevAwaitingRef.current;
+    prevAwaitingRef.current = isAwaiting;
+    if (prev === false && isAwaiting) approvalRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [payload]);
+  useEffect(() => {
+    const at = payload?.investigation.decision?.decidedAt ?? null;
+    const prev = prevDecisionAtRef.current;
+    prevDecisionAtRef.current = at;
+    if (prev !== null && at !== null && prev !== at) decisionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [payload]);
+
   if (loadError && !payload) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
@@ -272,6 +310,14 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
   const paidRuns = payload.runs.filter((r) => r.mode === "intel");
   const running = payload.runs.find((r) => ["planning", "executing", "verifying"].includes(r.taskState));
   const awaiting = payload.runs.find((r) => r.canApprove);
+
+  // Spotlight inputs: what still blocks this file, split by the action that
+  // clears it, and whether evidence outran the recorded decision.
+  const missingCriteria = decision ? decision.criteria.filter((c) => c.status === "missing") : [];
+  const solanaGaps = missingCriteria.some((c) => SOLANA_CHECKS.has(c.id));
+  const intelGaps = missingCriteria.some((c) => !SOLANA_CHECKS.has(c.id));
+  const evidenceStale =
+    !!decision && inv.evidence.some((e) => new Date(e.source.observedAt).getTime() > new Date(decision.decidedAt).getTime());
 
   const workflow = [
     { label: "Transaction entered", done: true },
@@ -328,28 +374,73 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
         <p className="mt-5 rounded-md border border-edge bg-panel-3 px-3.5 py-2.5 text-[12px] text-ink-soft">{notice}</p>
       )}
 
-      {/* Decision banner: the one thing a reviewer needs first, up top. */}
+      {/* Spotlight: the one thing a reviewer needs first, with the buttons that clear it.
+          The decision refreshes itself whenever evidence lands, so this panel stays true. */}
       {decision && (
-        <div className={`mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3.5 ${DECISION_STYLE[decision.outcome].panel}`}>
-          <div className="flex min-w-0 items-center gap-3">
-            {decision.outcome === "ESCALATE" ? (
-              <ShieldAlert size={18} aria-hidden className="shrink-0 text-risk" />
-            ) : decision.outcome === "HOLD" ? (
-              <CircleAlert size={18} aria-hidden className="shrink-0 text-amber" />
-            ) : (
-              <Check size={18} aria-hidden className="shrink-0 text-teal" />
-            )}
-            <div className="min-w-0">
-              <p className="text-[14px] font-semibold tracking-tight text-ink">{DECISION_STYLE[decision.outcome].label}</p>
-              <p className="mt-0.5 truncate text-[11.5px] text-ink-soft">{decision.rationale}</p>
+        <div ref={decisionRef} className={`mt-6 scroll-mt-24 rounded-2xl border px-4 py-3.5 ${DECISION_STYLE[decision.outcome].panel}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              {decision.outcome === "ESCALATE" ? (
+                <ShieldAlert size={18} aria-hidden className="shrink-0 text-risk" />
+              ) : decision.outcome === "HOLD" ? (
+                <CircleAlert size={18} aria-hidden className="shrink-0 text-amber" />
+              ) : (
+                <Check size={18} aria-hidden className="shrink-0 text-teal" />
+              )}
+              <div className="min-w-0">
+                <p className="text-[14px] font-semibold tracking-tight text-ink">{DECISION_STYLE[decision.outcome].label}</p>
+                <p className="mt-0.5 truncate text-[11.5px] text-ink-soft">{decision.rationale}</p>
+              </div>
             </div>
+            <a href="#decision" className="shrink-0 text-[11.5px] font-medium text-ink-soft transition-colors hover:text-ink">
+              Criteria &amp; evidence ↓
+            </a>
           </div>
-          <a
-            href="#decision"
-            className="shrink-0 text-[11.5px] font-medium text-ink-soft transition-colors hover:text-ink"
-          >
-            Criteria & evidence ↓
-          </a>
+          {evidenceStale && (
+            <p className="mt-2.5 rounded-md border border-amber/40 bg-amber-soft/40 px-3 py-2 text-[11.5px] leading-relaxed text-amber-deep">
+              Evidence arrived after this decision was recorded — the next inspection, sync or assessment brings it current.
+            </p>
+          )}
+          {decision.outcome !== "CLEARED" && missingCriteria.length > 0 && (
+            <div className="mt-3 border-t border-edge/80 pt-3">
+              <p className="text-[11.5px] leading-snug text-ink-soft">
+                Still open: {decision.openIssues} issue{decision.openIssues === 1 ? "" : "s"} needing a human decision ·{" "}
+                {missingCriteria.length} unevidenced check{missingCriteria.length === 1 ? "" : "s"}.
+                {solanaGaps ? " The free Solana inspection clears the wallet and balance checks." : ""}
+                {intelGaps ? " The registry and ownership checks need paid answers." : ""}
+              </p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {solanaGaps && (
+                  <button
+                    type="button"
+                    onClick={() => void act("inspect", () => fetch(`/api/assurance/${inv.id}/inspect`, { method: "POST" }))}
+                    disabled={busy !== null || payload.readOnly || inv.dataMode === "demonstration"}
+                    className="btn-signal !min-h-9 !text-[12px]"
+                  >
+                    {busy === "inspect" ? "Reading Solana…" : "Run Solana inspection (free)"}
+                  </button>
+                )}
+                {intelGaps && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void act("intel", () =>
+                        fetch(`/api/assurance/${inv.id}/intelligence`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "run", mode: "intel" }),
+                        }),
+                      )
+                    }
+                    disabled={busy !== null || payload.readOnly || inv.dataMode === "demonstration"}
+                    className="btn-quiet !min-h-9 !text-[12px]"
+                  >
+                    {busy === "intel" ? "Creating plan…" : "Request paid intelligence"}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -399,7 +490,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
               </div>
             )}
           </Section>
-
+          <div ref={approvalRef} className="scroll-mt-24">
           {/* 02 — investigation */}
           <Section
             n="02"
@@ -603,17 +694,18 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
               </div>
             )}
 
-            <div className="mt-5 rounded-md border border-edge bg-panel-3 px-3.5 py-3">
-              <p className="text-[11.5px] font-medium text-ink">Mind orchestration</p>
-              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">{payload.orchestration.note}</p>
+            <details className="mt-5 rounded-md border border-edge bg-panel-3 px-3.5 py-3">
+              <summary className="cursor-pointer list-none text-[11.5px] font-medium text-ink">Mind orchestration</summary>
+              <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-faint">{payload.orchestration.note}</p>
               <p className="mt-1.5 inline-flex items-center gap-1.5 text-[10.5px] text-ink-faint">
                 <span aria-hidden className={`size-1.5 rounded-full ${payload.orchestration.mindConnected ? "bg-teal" : "bg-ink-faint"}`} />
                 {payload.orchestration.mindConnected
                   ? "Minds delivery configured"
                   : "No connected Mind configured; planning is deterministic and no Mind claims are shown"}
               </p>
-            </div>
+            </details>
           </Section>
+          </div>
 
           {/* 03 — evidence */}
           <Section
@@ -748,7 +840,14 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
                             <span aria-hidden className={`inline-block size-1.5 rounded-full ${c.status === "pass" ? "bg-teal" : c.status === "fail" ? "bg-risk" : "bg-ink-faint"}`} />
                           </td>
                           <td className="py-1.5 pr-4 text-[12px] font-medium text-ink">{c.label}</td>
-                          <td className="py-1.5 pr-4 text-[11.5px] leading-snug text-ink-soft">{c.detail}</td>
+                          <td className="py-1.5 pr-4 text-[11.5px] leading-snug text-ink-soft">
+                            {c.detail}
+                            {c.status === "missing" && (
+                              <span className="mt-0.5 block text-[10.5px] text-amber-deep">
+                                {CRITERIA_HINT[c.id] ?? "Needs evidence — use the actions in the spotlight above."}
+                              </span>
+                            )}
+                          </td>
                           <td className="py-1.5 text-right text-[10.5px] uppercase tracking-wide text-ink-faint">{c.status}</td>
                         </tr>
                       ))}
@@ -890,8 +989,10 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
             )}
           </div>
 
-          <div className="mt-3 rounded-md border border-edge bg-panel px-4 py-4">
-            <p className="x-label">Evidence provenance</p>
+          <details className="mt-3 rounded-md border border-edge bg-panel px-4 py-4">
+            <summary className="cursor-pointer list-none text-[11px] font-medium uppercase tracking-[0.14em] text-ink-faint">
+              Evidence provenance ({inv.evidence.length})
+            </summary>
             <dl className="mt-2.5 space-y-1.5">
               {[
                 { label: "Solana reads", value: sourceVerified, tone: "text-teal" },
@@ -908,11 +1009,13 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
             <p className="mt-2.5 border-t border-edge pt-2 text-[10.5px] leading-snug text-ink-faint">
               A paid answer is only counted when the engine re-derived it against the node signal.
             </p>
-          </div>
+          </details>
 
           {paidRuns.length > 0 && (
-            <div className="mt-3 rounded-md border border-edge bg-panel px-4 py-4">
-              <p className="x-label">Intelligence spend</p>
+            <details className="mt-3 rounded-md border border-edge bg-panel px-4 py-4">
+              <summary className="cursor-pointer list-none text-[11px] font-medium uppercase tracking-[0.14em] text-ink-faint">
+                Intelligence spend ({money(paidRuns.reduce((s, r) => s + r.spendUsdCents, 0))})
+              </summary>
               {paidRuns.map((r) => (
                 <div key={r.taskId} className="mt-2 flex items-baseline justify-between gap-2">
                   <span className="tabular text-[10.5px] text-ink-faint">{r.taskId.slice(0, 8)}…</span>
@@ -922,12 +1025,14 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
               <Link href="/activity" className="mt-2.5 inline-flex items-center gap-1 text-[11px] font-medium text-ink-soft hover:text-ink">
                 Open the task ledger <ArrowRight size={11} aria-hidden />
               </Link>
-            </div>
+            </details>
           )}
 
           {inv.limitations.length > 0 && (
-            <div className="mt-3 rounded-md border border-edge bg-panel-3 px-4 py-4">
-              <p className="x-label">Stated limits</p>
+            <details className="mt-3 rounded-md border border-edge bg-panel-3 px-4 py-4">
+              <summary className="cursor-pointer list-none text-[11px] font-medium uppercase tracking-[0.14em] text-ink-faint">
+                Stated limits ({inv.limitations.length})
+              </summary>
               <ul className="mt-2 space-y-2">
                 {inv.limitations.map((l, i) => (
                   <li key={i} className="text-[11px] leading-relaxed text-ink-soft">
@@ -935,7 +1040,7 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
                   </li>
                 ))}
               </ul>
-            </div>
+            </details>
           )}
 
           {inv.audit.length > 0 && (

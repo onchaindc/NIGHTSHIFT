@@ -4,7 +4,8 @@ import { callerIdentity } from "@/lib/api/auth";
 import { paidRunGate } from "@/lib/api/userSpend";
 import { EngineError } from "@/lib/engine/engine";
 import { createAssuranceRun, syncIntelligence } from "@/lib/assurance/run";
-import { audit, getInvestigation, saveInvestigation } from "@/lib/assurance/store";
+import { applyAssessment } from "@/lib/assurance/reassess";
+import { getInvestigation, saveInvestigation } from "@/lib/assurance/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,9 +49,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   try {
     if (body.action === "sync") {
       const result = await syncIntelligence(inv);
-      audit(inv, actor, "intelligence_synced", `${result.added} evidence record(s) absorbed.`);
+      // Absorbing evidence is only half the job — the recorded decision must
+      // follow the ledger in the same request, or the file keeps showing
+      // MISSING checks the absorbed answers already satisfied.
+      const { assessment } = await applyAssessment(inv, actor);
       await saveInvestigation(inv);
-      return NextResponse.json({ investigation: inv, added: result.added, notes: result.notes });
+      return NextResponse.json({ investigation: inv, added: result.added, notes: result.notes, outcome: assessment.decision.outcome });
     }
 
     const mode = body.mode === "free" ? "free" : "intel";
