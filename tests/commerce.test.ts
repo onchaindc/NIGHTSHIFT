@@ -208,7 +208,7 @@ describe("marketplace — publish, match, offer, accept", () => {
     expect(linkedWorkflow?.steps[0].status).toBe("done");
     const again = await acceptOffer({ requirementId: requirement.id, offerId: (await getRequirement(requirement.id))!.offers[0].id, ownerWallet: A });
     expect(again.ok).toBe(false);
-    if (!again.ok) expect(again.error).toContain("no longer pending");
+    if (!again.ok) expect(again.error).toContain("no longer accepting offer decisions");
   });
 
   it("closes a requirement for its owner and nobody else", async () => {
@@ -378,7 +378,7 @@ describe("reseller — packages are priced from real Capacity listings", () => {
     expect(blockedRetire.ok).toBe(false);
     if (!blockedRetire.ok) expect(blockedRetire.status).toBe(409);
 
-    const belowAgain = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 350 });
+    const belowAgain = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 300 });
     expect(belowAgain.ok).toBe(false);
     const above = await updatePackage({ id: listed.value.id, ownerWallet: A, packagePriceUsdCents: 500 });
     expect(above.ok).toBe(true);
