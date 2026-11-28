@@ -713,14 +713,13 @@ async function parseComponents(text: string): Promise<{ ok: true; components: Pa
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 12);
   if (lines.length === 0) return { ok: false, error: "a package needs at least one component — add capacity:<service-reference> from the Capacity directory, one per line" };
   const seen = new Set<string>();
+  const services = await listServices();
   const components: PackageComponent[] = [];
   for (const [i, line] of lines.entries()) {
-    const match = /^capacity:([a-z0-9-]{8,80})$/i.exec(line);
+    const match = /^capacity:(NS-CAP-[A-F0-9]{8})$/i.exec(line);
     if (!match) return { ok: false, error: `component ${i + 1} must reference a real Capacity listing as capacity:<service-reference>; labels and prices are loaded from the listing` };
     const key = match[1];
-    const service = /^NS-CAP-/i.test(key)
-      ? (await listServices()).find((candidate) => candidate.reference.toLowerCase() === key.toLowerCase()) ?? null
-      : await getService(key);
+    const service = services.find((candidate) => candidate.reference.toLowerCase() === key.toLowerCase()) ?? null;
     if (service && seen.has(service.id)) return { ok: false, error: `component ${i + 1} duplicates a service already in this package` };
     if (service) seen.add(service.id);
     if (!service || service.status !== "listed" || service.availability !== "available") {
