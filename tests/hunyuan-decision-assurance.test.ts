@@ -297,6 +297,37 @@ describe("decision assurance API gate", () => {
     expect(res.status).toBe(401);
   });
 
+  it("refuses an anonymous GET: a persisted private review is never retrievable without the operator credential", async () => {
+    // Persist a real review first, so the 401 is proven against a record that
+    // actually exists and carries one — not against an empty record.
+    const inv = assuranceRecord("da-get-0008", ["ev-reg-1"]);
+    await saveInvestigation(inv);
+    setHunyuanTransportForTests(transportReturning(validReview(["ev-reg-1"])));
+    const runRes = await postRoute(authedReq("/api/hunyuan/decision-assurance", { method: "POST", body: { scope: "assurance", id: inv.id } }));
+    expect(runRes.status).toBe(200);
+    const persisted = await getInvestigation(inv.id);
+    expect(persisted?.hunyuanAssurance).toBeTruthy();
+
+    const anonRes = await getRoute(new NextRequest(`http://localhost/api/hunyuan/decision-assurance?scope=assurance&id=${inv.id}`));
+    expect(anonRes.status).toBe(401);
+    const anonBody = JSON.stringify((await anonRes.json()) as unknown);
+    // The response body must not leak any review content either.
+    expect(anonBody).not.toContain("headline");
+    expect(anonBody).not.toContain("materialFindings");
+    expect(anonBody).not.toContain(validReview(["ev-reg-1"]).headline);
+
+    // And the persisted review is still there for the operator afterwards.
+    const opRes = await getRoute(authedReq(`/api/hunyuan/decision-assurance?scope=assurance&id=${inv.id}`));
+    expect(opRes.status).toBe(200);
+    const opBody = (await opRes.json()) as { exists: boolean };
+    expect(opBody.exists).toBe(true);
+  });
+
+  it("anonymous GET fails closed even without scope/id params (existence probing)", async () => {
+    const anonRes = await getRoute(new NextRequest("http://localhost/api/hunyuan/decision-assurance"));
+    expect(anonRes.status).toBe(401);
+  });
+
   it("serves the persisted review to the operator and maps 400/404 honestly", async () => {
     const inv = assuranceRecord("da-route-0007", ["ev-reg-1"]);
     await saveInvestigation(inv);

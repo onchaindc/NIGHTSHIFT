@@ -15,6 +15,9 @@ import type { ChainReceipt } from "@/lib/chain/rpc";
  * label: the node's assertion is recorded, but never counted as proof.
  *
  * Missing or unverifiable evidence NEVER becomes a successful verification.
+ * A task that mixes fully checked evidence with evidence that is missing,
+ * unverified or only analysis is `unverified`, never `verified`: every single
+ * applicable piece of evidence must independently check out.
  * The verdict is:
  *   verified   — the task claims completion and every applicable check passed
  *                against live, independently fetched records.
@@ -366,11 +369,25 @@ export async function independentlyVerifyTask(
   }
 
   const claimedComplete = task.state === "completed";
-  const networkChecks = checks.filter((c) => c.status === "verified" && (c.id.startsWith("signal") || c.id.startsWith("chain") || c.id.startsWith("receipt")));
   const hasFailure = failures.length > 0;
+
+  // Every check derived from the task's claimed evidence: node signals, chain
+  // re-reads, receipts and execution-time recorded reads. Ledger reconciliation
+  // is an accounting check, not network proof, and never satisfies the
+  // evidence requirement on its own.
+  const evidenceChecks = checks.filter((c) => /^(signal_|chain_|receipt_|recorded_read_)/.test(c.id));
+  const verifiedEvidence = evidenceChecks.filter((c) => c.status === "verified");
+  // Audit finding: a task must NOT be verified while ANY applicable evidence
+  // remains missing, unverified or only analysis. Such a check is not a
+  // contradiction (that is `failed`), but it means the claim is not fully
+  // independently proven — the honest verdict is `unverified`.
+  const notFullyProven = evidenceChecks.filter(
+    (c) => c.status === "missing" || c.status === "unverified" || c.status === "analysis",
+  );
+
   const verdict: IndependentVerificationReport["verdict"] = hasFailure
     ? "failed"
-    : claimedComplete && networkChecks.length > 0 && ledger.consistent
+    : claimedComplete && verifiedEvidence.length > 0 && notFullyProven.length === 0 && ledger.consistent
       ? "verified"
       : "unverified";
 

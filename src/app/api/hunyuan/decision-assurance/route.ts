@@ -87,9 +87,18 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET /api/hunyuan/decision-assurance?scope=&id= — the persisted review, when
- * the record carries one. Operator-gated like the records it summarises.
+ * the record carries one. Operator-gated like the records it summarises: a
+ * Hunyuan review restates the file's evidence, conclusions and risks, so an
+ * anonymous caller must not be able to read it (audit fix — fails closed like
+ * the POST gate and every other private read).
  */
 export async function GET(req: NextRequest) {
+  if (!requestAuthorized(req)) {
+    return NextResponse.json(
+      { error: "authorization required: the persisted decision-assurance review is private to the operator (NIGHTSHIFT_API_TOKEN)" },
+      { status: 401 },
+    );
+  }
   const url = new URL(req.url);
   const scope = scopeOf(url.searchParams.get("scope"));
   const id = idOf(url.searchParams.get("id"));

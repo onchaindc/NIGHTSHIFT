@@ -322,4 +322,135 @@ describe("independentlyVerifyTask", () => {
     expect(report.checks.find((c) => c.id.startsWith("recorded_read"))?.status).toBe("analysis");
     expect(report.unresolvedGaps.join(" ")).toContain("chain_read");
   });
+
+  // -------------------------------------------------------------------------
+  // Audit fix: the verdict gate. "verified" requires EVERY applicable piece of
+  // evidence to check out — a mix of verified and unresolved evidence must be
+  // "unverified", a mix with a missing record must be "failed".
+  // -------------------------------------------------------------------------
+
+  function mixedCapabilityTask(secondEvidence: Evidence[]): TaskRecord {
+    return baseTask({
+      events: [],
+      spend: { limitUsdCents: 100, spentUsdCents: 0, entries: [] },
+      criteria: {
+        primaryVerifiedAgainstNodeSignal: true,
+        answerSane: true,
+        answerMaxAgeSeconds: 0,
+        ownPaymentSettledOnChain: false,
+        reconcileLedgerEntries: false,
+      },
+      result: {
+        // Non-JSON summary: no reconstructible accepted answer for plain
+        // signal evidence — that signal's content check is honestly unverified.
+        summary: "capability report",
+        evidence: secondEvidence,
+        completedAt: NOW - 20_000,
+        capabilityReport: {
+          slug: "counterparty-intelligence",
+          preparedAt: new Date(NOW).toISOString(),
+          dimensions: [
+            {
+              dimension: "registry",
+              label: "Registry identity",
+              status: "verified",
+              detail: "ok",
+              intent: "CORPORATE_REGISTRY_LOOKUP",
+              provider: "corp-brreg",
+              signalHash: "signal-hash-a",
+              committed: { legal_name: "MARA HOLDINGS, INC." },
+            },
+          ],
+          missing: [],
+          spendUsdCents: 0,
+          counts: { verified: 1, recorded: 0, unverified: 0, routable_unverified: 0, gap: 0 },
+          note: "n/a",
+        },
+      },
+    });
+  }
+
+  it("does NOT verify a task mixing a proven signal with an unresolved one (audit fix)", async () => {
+    const task = mixedCapabilityTask([{ kind: "telegraph_signal", signalHash: "signal-hash-b", minerId: "miner-2" }]);
+    const report = await independentlyVerifyTask(
+      task,
+      depsOver({
+        lookupSignal: async (hash) => {
+          if (hash === "signal-hash-a") return { signal_hash: "s", result: { execution: { result: { legal_name: "MARA HOLDINGS, INC." } } } };
+          return { signal_hash: "s", payload: { response: { anything: "record exists" } } };
+        },
+      }),
+    );
+    const committed = report.checks.find((c) => c.id.startsWith("signal_committed"));
+    const unresolved = report.checks.find((c) => c.id.startsWith("signal_answer_"));
+    expect(committed?.status).toBe("verified");
+    expect(unresolved?.status).toBe("unverified");
+    expect(report.failures).toEqual([]);
+    // Old behaviour would have returned "verified" on the strength of the one
+    // proven signal; the tightened gate reports the honest mixed verdict.
+    expect(report.verdict).toBe("unverified");
+    expect(report.unresolvedGaps.join(" ")).toContain("not reconstructible");
+  });
+
+  it("does NOT verify a task whose chain settlement re-read fails, even with a proven signal (audit fix)", async () => {
+    const report = await independentlyVerifyTask(
+      withAnswer(baseTask()),
+      depsOver({
+        lookupSignal: async () => nodeRecord,
+        getTransactionReceipt: async () => { throw new Error("RPC connection reset"); },
+      }),
+    );
+    const chain = report.checks.find((c) => c.id.startsWith("chain_"));
+    expect(chain?.status).toBe("unverified");
+    expect(report.failures).toEqual([]);
+    expect(report.verdict).toBe("unverified");
+    expect(report.unresolvedGaps.join(" ")).toContain("could not be re-read");
+  });
+
+  it("does NOT verify a task mixing a proven signal with execution-time analysis evidence (audit fix)", async () => {
+    const task = withAnswer(baseTask());
+    task.result?.evidence.push({ kind: "chain_read", chain: "base", gasPriceWei: 1, gasPriceGwei: 0.001, rpcUrl: "https://rpc" });
+    const report = await independentlyVerifyTask(
+      task,
+      depsOver({
+        lookupSignal: async () => nodeRecord,
+        getTransactionReceipt: async () => ({ found: true, status: "success", blockNumber: 42, to: null, rpcUrl: "https://rpc" }),
+      }),
+    );
+    expect(report.checks.find((c) => c.id.startsWith("signal_answer"))?.status).toBe("verified");
+    expect(report.checks.find((c) => c.id.startsWith("recorded_read"))?.status).toBe("analysis");
+    expect(report.failures).toEqual([]);
+    expect(report.verdict).toBe("unverified");
+  });
+
+  it("fails a task with one proven and one missing signal record (audit fix)", async () => {
+    const task = mixedCapabilityTask([{ kind: "telegraph_signal", signalHash: "signal-hash-b", minerId: "miner-2" }]);
+    const report = await independentlyVerifyTask(
+      task,
+      depsOver({
+        lookupSignal: async (hash) => {
+          if (hash === "signal-hash-a") return { signal_hash: "s", result: { execution: { result: { legal_name: "MARA HOLDINGS, INC." } } } };
+          throw new Error("signal lookup failed: HTTP 404");
+        },
+      }),
+    );
+    const missing = report.checks.find((c) => c.status === "missing");
+    expect(missing?.signalHash).toBe("signal-hash-b");
+    expect(report.failures.join(" ")).toContain("no node record");
+    expect(report.verdict).toBe("failed");
+  });
+
+  it("still verifies when every applicable evidence check passes (audit fix, positive control)", async () => {
+    const report = await independentlyVerifyTask(
+      withAnswer(baseTask()),
+      depsOver({
+        lookupSignal: async () => nodeRecord,
+        getTransactionReceipt: async () => ({ found: true, status: "success", blockNumber: 42, to: null, rpcUrl: "https://rpc" }),
+      }),
+    );
+    const evidenceChecks = report.checks.filter((c) => /^(signal_|chain_|receipt_)/.test(c.id));
+    expect(evidenceChecks.length).toBeGreaterThan(0);
+    expect(evidenceChecks.every((c) => c.status === "verified")).toBe(true);
+    expect(report.verdict).toBe("verified");
+  });
 });
