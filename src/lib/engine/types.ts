@@ -390,7 +390,8 @@ export interface TaskRecord {
   /** Terminal failure/blocker explanation, machine-readable where possible. */
   error: string | null;
   origin: {
-    source: "web" | "telegram";
+    /** Where the task came from. "mcp" = created through the MCP server. */
+    source: "web" | "telegram" | "mcp";
     actor?: string; // telegram chat id, etc.
   };
   /** Task variant: "goal" (default), "protocol_watch", or "terminal_request". */
