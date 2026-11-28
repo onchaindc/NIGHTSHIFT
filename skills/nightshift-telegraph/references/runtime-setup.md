@@ -5,9 +5,14 @@ a remote MCP endpoint the runtime connects to. Configure BOTH parts:
 the skill folder teaches the workflow; the MCP connection provides the tools.
 
 > Honesty note: these instructions describe the documented skill-loading
-> mechanisms of each runtime. No live OpenClaw or Hermes session has been run
-> against the deployed endpoint yet; after installing, run the verification
-> step below and only then claim runtime-tested status.
+> mechanisms of each runtime. Both runtimes have now been exercised for real
+> against a production build of this branch (local `npm start` server per
+> section 4, token auth via each runtime's own secret store): tool discovery,
+> live node discovery, a free investigation, evidence retrieval, independent
+> verification and the paid approval gate all ran through real agent turns.
+> The full transcript is in `runtime-verification.md`. When connecting to a
+> NEW deployment, re-run the verification step below there before claiming
+> runtime-tested status for that deployment.
 
 ## 1. Install the skill folder
 
