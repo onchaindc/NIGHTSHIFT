@@ -29,10 +29,9 @@ export default function MindsPage() {
     <div className="mx-auto max-w-6xl px-4 py-9 sm:px-6">
       <header className="max-w-[64ch]">
         <p className="x-eyebrow">NIGHTSHIFT MINDS</p>
-        <h1 className="x-display-1 mt-3 text-ink">Specialists for decisions that carry consequence.</h1>
+        <h1 className="x-display-1 mt-3 text-ink">Specialists for consequential decisions.</h1>
         <p className="mt-4 text-[13.5px] leading-relaxed text-ink-soft">
-          Each Mind investigates one business domain with a pinned provider, a published price and an evidence
-          trail. They share the same engine — planning, approval, controlled spending, verification and history.
+          Each Mind investigates one domain with a pinned provider, a published price and an evidence trail.
         </p>
       </header>
         <BudgetStrip />
