@@ -325,6 +325,9 @@ export async function submitRequirementDelivery(input: {
   if (requirement.status === "closed" || requirement.status === "delivered") {
     return { ok: false, error: "this requirement is already closed or delivered", status: 409 };
   }
+  if (requirement.delivery?.status === "submitted") {
+    return { ok: false, error: "the current delivery is awaiting buyer review", status: 409 };
+  }
   const noteText = str(input.note, 4000);
   if (!noteText) return { ok: false, error: "a delivery note describing the completed work is required", status: 400 };
   const rawUrl = str(input.artifactUrl, 1000);
