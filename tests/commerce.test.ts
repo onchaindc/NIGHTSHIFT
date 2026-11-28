@@ -38,6 +38,8 @@ import {
   createWorkflow,
   fulfillCommercePurchase,
   offerOnRequirement,
+  reviewRequirementDelivery,
+  submitRequirementDelivery,
   retirePackage,
   retireService,
   runWorkflowStep,
@@ -164,12 +166,43 @@ describe("marketplace — publish, match, offer, accept", () => {
     const accepted = await acceptOffer({ requirementId: requirement.id, offerId: offer.ok ? offer.value.offers[0].id : "", ownerWallet: A });
     expect(accepted.ok).toBe(true);
     if (accepted.ok) {
-      expect(accepted.value.requirement.status).toBe("matched");
+      expect(accepted.value.requirement.status).toBe("in_progress");
+      expect(accepted.value.requirement.acceptedOfferId).toBe(accepted.value.requirement.offers[0].id);
       expect(accepted.value.requirement.offers[0].status).toBe("accepted");
       expect(accepted.value.workflow).not.toBeNull();
       expect(accepted.value.workflow!.steps[0].kind).toBe("coordination");
       expect(accepted.value.workflow!.ownerWallet).toBe(A);
     }
+    const wrongProvider = await submitRequirementDelivery({ requirementId: requirement.id, providerWallet: C, note: "Completed screening." });
+    expect(wrongProvider.ok).toBe(false);
+    if (!wrongProvider.ok) expect(wrongProvider.status).toBe(403);
+    const submitted = await submitRequirementDelivery({
+      requirementId: requirement.id,
+      providerWallet: B,
+      note: "Screening completed. Findings and source citations are in the report.",
+      artifactUrl: "https://example.com/report/NS-MP-test",
+    });
+    expect(submitted.ok).toBe(true);
+    if (submitted.ok) {
+      expect(submitted.value.delivery?.status).toBe("submitted");
+      expect(submitted.value.status).toBe("in_progress");
+    }
+    const strangerReview = await reviewRequirementDelivery({ requirementId: requirement.id, ownerWallet: C, decision: "accept" });
+    expect(strangerReview.ok).toBe(false);
+    if (!strangerReview.ok) expect(strangerReview.status).toBe(403);
+    const rejected = await reviewRequirementDelivery({ requirementId: requirement.id, ownerWallet: A, decision: "reject", note: "Please include source dates." });
+    expect(rejected.ok).toBe(true);
+    if (rejected.ok) expect(rejected.value.delivery?.status).toBe("rejected");
+    const resubmitted = await submitRequirementDelivery({ requirementId: requirement.id, providerWallet: B, note: "Updated report includes source dates." });
+    expect(resubmitted.ok).toBe(true);
+    const delivered = await reviewRequirementDelivery({ requirementId: requirement.id, ownerWallet: A, decision: "accept" });
+    expect(delivered.ok).toBe(true);
+    if (delivered.ok) {
+      expect(delivered.value.status).toBe("delivered");
+      expect(delivered.value.delivery?.status).toBe("accepted");
+    }
+    const linkedWorkflow = accepted.ok && accepted.value.workflow ? await getWorkflow(accepted.value.workflow.id) : null;
+    expect(linkedWorkflow?.steps[0].status).toBe("done");
     const again = await acceptOffer({ requirementId: requirement.id, offerId: (await getRequirement(requirement.id))!.offers[0].id, ownerWallet: A });
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error).toContain("no longer pending");
