@@ -31,6 +31,7 @@
  */
 
 import type { AuditEntry } from "@/lib/assurance/types";
+import type { HunyuanAssuranceRecord } from "@/lib/hunyuan/types";
 
 export type DeskInvestigationType =
   | "counterparty_due_diligence"
@@ -235,6 +236,11 @@ export interface DeskInvestigation {
   spendLimitUsdCents: number;
   operator: { createdBy: string; tenant: string };
   audit: AuditEntry[];
+  /**
+   * Mission #01 — the persisted Hunyuan decision-assurance review (analysis,
+   * never an evidence class), when one has run for this file.
+   */
+  hunyuanAssurance?: HunyuanAssuranceRecord | null;
 }
 
 export interface DeskInvestigationSummary {

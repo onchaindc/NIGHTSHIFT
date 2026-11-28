@@ -17,6 +17,8 @@
  * beside a verified fact as if it were one.
  */
 
+import type { HunyuanAssuranceRecord } from "@/lib/hunyuan/types";
+
 export type DataMode = "live" | "demonstration";
 
 export type EvidenceClass = "source_verified" | "node_verified" | "probe_verified" | "demonstration";
@@ -178,6 +180,11 @@ export interface Investigation {
   operator: { createdBy: string; tenant: string };
   audit: AuditEntry[];
   limitations: string[];
+  /**
+   * Mission #01 — the persisted Hunyuan decision-assurance review (analysis,
+   * never an evidence class), when one has run for this file.
+   */
+  hunyuanAssurance?: HunyuanAssuranceRecord | null;
 }
 
 export interface InvestigationSummary {
