@@ -117,7 +117,7 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
     samples: {
       name: "Supplier onboarding package",
       summary: "Registry, sanctions and trade-document verification for one new supplier, delivered as one package.",
-      components: "Counterparty DD | 200\nTrade & supplier intelligence | 150",
+      components: "",
       packagePriceUsdCents: "400",
     },
   },
