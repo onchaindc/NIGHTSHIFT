@@ -73,6 +73,16 @@ export interface RequirementOffer {
   createdAt: string;
 }
 
+export interface MarketplaceDelivery {
+  providerWallet: string;
+  note: string;
+  artifactUrl: string | null;
+  status: "submitted" | "accepted" | "rejected";
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewerNote: string | null;
+}
+
 export interface MarketplaceRequirement {
   id: string;
   reference: string;
@@ -90,6 +100,9 @@ export interface MarketplaceRequirement {
   offers: RequirementOffer[];
   /** Set when an offer is accepted: the coordination workflow opened for it. */
   workflowId: string | null;
+  /** Accepted offer and provider-submitted delivery; optional for legacy records. */
+  acceptedOfferId?: string | null;
+  delivery?: MarketplaceDelivery | null;
   notes: string[];
   createdAt: string;
   updatedAt: string;
@@ -140,6 +153,8 @@ export interface WorkflowStep {
   /** A capacity service (or catalog offering id) assigned to a coordination step. */
   serviceId: string | null;
   offeringRef: string | null;
+  /** Marketplace requirement this coordination step is fulfilling, when applicable. */
+  requirementId?: string | null;
   investigationId: string | null;
   taskId: string | null;
   status: "pending" | "in_progress" | "awaiting_approval" | "done" | "failed";
