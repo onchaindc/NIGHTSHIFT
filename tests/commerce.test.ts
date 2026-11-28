@@ -409,10 +409,18 @@ describe("the internal purchase rail fulfills the four offerings", () => {
   });
 
   it("records a refused purchase as a failed job with its reason — never silently dropped", async () => {
+    const componentService = await createService(A, {
+      name: "Counterparty DD",
+      category: "counterparty",
+      summary: "Registry and sanctions review.",
+      priceUsdCents: 200,
+    });
+    expect(componentService.ok).toBe(true);
+    if (!componentService.ok) return;
     const refused = await fulfillCommercePurchase({
       offeringId: "commerce_reseller",
       buyerWallet: D,
-      input: { name: "Bad bundle", summary: "Priced below its parts.", components: "Counterparty DD | 200", packagePriceUsdCents: 150 },
+      input: { name: "Bad bundle", summary: "Priced below its parts.", components: `capacity:${componentService.value.id}`, packagePriceUsdCents: 150 },
     });
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error).toContain("worth more than its parts");
