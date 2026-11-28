@@ -1,5 +1,86 @@
 # Runtime verification record — OpenClaw and Hermes sessions
 
+## Round 3 — verification against the deployed URL itself (2026-11-28, latest)
+
+The team issued a Protection Bypass for Automation secret for the `nightshift`
+project, unblocking verification against the live deployment. The bypass
+header was used by every caller below; nothing on the deployment was
+reconfigured and no payment, approval or wallet funding was performed.
+
+Deployment under test: branch alias
+`https://nightshift-git-feat-openclaw-hermes-5fbec3-onchaindcs-projects.vercel.app`
+(Vercel build success for commit `aaf7a24`, per the GitHub commit status,
+2026-11-28T11:26:56Z). `GET /api/status` on this deployment reports:
+`apiAuth: "open"` (no `NIGHTSHIFT_API_TOKEN` configured — the operator gate
+fails closed and authorizes nobody), `persistence: postgres, durable,
+connection ok`, `services.hunyuan: false`.
+
+Checklist results on the deployed URL:
+
+1. **MCP nine-tool contract — PASS.** `initialize` handshake OK
+   (server `nightshift 1.0.0`); `tools/list` returns exactly the nine tools.
+2. **Live discovery — PASS.** `telegraph_list_intents` = 136 intents
+   (`truncated: false`); `telegraph_list_miners` = 60 miners
+   (`truncated: true`) — live node, no credentials.
+3. **Free investigation — PASS (with honest clearance limits).**
+   Anonymous create → `completed`, `spentUsdCents: 0`
+   (task `16ab10b4-…-5510bfe69017`). Evidence read returns the correct
+   owner/operator privacy refusal to an anonymous caller; independent
+   `nightshift_verify_task` is operator-gated and is therefore unreachable on
+   this deployment in `open` mode (verified on the same-commit build in
+   Round 2: honest `unverified`, 0 gaps).
+4. **Paid intelligence gate — SAFE, gate unreachable.**
+   `nightshift_request_intelligence` refuses with 401 "sign in with your
+   wallet to run intel investigations; the free modes stay open to everyone".
+   No payment signed, no paid step executed, nothing spent. Reaching
+   `awaiting_approval` on this deployment requires a funded wallet session;
+   none was created (no funding, by policy). `awaiting_approval` with $0 and
+   no signed payment is verified on the same-commit build (Round 2).
+5. **Decision Assurance anonymity gates — PASS.** Anonymous `GET` → 401
+   ("private to the operator"); anonymous `POST` → 401 ("operator-gated").
+6. **Hunyuan status — PASS (truthful unconfigured).** `GET /api/hunyuan/status`
+   → `provider=tencent-hunyuan`, `configured=false`,
+   `missing=["HUNYUAN_API_KEY"]`, `baseUrl=https://tokenhub-intl.tencentmaas.com/v1`,
+   mission descriptions present, `note` explicitly states no simulated
+   provider output is ever produced.
+7. **Continuum tick — BLOCKED by design.** `POST /api/hunyuan/continuum/tick`
+   and `GET /api/hunyuan/continuum` are operator-gated → 401 in `open` mode.
+   The persistence layer they write to is healthy (postgres, connection ok).
+   Tick + persisted-event verification ran on the same-commit build (Round 2:
+   baseline → 22 deduplicated events → 0 on re-tick).
+
+Real runtime sessions against the deployed URL (bypass header in both client
+configs; the previous local bearer was removed):
+
+- **OpenClaw 2026.11.11** (`mcp probe`): Connected — **9 tools**.
+  Agent turn 1: `telegraph_list_intents` + `telegraph_list_miners` executed
+  live; payloads exceeded the model output budget and the agent reported the
+  truncation honestly (counts confirmed by the direct client: 136 / 60).
+  Agent turn 2: free investigation task `2aaf03da-…-881a066c676c`,
+  `completed`, `spentUsdCents: 0`, honest free-mode summary quoted.
+  Agent turn 3: `nightshift_request_intelligence` → exact 401 wallet-gate
+  refusal relayed verbatim; no retry, no approval attempted.
+- **Hermes Agent 0.23.4** (`hermes mcp test nightshift`): Connected
+  (2306 ms), **9 tools** discovered. Agent turn: free investigation task
+  `2ea598bd-…-b0c9c294aa29`, `completed`, $0, honest report (0/9 registry
+  fields known from free sources); paid request → the same 401 wallet-gate
+  refusal; nothing signed or approved.
+
+Deployment-configuration gaps found by this round (operator-side actions, not
+application defects):
+
+- `NIGHTSHIFT_API_TOKEN` is not set on the deployment (`apiAuth: "open"`):
+  every operator-gated route (evidence full reads, verify, continuum tick and
+  ledger, paid paths beyond the wallet gate) fails closed to 401. Setting the
+  variable unlocks checklist items 3 (verify), 4 (awaiting_approval) and 7.
+- `HUNYUAN_API_KEY` is not set: Hunyuan inference is honestly reported as
+  unconfigured; missions run schema-validated workflows without simulated
+  provider output.
+- The production domain `nightshift-telegraph.vercel.app` serves `main`,
+  which does not contain the mission code (`/api/mcp`,
+  `/api/hunyuan/status` → 404 there). Merging this branch to `main` is
+  prohibited by the mission contract.
+
 ## Round 2 — post-push deployment attempt and same-commit build (2026-11-28, later)
 
 Branch `feat/openclaw-hermes-integration` was pushed through `7a80f28`
