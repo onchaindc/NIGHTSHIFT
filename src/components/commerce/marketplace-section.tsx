@@ -131,7 +131,7 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
   async function submitDelivery(requirementId: string) {
     const ok = await act(
       { action: "submitDelivery", requirementId, note: deliveryNote, artifactUrl: deliveryUrl },
-      \`delivery:\${requirementId}\`,
+      `delivery:${requirementId}`,
     );
     if (ok) {
       setDeliveryFor(null);
@@ -141,7 +141,7 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
   }
 
   async function reviewDelivery(requirementId: string, decision: "accept" | "reject") {
-    await act({ action: "reviewDelivery", requirementId, decision }, \`review:\${requirementId}\`);
+    await act({ action: "reviewDelivery", requirementId, decision }, `review:${requirementId}`);
   }
 
   const requirements = board?.requirements ?? [];
@@ -257,7 +257,7 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
                 </Field>
                 <FormRow>
                   <button type="button" disabled={busy !== null || deliveryFor !== r.id || deliveryNote.trim() === ""} onClick={() => void submitDelivery(r.id)} className="btn-primary !min-h-8 !text-[11.5px]">
-                    {busy === \`delivery:\${r.id}\` ? "Submitting…" : "Submit for buyer review"}
+                    {busy === `delivery:${r.id}` ? "Submitting…" : "Submit for buyer review"}
                   </button>
                 </FormRow>
               </div>
@@ -266,7 +266,7 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
             {isOwner && r.delivery?.status === "submitted" && (
               <FormRow>
                 <button type="button" disabled={busy !== null} onClick={() => void reviewDelivery(r.id, "accept")} className="btn-primary !min-h-8 !text-[11.5px]">
-                  {busy === \`review:\${r.id}\` ? "Reviewing…" : "Accept delivery"}
+                  {busy === `review:${r.id}` ? "Reviewing…" : "Accept delivery"}
                 </button>
                 <button type="button" disabled={busy !== null} onClick={() => void reviewDelivery(r.id, "reject")} className="btn-quiet !min-h-8 !text-[11.5px]">
                   Request changes
