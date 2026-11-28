@@ -249,7 +249,7 @@ export function MarketplaceSection({ buyerAddress }: { buyerAddress: string | nu
             {buyerAddress && r.offers.some((o) => o.status === "accepted" && o.providerWallet === buyerAddress) && r.status !== "delivered" && r.status !== "closed" && r.delivery?.status !== "submitted" && (
               <div className="space-y-2 rounded-lg border border-edge bg-panel-2 px-3 py-3">
                 <MicroHeading>Submit delivery</MicroHeading>
-                <Field label="Delivery summary" help="Describe the completed work and what the buyer should verify.">
+                <Field label="Delivery summary" help="Visible on the public board. Describe the completed work and what the buyer should verify.">
                   <TextArea value={deliveryFor === r.id ? deliveryNote : ""} onChange={(e) => { setDeliveryFor(r.id); setDeliveryNote(e.target.value); }} />
                 </Field>
                 <Field label="Artifact URL (optional)" help="Link to a report, evidence bundle or deliverable.">
