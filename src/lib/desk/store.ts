@@ -72,6 +72,7 @@ function normalizeDeskRecord(inv: DeskInvestigation): DeskInvestigation {
     report: inv.report ?? null,
     spendLimitUsdCents: typeof inv.spendLimitUsdCents === "number" ? inv.spendLimitUsdCents : 100,
     operator: inv.operator ?? { createdBy: "", tenant: "" },
+    hunyuanAssurance: inv.hunyuanAssurance ?? null,
     audit: Array.isArray(inv.audit) ? inv.audit : [],
   };
 }

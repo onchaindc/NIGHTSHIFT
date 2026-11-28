@@ -76,6 +76,7 @@ function normalizeInvestigation(inv: Investigation): Investigation {
     spendLimitUsdCents: typeof inv.spendLimitUsdCents === "number" ? inv.spendLimitUsdCents : 100,
     operator: inv.operator ?? { createdBy: "", tenant: "" },
     limitations: Array.isArray(inv.limitations) ? inv.limitations : [],
+    hunyuanAssurance: inv.hunyuanAssurance ?? null,
     audit: Array.isArray(inv.audit) ? inv.audit : [],
   };
 }

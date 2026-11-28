@@ -67,6 +67,21 @@ async function tick(req: NextRequest) {
     } catch (err) {
       console.error("abandoned task recovery failed:", err);
     }
+    // Mission #02 — Continuous Enterprise Intelligence: the daily cron is the
+    // recurring heartbeat for one continuum pass over every tracked entity.
+    // Lease-guarded and fingerprint-deduplicated, so a retried or overlapping
+    // tick never double-reports; deterministic detections persist even when
+    // Hunyuan is unconfigured (the run record states that honestly).
+    try {
+      const { autoContinuumEnabled, runContinuumTick } = await import("@/lib/hunyuan/continuum");
+      if (autoContinuumEnabled()) {
+        const result = await runContinuumTick({ trigger: "scheduler" });
+        if (result.skippedByOtherWorker) console.log("hunyuan continuum: skipped, another worker holds the tick lease");
+        else console.log(`hunyuan continuum: ${result.newEvents} new event(s), ${result.enriched} provider-assessed, ${result.baselinesEstablished} baseline(s)${result.providerError ? `, provider error: ${result.providerError}` : ""}`);
+      }
+    } catch (err) {
+      console.error("hunyuan continuum tick failed:", err);
+    }
   });
   return NextResponse.json({ ok: true, started: true });
 }

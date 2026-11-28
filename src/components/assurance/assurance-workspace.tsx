@@ -14,6 +14,7 @@ import type {
 } from "@/lib/assurance/types";
 import { SEVERITY_ORDER } from "@/lib/assurance/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
+import { DecisionAssurancePanel } from "@/components/hunyuan/decision-assurance-panel";
 import { friendlyNetworkError } from "@/lib/api/client-errors";
 import type { TaskRecord } from "@/lib/engine/types";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
@@ -346,6 +347,9 @@ export function AssuranceWorkspace({ investigationId }: { investigationId: strin
           </a>
         </div>
       )}
+
+      {/* Mission #01 — the Hunyuan decision-assurance review for this file. */}
+      <DecisionAssurancePanel scope="assurance" id={inv.id} />
 
       {payload.readOnly && (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-edge bg-panel-3 px-4 py-3.5">

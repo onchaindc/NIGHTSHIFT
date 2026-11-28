@@ -11,6 +11,7 @@ import { DESK_TYPE_LABEL, DESK_VERDICT_LABEL } from "@/lib/desk/types";
 import { friendlyNetworkError } from "@/lib/api/client-errors";
 import { vibrate } from "@/lib/haptics";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
+import { DecisionAssurancePanel } from "@/components/hunyuan/decision-assurance-panel";
 import { ReportDisclosure } from "@/components/report/collapsible";
 import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import { openTaskStream } from "@/components/minds/task-stream";
@@ -496,6 +497,10 @@ export function DeskWorkspace({ investigationId }: { investigationId: string }) 
           </div>
         </section>
       )}
+
+      {/* Mission #01 — the Hunyuan decision-assurance review for this file,
+          rendered beside the desk report it analysed. */}
+      <DecisionAssurancePanel scope="desk" id={inv.id} />
 
       {/* Report — the answer is the spotlight. Headline and findings open the
           card; discrepancies, section summaries, limitations and questions sit

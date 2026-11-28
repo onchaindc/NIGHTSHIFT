@@ -61,6 +61,9 @@ export async function GET(req: Request) {
   const services = {
     telegraph: configured("TELEGRAPH_EVM_PRIVATE_KEY"),
     telegram: configured("TELEGRAM_BOT_TOKEN"),
+    // Tencent Hunyuan (missions #01/#02): server-side inference only; the key
+    // never reaches the browser, so this reports configuration, not a value.
+    hunyuan: configured("HUNYUAN_API_KEY"),
     chainRpc: true, // the engine falls back to its bundled public Base Sepolia RPC
   };
 
