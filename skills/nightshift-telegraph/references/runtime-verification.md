@@ -1,6 +1,69 @@
 # Runtime verification record — OpenClaw and Hermes sessions
 
-## Round 3 — verification against the deployed URL itself (2026-11-28, latest)
+## Round 4 — missions closed on the live deployment (2026-11-28, final)
+
+The team set `NIGHTSHIFT_API_TOKEN` in the Vercel dashboard (Preview scope)
+and supplied the operator bearer out-of-band. Two deployment events happened
+first, both recorded honestly:
+
+1. **Author rewrite.** Fourteen commits on this branch and five on `main`
+   carried the sandbox identity `Z User <z@container>`. Per team instruction
+   every one was rewritten to `onchaindc
+   <197216278+onchaindc@users.noreply.github.com>` (metadata-only,
+   content-preserving) and force-pushed: branch head `96a049a`→`fdd0230`,
+   `d31a834`→`54e6562`; `main` head `ab6120f`→`461de12`. The sandbox git
+   identity was fixed so future commits attribute correctly.
+2. **A real defect found and fixed by live verification.** With the operator
+   gate live, the first continuum tick crashed with 502 ("Cannot read
+   properties of undefined (reading 'verdict')"): a desk file parked
+   mid-flight can hold a report whose `assessment`/`confidence` are not
+   produced yet, and `collectEntityViews` read them unguarded
+   (`src/lib/hunyuan/continuum.ts`). Fix `762e750`: no assessment yet → no
+   report signature yet; regression test added (partial-report desk file
+   survives two ticks). Full gate re-run: 805 tests passed, `tsc` clean,
+   production build OK.
+
+Final checklist state on the deployment (branch alias serving `762e750`,
+`apiAuth: "token"`):
+
+1. **MCP nine-tool contract — PASS.** `tools/list` = exactly 9 tools.
+2. **Live discovery — PASS** (Round 3 numbers stand: 136 intents / 60 miners).
+3. **Free investigation + evidence + independent verify — PASS with operator
+   clearance.** Evidence full record returned to the operator (honest
+   `missing` list of 9 registry fields, `probeStatus: rejected` for a free
+   run); `nightshift_verify_task` verdict **`unverified`** — honest, ledger
+   reconciled (0 entries, 0 cents, 0 problems), re-checks the Telegraph node
+   and the public chain, "a provider's own verified label is never accepted
+   as proof", `unresolvedGaps: []`.
+4. **Paid intelligence — PASS, exactly at the gate.** Operator bearer:
+   task `b9bde154…`, `state: awaiting_approval`, `spentUsdCents: 0`, approval
+   note: "No payment has been signed and nothing has executed. A human must
+   approve this exact plan before any paid step runs." Left unapproved on
+   purpose; re-checked after the fix deploy — still `awaiting_approval`, $0.
+5. **Decision Assurance anonymity gates — PASS** (Round 3: anonymous GET/POST
+   → 401).
+6. **Hunyuan status — PASS (truthful unconfigured).** `configured=false`,
+   `missing=["HUNYUAN_API_KEY"]` — the team confirmed the TokenHub key is
+   unavailable; skipped by explicit decision. No simulated provider output
+   anywhere; missions run deterministic, schema-validated workflows and
+   declare the provider gap.
+7. **Continuous Intelligence tick + persistence — PASS after the fix.**
+   Fixed tick: HTTP 200, 20 entities scanned, events persisted to postgres.
+   Observed convergence on a stale store (the daily cron's last pass was
+   07:17 UTC and a day of desk activity had accumulated): tick 1 = 198 new
+   events, tick 2 = 90, tick 3 = 57, tick 4 = **0** — steady state reached,
+   reruns idempotent by content fingerprint. Ledger (operator) returns the
+   persisted events with ts, entityKey/entityLabel, kind, materiality,
+   fingerprint, investigationIds and `providerAssessment` paths;
+   anonymous ledger read stays 401. Watch-item: the settling burst (three
+   ticks to zero) happened against an unusually large stale backlog; a quiet
+   store should tick straight to 0 — worth watching on the daily cron.
+
+Operator-gated routes now authenticate correctly (`apiAuth: "token"`):
+evidence full reads, verify, tick, ledger. Anonymous callers still receive
+401 everywhere the gate applies.
+
+## Round 3 — verification against the deployed URL itself (2026-11-28)
 
 The team issued a Protection Bypass for Automation secret for the `nightshift`
 project, unblocking verification against the live deployment. The bypass
