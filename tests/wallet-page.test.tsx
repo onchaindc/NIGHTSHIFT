@@ -57,8 +57,10 @@ describe("Wallet page — exactly one summary card", () => {
     expect(html.split("USDC (Circle)").length - 1).toBe(1);
     expect(html).toContain("Also connected");
     expect(html).toContain("external wallet");
-    // The payer wallet is spending context, not a wallet summary card.
-    expect(html).toContain("Payer wallet");
+    // The user's own spend credit is the first-class spending card; the
+    // deployment rail is spending context, not a wallet summary card.
+    expect(html).toContain("In-app spend credit · YOUR wallet pays for every run");
+    expect(html).toContain("Deployment settlement rail");
   });
 
   it("with no wallet at all, offers create/connect in one honest panel", () => {
@@ -77,7 +79,7 @@ describe("Wallet page — organized sections backed by the real ledgers", () => 
     const html = renderToStaticMarkup(<FundsPage />);
     expect(html).toContain('aria-label="Spending controls"');
     expect(html).toContain('aria-label="Wallet activity"');
-    expect(html).toContain('aria-label="Transactions"');
+    expect(html).toContain('aria-label="Spend history"');
     expect(html).toContain('aria-label="Receipts"');
   });
 

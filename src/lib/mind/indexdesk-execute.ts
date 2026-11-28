@@ -1,5 +1,6 @@
 import { canTransition, type ExecutionEventType, type TaskRecord } from "@/lib/engine/types";
 import { saveTask } from "@/lib/engine/store";
+import { debitCreditsForRun } from "@/lib/wallet/credits";
 import type { ExecutionOutputs } from "@/lib/engine/engine";
 import type { ApprovedOffer, ExecuteInput, ExecuteOutcome } from "@/lib/terminal/ask";
 import { probeAsk } from "@/lib/terminal/ask";
@@ -265,6 +266,7 @@ export async function executeIndexDataAsk(task: TaskRecord, stepTarget: string |
       receiptHash: outcome.receipt.receipt_hash,
       signalHash: outcome.signalHash,
     });
+    await debitCreditsForRun(task.owner, cents, task.id, `Index desk: ${probeRecord.symbol} ${INDEX_DIMENSION_LABELS[dimension]} via Telegraph`);
     await event(
       task,
       "spend_recorded",

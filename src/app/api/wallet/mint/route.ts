@@ -4,6 +4,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 
 import { paidCredentialsConfigured } from "@/lib/telegraph/client";
+import { FAUCET_CREDIT_USD_CENTS, grantCredits } from "@/lib/wallet/credits";
 
 /**
  * POST /api/wallet/mint — give a connected wallet 10 test USDC.
@@ -69,8 +70,16 @@ export async function POST(req: Request) {
       args: [address as `0x${string}`],
     });
     if (balance > 0n) {
+      // Already funded on-chain — the faucet still tops up the in-app spend
+      // credit (the 60s cooldown above and the per-user daily cap keep this
+      // from being a farm; the cap bounds what credit can actually spend).
+      const ledger = await grantCredits(address, FAUCET_CREDIT_USD_CENTS, "Faucet top-up — in-app spend credit");
       return NextResponse.json(
-        { error: "This wallet already holds test USDC — no deposit needed." },
+        {
+          error: "This wallet already holds test USDC — the in-app spend credit was topped up instead.",
+          creditsGrantedUsdCents: FAUCET_CREDIT_USD_CENTS,
+          creditBalanceUsdCents: ledger.balanceUsdCents,
+        },
         { status: 409 },
       );
     }
@@ -82,8 +91,14 @@ export async function POST(req: Request) {
       args: [address as `0x${string}`, MINT_AMOUNT],
     });
     recentMints.set(keyName, Date.now());
+    const ledger = await grantCredits(address, FAUCET_CREDIT_USD_CENTS, "Faucet mint — in-app spend credit");
 
-    return NextResponse.json({ hash, amount: "10" });
+    return NextResponse.json({
+      hash,
+      amount: "10",
+      creditsGrantedUsdCents: FAUCET_CREDIT_USD_CENTS,
+      creditBalanceUsdCents: ledger.balanceUsdCents,
+    });
   } catch (err) {
     const message =
       err && typeof err === "object" && "shortMessage" in err

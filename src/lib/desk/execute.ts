@@ -13,6 +13,7 @@
  */
 
 import { saveTask } from "@/lib/engine/store";
+import { debitCreditsForRun } from "@/lib/wallet/credits";
 import type { ExecutionEventType, TaskRecord } from "@/lib/engine/types";
 import type { ExecutionOutputs } from "@/lib/engine/engine";
 import type { ApprovedOffer } from "@/lib/terminal/ask";
@@ -249,6 +250,9 @@ export async function executeDeskIntel(task: TaskRecord, target: string | undefi
         receiptHash: result.receiptHash,
         signalHash: result.signalHash,
       });
+      // The run owner's own in-app credit pays for it — debited at the same
+      // moment the task's spend entry is written (no-op for payer-owned runs).
+      await debitCreditsForRun(task.owner, result.costUsdCents, task.id, `${config.reference}: ${result.label} via Telegraph`);
       committed.push(result);
       event(task, "spend_recorded", `Spent $${(result.costUsdCents / 100).toFixed(2)} on ${result.label}`, {
         amountUsdCents: result.costUsdCents,

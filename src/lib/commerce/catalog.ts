@@ -37,6 +37,14 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
     ],
     deliverable:
       "A live requirement on the marketplace board with auto-matches against registered provider services and the published NIGHTSHIFT offerings, open for provider offers.",
+    samples: {
+      title: "Verify a new supplier before the first purchase order",
+      category: "counterparty",
+      detail:
+        "Screen the supplier's registry, sanctions and financial standing before we release the first purchase order.",
+      budgetUsdCents: "200",
+      deadline: "before Friday's PO",
+    },
   },
   {
     id: "commerce_capacity",
@@ -56,6 +64,15 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
     ],
     deliverable:
       "A live provider service listing with pricing, availability and a verification verdict against the verified capability matrix.",
+    samples: {
+      name: "Sanctions screening with source citations",
+      category: "counterparty",
+      summary: "Sanctions and watchlist screening of a named entity with per-source citations and a clear verdict.",
+      priceUsdCents: "150",
+      delivery: "A screening report with the verdict, per-source citations and named gaps.",
+      slaHours: "24",
+      capabilities: "",
+    },
   },
   {
     id: "commerce_workflows",
@@ -76,6 +93,12 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
     ],
     deliverable:
       "An executable workflow whose first desk step is opened as a real Deal Desk file with its free pre-flight already running, and whose remaining steps are ready to run in order.",
+    samples: {
+      title: "Onboard supplier ABC before the first purchase order",
+      goal: "Establish that the supplier exists, is not sanctioned, and can be paid safely before the first PO is released.",
+      template: "supplier_onboarding",
+      steps: "",
+    },
   },
   {
     id: "commerce_reseller",
@@ -91,6 +114,12 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
       { name: "packagePriceUsdCents", label: "Your package price in USD cents", kind: "number", required: true, help: "Must be above the sum of the components — the reseller margin is what makes it a business." },
     ],
     deliverable: "A listed reseller package on the marketplace board with its margin computed and validated.",
+    samples: {
+      name: "Supplier onboarding package",
+      summary: "Registry, sanctions and trade-document verification for one new supplier, delivered as one package.",
+      components: "Counterparty DD | 200\nTrade & supplier intelligence | 150",
+      packagePriceUsdCents: "400",
+    },
   },
 ];
 

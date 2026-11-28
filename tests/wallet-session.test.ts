@@ -96,6 +96,10 @@ describe("per-user daily spend cap", () => {
       },
     ] as never);
     const { paidRunGate, userPaidSpend24h } = await import("@/lib/api/userSpend");
+    // The gate now checks the user's own in-app spend credit BEFORE the cap:
+    // seed enough credit that the at-cap denial below is genuinely the cap's.
+    const { grantCredits } = await import("@/lib/wallet/credits");
+    await grantCredits("0xAAA0000000000000000000000000000000000001", 100, "test seed");
 
     const standing = await userPaidSpend24h("0xAAA0000000000000000000000000000000000001");
     expect(standing.spentCents).toBe(200);

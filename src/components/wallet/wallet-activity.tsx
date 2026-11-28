@@ -237,6 +237,12 @@ export function WalletActivity() {
   const totalAsks = (asks ?? []).length;
   const totalJobs = (jobs ?? []).length;
 
+  // What the wallet actually SPENT, per rail — the summary the history below
+  // itemizes. Ask rows carry the settled amount from the engine spend ledger;
+  // buyer rows carry the offering price the escrow was funded with.
+  const asksTotalCents = (asks ?? []).reduce((n, a) => n + a.amountCents, 0);
+  const jobsTotalCents = (jobs ?? []).reduce((n, j) => n + (j.priceCents ?? 0), 0);
+
   if (!loading && asksFailed && jobsFailed) {
     return (
       <div className="rounded-2xl border border-risk/30 bg-panel px-5 py-6" role="alert">
@@ -254,15 +260,34 @@ export function WalletActivity() {
 
   return (
     <div className="space-y-8">
-      {/* Transactions */}
-      <section aria-label="Transactions">
+      {/* Spend history */}
+      <section aria-label="Spend history">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="x-label !mt-0">
-            TRANSACTIONS
+            SPEND HISTORY
             {!loading && <span className="tabular ml-1 tracking-normal">· {totalAsks + totalJobs} on record</span>}
           </h2>
           <span className="text-[11px] text-ink-faint">spend ledger + buyer escrow, newest first</span>
         </div>
+
+        {!loading && (totalAsks > 0 || totalJobs > 0) && (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-edge bg-panel-3 px-4 py-3">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">Autonomous asks · settled</p>
+              <p className="tabular mt-1 text-[20px] font-semibold leading-none text-ink">{usd(asksTotalCents)}</p>
+              <p className="mt-1 text-[10.5px] text-ink-faint">
+                {totalAsks} {totalAsks === 1 ? "ask" : "asks"} · paid from your in-app spend credit
+              </p>
+            </div>
+            <div className="rounded-xl border border-edge bg-panel-3 px-4 py-3">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">Buyer Desk purchases · escrowed</p>
+              <p className="tabular mt-1 text-[20px] font-semibold leading-none text-ink">{usd(jobsTotalCents)}</p>
+              <p className="mt-1 text-[10.5px] text-ink-faint">
+                {totalJobs} {totalJobs === 1 ? "purchase" : "purchases"} · signed from your own wallet on Base
+              </p>
+            </div>
+          </div>
+        )}
 
         {loading && asks === null && (
           <div aria-live="polite" className="mt-3 space-y-2">

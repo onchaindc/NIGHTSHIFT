@@ -178,7 +178,7 @@ function WalletCard({
             className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-1.5 text-[12px] text-teal transition-colors hover:bg-teal/15 disabled:opacity-50"
           >
             <Coins size={13} />
-            {minting ? "Minting…" : "Mint 10 escrow-rail test USDC"}
+            {minting ? "Minting…" : "Mint 10 test USDC + spend credit"}
           </button>
         )}
         {onDeposit && (
@@ -333,6 +333,120 @@ createPortal(
 );
 }
 
+interface CreditEntryView {
+  ts: number;
+  deltaUsdCents: number;
+  balanceAfterUsdCents: number;
+  label: string;
+}
+
+/**
+ * THE user's own spend wallet: the in-app credit balance paid runs settle
+ * against, with the history of what it actually paid for. This is the answer
+ * to "which wallet pays?" — yours, not the deployment's.
+ */
+function CreditCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
+  const [balance, setBalance] = useState<number | null>(null);
+  const [entries, setEntries] = useState<CreditEntryView[]>([]);
+  const [failed, setFailed] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/wallet/credits", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+      if (res.status === 401) {
+        setFailed(false);
+        setBalance(null);
+        setEntries([]);
+        return;
+      }
+      if (!res.ok) {
+        setFailed(true);
+        return;
+      }
+      const body = (await res.json()) as { balanceUsdCents?: number; entries?: CreditEntryView[] };
+      setBalance(typeof body.balanceUsdCents === "number" ? body.balanceUsdCents : 0);
+      setEntries(Array.isArray(body.entries) ? body.entries.slice(0, 6) : []);
+      setFailed(false);
+    } catch {
+      /* transient — the next poll retries; the last good values stay */
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const poll = setInterval(() => void refresh(), 15_000);
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refresh]);
+
+  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const when = (ts: number) =>
+    new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-teal/30 bg-panel p-6 shadow-sm">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal/40 to-transparent" />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+            In-app spend credit · YOUR wallet pays for every run
+          </p>
+          <p className="mt-1 text-[12.5px] text-ink-soft">
+            {sessionSignedIn
+              ? "Paid asks (Terminal, Minds, Deal Desk) settle from this balance — never from the deployment's wallet."
+              : "Sign in with your wallet to hold and spend your own credit."}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          aria-label="Refresh spend credit"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-faint transition-colors hover:bg-panel-2 hover:text-ink"
+        >
+          <RefreshCw size={13} strokeWidth={1.8} className={syncing ? "motion-safe:animate-spin" : ""} />
+        </button>
+      </div>
+
+      <p className="mt-5 text-[28px] font-semibold tabular leading-none tracking-tight text-ink">
+        {sessionSignedIn ? (balance === null ? "…" : usd(balance)) : "—"}
+      </p>
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+        Funded by the faucet mint below (10.00 of credit alongside the 10 on-chain test USDC). A run's daily cap on
+        faucet-funded spending still applies. {sessionSignedIn ? "Balances update every 15s." : ""}
+      </p>
+
+      {sessionSignedIn && failed && (
+        <p className="mt-3 text-[12px] text-amber">The credit ledger could not be read — retrying.</p>
+      )}
+      {sessionSignedIn && !failed && entries.length > 0 && (
+        <ul className="mt-4 divide-y divide-edge/60 border-t border-edge/60">
+          {entries.map((e, i) => (
+            <li key={`${e.ts}:${i}`} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2">
+              <span className="min-w-0 flex-1 truncate text-[12px] text-ink-soft" title={e.label}>
+                {e.label}
+              </span>
+              <span className="text-[10.5px] text-ink-faint">{when(e.ts)}</span>
+              <span className={`tabular w-16 text-right text-[12px] ${e.deltaUsdCents >= 0 ? "text-teal" : "text-ink"}`}>
+                {e.deltaUsdCents >= 0 ? "+" : "−"}
+                {usd(Math.abs(e.deltaUsdCents))}
+              </span>
+              <span className="tabular w-16 text-right text-[10.5px] text-ink-faint">{usd(e.balanceAfterUsdCents)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface PayerRail {
   network: string;
   chain: string;
@@ -396,7 +510,7 @@ function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber/40 to-transparent" />
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">Payer wallet · funds every autonomous paid run</p>
+          <p className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">Deployment settlement rail · free modes & operator runs</p>
           <p className="mt-1 tabular text-[12.5px] text-ink-soft">{payer ? shortAddr(payer) : "…"}</p>
         </div>
         <button
@@ -430,8 +544,8 @@ function PayerCard({ sessionSignedIn }: { sessionSignedIn: boolean }) {
       )}
 
       <p className="mt-4 text-[11px] leading-relaxed text-ink-faint">
-        Paid asks (Terminal, Minds, Deal Desk) settle from THIS wallet — your own wallet signs in and owns files, it is never
-        debited. Auto-syncs every 20s · updated {syncedLabel}.
+        Your paid runs settle from YOUR in-app spend credit above — not from this wallet. This deployment rail remains
+        what free modes and the operator session consume on-chain. Auto-syncs every 20s · updated {syncedLabel}.
         {!sessionSignedIn && " The balances are live on-chain reads; sign in to relate them to your runs."}
       </p>
     </div>
@@ -516,12 +630,12 @@ export default function FundsPage() {
       });
       const data = (await res.json()) as { error?: string };
       if (res.status === 409) {
-        setNotice(data.error ?? "This wallet already holds test USDC.");
+        setNotice(data.error ?? "This wallet already holds test USDC — spend credit topped up instead.");
         void refreshBalances();
         return;
       }
       if (!res.ok) throw new Error(data.error ?? "Mint failed");
-      setNotice("10 test USDC minted — balances update in a moment.");
+      setNotice("10 test USDC minted and 10.00 of in-app spend credit added — balances update in a moment.");
       setTimeout(refreshBalances, 3000);
       setTimeout(refreshBalances, 8000);
     } catch (e) {
@@ -614,8 +728,8 @@ export default function FundsPage() {
             <WalletCard
               label={
                 primary === embedded
-                  ? "In-app wallet · your identity, never debited by paid runs"
-                  : "Connected wallet · your identity, never debited by paid runs"
+                  ? "In-app wallet · your identity — buyer purchases sign from it on-chain"
+                  : "Connected wallet · your identity — buyer purchases sign from it on-chain"
               }
               address={primary.address}
               ethBalance={balances[primary.address]?.eth ?? null}
@@ -673,6 +787,7 @@ export default function FundsPage() {
           per-user allowance. Both keep their existing APIs. */}
       <section aria-label="Spending controls" className="mt-8 space-y-4">
         <h2 className="x-label !mt-0">SPENDING</h2>
+        <CreditCard sessionSignedIn={!!primary} />
         <PayerCard sessionSignedIn={!!primary} />
         <SpendAllowance />
       </section>

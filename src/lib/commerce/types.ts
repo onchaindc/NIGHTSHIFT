@@ -42,6 +42,8 @@ export interface CommerceOffering {
   inputs: AcpServiceInput[];
   /** What the buyer receives, in honest language. */
   deliverable: string;
+  /** Worked example the sample-fill wand one-taps into the purchase form. */
+  samples?: Record<string, string>;
 }
 
 /* ------------------------------------------------------------------ */

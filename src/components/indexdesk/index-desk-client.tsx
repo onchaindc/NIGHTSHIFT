@@ -38,6 +38,7 @@ import { useRunWatchdog } from "@/components/minds/run-watchdog";
 import RunFlow from "@/components/minds/run-flow";
 import type { TaskRecord } from "@/lib/engine/types";
 import { WalletSignIn, type SessionState } from "@/components/wallet-sign-in";
+import { SampleFill } from "@/components/sample-fill";
 import {
   deskHrefWithTask,
   deskSessionMode,
@@ -251,6 +252,34 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
     setRows((rs) => updateAssetRow(rs, id, patch));
   };
 
+  /** The worked example the wand fills: two declared assets, market-cap weighting. */
+  const fillSamples = () => {
+    setIndexName("Diversified large-cap basket");
+    setScheme("market_cap");
+    setCustomWeights("");
+    setNotes("Worked example: verify the declared supply and price of each constituent before the reconstitution is computed.");
+    setRows([
+      createAssetRow({
+        symbol: "USDC",
+        company: "Circle Internet Financial",
+        jurisdiction: "United States",
+        chain: "ethereum",
+        declaredSupply: "1000000000",
+        declaredPrice: "1.00",
+        declaredVolume: "4200000",
+      }),
+      createAssetRow({
+        symbol: "WBTC",
+        company: "Wrapped Bitcoin",
+        jurisdiction: "United States",
+        chain: "ethereum",
+        declaredSupply: "190000",
+        declaredPrice: "64000",
+        declaredVolume: "12000",
+      }),
+    ]);
+  };
+
   const buildDefinition = useCallback(() => {
     const num = (v: string): number | undefined => {
       if (!v.trim()) return undefined;
@@ -441,7 +470,10 @@ export default function IndexDeskClient({ guarantees }: { guarantees: IndexDeskG
       {/* 1 · define */}
       <section className="mt-8 overflow-hidden rounded-xl border border-edge bg-panel">
         <div className="border-b border-edge px-4 py-3 sm:px-5">
-          <p className="x-label">1 · Define the index</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="x-label">1 · Define the index</p>
+            <SampleFill onFill={fillSamples} />
+          </div>
         </div>
         <div className="space-y-5 px-4 py-4 sm:px-5">
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
