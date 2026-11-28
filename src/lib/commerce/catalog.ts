@@ -105,7 +105,7 @@ export const COMMERCE_OFFERINGS: CommerceOffering[] = [
     section: "reseller",
     name: "Reseller — package builder",
     description:
-      "Package purchased specialist services into one higher-value offering with your own price. The margin is computed from the components' standalone prices and must be positive — a package is worth more than its parts or it does not list.",
+      "Package registered specialist services into one higher-value offering with your own price. Component names and prices are loaded from live Capacity listings, and the margin must remain positive against those source prices.",
     priceUsdCents: INTRO_PRICE_USD_CENTS,
     inputs: [
       { name: "name", label: "Package name", kind: "text", required: true, help: "e.g. \"Supplier onboarding package\"." },
