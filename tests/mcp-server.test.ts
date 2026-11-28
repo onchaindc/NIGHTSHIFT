@@ -8,6 +8,7 @@ import { defaultMcpDeps, type McpCaller, type McpDeps } from "@/lib/mcp/deps";
 import { createTask } from "@/lib/engine/engine";
 import { getTask, listTasks, resetStore } from "@/lib/engine/store";
 import { userSessionCookieValue } from "@/lib/api/auth";
+import { FAUCET_CREDIT_USD_CENTS, grantCredits } from "@/lib/wallet/credits";
 
 /**
  * MCP protocol tests for the NIGHTSHIFT MCP server.
@@ -267,7 +268,10 @@ describe("paid intelligence stops at the approval gate", () => {
     expect(JSON.stringify(res.parsed)).toContain("NO payment was signed");
   });
 
-  it("stamps ownership for wallet-session callers inside their daily cap", async () => {
+  it("stamps ownership for wallet-session callers whose own credit covers the run", async () => {
+    // Merged semantics: paid runs settle from the wallet user's OWN in-app
+    // credit, so a funded user is the precondition for task creation.
+    await grantCredits(USER_ADDR, FAUCET_CREDIT_USD_CENTS, "test faucet");
     const client = await connect({ cookie: userCookie() });
     const res = await callTool(client, "nightshift_request_intelligence", {
       objective: "Investigate GLEIF in the US",
@@ -277,6 +281,21 @@ describe("paid intelligence stops at the approval gate", () => {
     expect(stored?.owner).toBe(USER_ADDR);
     expect(stored?.state).toBe("awaiting_approval");
     expect(stored?.spend.spentUsdCents).toBe(0);
+    // Nothing is debited at the approval gate — the debit happens when the
+    // approved plan actually settles a purchase.
+    const { creditBalanceOf } = await import("@/lib/wallet/credits");
+    expect(await creditBalanceOf(USER_ADDR)).toBe(FAUCET_CREDIT_USD_CENTS);
+  });
+
+  it("refuses a wallet user with no spend credit (their own wallet pays)", async () => {
+    const goal = "Investigate GLEIF in the US - no credit";
+    const client = await connect({ cookie: otherCookie() });
+    const res = await callTool(client, "nightshift_request_intelligence", { objective: goal });
+    expect(res.isError).toBe(true);
+    const body = JSON.stringify(res.parsed);
+    expect(body).toContain("in-app spend credit");
+    expect(body).toContain("top it up on the Wallet page");
+    expect((await listTasks()).filter((t) => t.goal === goal)).toHaveLength(0);
   });
 
   it("refuses anonymous paid requests (authentication failure)", async () => {
@@ -288,8 +307,11 @@ describe("paid intelligence stops at the approval gate", () => {
     expect((await listTasks()).filter((t) => t.goal === goal)).toHaveLength(0);
   });
 
-  it("refuses a wallet user whose daily cap is exhausted", async () => {
+  it("refuses a wallet user whose daily cap is exhausted even with credit", async () => {
     const goal = "Investigate GLEIF in the US - over cap";
+    // Fund the wallet first, so the refusal is genuinely the daily cap and
+    // not an empty balance (the credit gate is tested separately above).
+    await grantCredits(CAPPED_ADDR, FAUCET_CREDIT_USD_CENTS, "test faucet");
     // Seed spend for this owner inside the 24h window.
     await createTask({
       goal: "seed spend - cap test",
@@ -335,6 +357,7 @@ describe("paid intelligence stops at the approval gate", () => {
 describe("task access, ownership and redaction", () => {
   async function seededPaidTask() {
     const goal = "Investigate MARA HOLDINGS INC in the US - access tests";
+    await grantCredits(ACCESS_ADDR, FAUCET_CREDIT_USD_CENTS, "test faucet");
     const client = await connect({ cookie: accessCookie() });
     const res = await callTool(client, "nightshift_request_intelligence", { objective: goal });
     expect(res.isError).toBeFalsy();
