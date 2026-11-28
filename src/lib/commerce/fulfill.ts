@@ -719,7 +719,7 @@ export async function runWorkflowStep(input: { id: unknown; stepId: unknown; own
       step.completedAt = NOW();
       step.result = `Delivery accepted for ${requirement.reference}; assignment ${ref} is complete.`;
     } else {
-      step.status = "in_progress";
+      step.status = "pending";
       step.result = `Assignment recorded against ${ref}${step.offeringRef ? " (published offering)" : ""}. Waiting for the provider to submit delivery evidence.`;
     }
     await saveWorkflow(wf);
