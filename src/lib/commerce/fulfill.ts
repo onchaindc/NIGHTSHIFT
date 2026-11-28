@@ -112,7 +112,7 @@ export function matchRequirement(
   const deskType = requirement.category === "other" ? null : CATEGORY_TO_DESK_TYPE[requirement.category];
 
   const scored = services
-    .filter((s) => s.status === "listed")
+    .filter((s) => s.status === "listed" && s.availability === "available")
     .map((s) => {
       let score = 0;
       if (s.category === requirement.category) score += 3;
@@ -205,7 +205,7 @@ export async function offerOnRequirement(input: {
 }): Promise<CommerceResult<MarketplaceRequirement>> {
   const requirement = await getRequirement(str(input.requirementId, 80));
   if (!requirement) return { ok: false, error: "no such requirement on the board", status: 404 };
-  if (requirement.status === "closed") return { ok: false, error: "this requirement is closed", status: 400 };
+  if (requirement.status !== "open" && requirement.status !== "matched") return { ok: false, error: "this requirement is no longer accepting offers", status: 409 };
   if (requirement.ownerWallet === input.providerWallet.toLowerCase()) {
     return { ok: false, error: "you cannot offer on your own requirement", status: 400 };
   }
@@ -218,7 +218,7 @@ export async function offerOnRequirement(input: {
   const offeringRef = str(input.offeringRef, 120) || null;
   if (serviceId) {
     const service = await getService(serviceId);
-    if (!service || service.status !== "listed") return { ok: false, error: "the referenced service is not listed", status: 400 };
+    if (!service || service.status !== "listed" || service.availability !== "available") return { ok: false, error: "the referenced service is not currently available", status: 400 };
     if (service.providerWallet !== input.providerWallet.toLowerCase()) {
       return { ok: false, error: "you can only offer your own service listings", status: 403 };
     }
@@ -262,6 +262,9 @@ export async function acceptOffer(input: {
   if (!requirement) return { ok: false, error: "no such requirement on the board", status: 404 };
   if (requirement.ownerWallet !== input.ownerWallet.toLowerCase()) {
     return { ok: false, error: "only the requirement owner can accept an offer", status: 403 };
+  }
+  if (requirement.status !== "open" && requirement.status !== "matched") {
+    return { ok: false, error: "this requirement is no longer accepting offer decisions", status: 409 };
   }
   const offer = requirement.offers.find((o) => o.id === str(input.offerId, 80));
   if (!offer) return { ok: false, error: "no such offer on this requirement", status: 404 };
@@ -367,6 +370,9 @@ export async function reviewRequirementDelivery(input: {
   if (!requirement) return { ok: false, error: "no such requirement on the board", status: 404 };
   if (requirement.ownerWallet !== input.ownerWallet.toLowerCase()) {
     return { ok: false, error: "only the requirement owner can review delivery", status: 403 };
+  }
+  if (requirement.status === "closed") {
+    return { ok: false, error: "this requirement has been closed", status: 409 };
   }
   if (!requirement.delivery || requirement.delivery.status !== "submitted") {
     return { ok: false, error: "there is no submitted delivery awaiting review", status: 409 };
